@@ -1,116 +1,62 @@
 # Radar 2.0 — MVP 0.1
 
-Primeira versão local do nosso Radar.
+Radar pessoal para organizar garimpos de roupas, câmeras e outros anúncios.
 
-## O que já faz
+## Estado atual
 
-- Criar radares com palavras-chave, categoria e preço máximo.
-- Adicionar anúncios manualmente.
-- Salvar link direto, plataforma, imagem, preço e observações.
-- Evitar anúncios duplicados pela URL.
-- Marcar como:
-  - novo
-  - interessante
-  - descartado
-  - vendido
-- Atualizar preço.
-- Guardar histórico de preço.
-- Mostrar quando o preço caiu.
-- Filtrar por radar, status e texto.
-- Banco local SQLite em `data/radar.db`.
+- Dashboard com radares e feed de anúncios.
+- SQLite persistente.
+- Deploy no Fly.io em `ord` (Chicago).
+- HTTPS público.
+- OAuth oficial do Mercado Livre conectado.
+- Renovação automática do access token do Mercado Livre.
+- Histórico de preços e prevenção de URLs duplicadas.
+- Importação manual de anúncios por link preparada para APIs autorizadas.
+- Health check em `/api/health`.
 
-## Requisitos
+## Desenvolvimento local
 
-- Node.js 18 ou superior
-- npm
-
-## Como instalar no Windows
-
-1. Extraia a pasta `radar-2.0`.
-2. Abra a pasta no VS Code.
-3. Abra o terminal dentro dela.
-4. Rode:
+Requisitos: Node.js 22+ e npm.
 
 ```bash
 npm install
-```
-
-5. Depois:
-
-```bash
 npm start
 ```
 
-6. Abra:
+Abra `http://localhost:3000`.
+
+## Variáveis de ambiente
+
+Veja `.env.example`. Credenciais reais nunca devem ser commitadas.
+
+## Produção
+
+O deploy usa:
+
+- `Dockerfile`
+- `fly.toml`
+- volume Fly `radar_data` em `/data`
+- `DB_PATH=/data/radar.db`
+
+URL atual: `https://radar-2-0-littleghoost.fly.dev`
+
+## Mercado Livre
+
+O OAuth usa Authorization Code + Refresh Token. O callback configurado é:
 
 ```text
-http://localhost:3000
+https://radar-2-0-littleghoost.fly.dev/auth/mercadolivre/callback
 ```
 
-## Primeiros radares sugeridos
+A conta conectada é identificada pelo backend e o token é renovado próximo do vencimento.
 
-### Radar de roupas
+A API oficial atualmente retorna 403 para busca geral por palavra-chave neste aplicativo. O Radar não tenta contornar essa restrição. Integrações de coleta automática devem usar somente endpoints/fontes autorizados.
 
-Nome:
-`Grails / JNCO`
+## Próximas etapas
 
-Busca:
-`JNCO baggy kangaroo vintage tribal dragon embroidery`
-
-Preço máximo:
-`150`
-
-Categoria:
-`roupas`
-
-### Radar de Handycam
-
-Nome:
-`Handycam NightShot`
-
-Busca:
-`Sony Handycam NightShot HDD DCR-SR`
-
-Preço máximo:
-`300`
-
-Categoria:
-`cameras`
-
-## Próxima fase
-
-A versão 0.2 será focada em coleta automática de anúncios.
-
-Arquitetura prevista:
-
-```text
-server/
-└── services/
-    └── sources/
-        ├── olx.js
-        ├── enjoei.js
-        ├── mercadolivre.js
-        ├── ebay.js
-        └── mercari.js
-```
-
-Fluxo:
-
-```text
-fonte -> coletor -> normalizador -> filtro -> banco -> feed
-```
-
-Depois entram:
-
-- detecção automática de anúncio repetido;
-- alertas de preço;
-- score visual;
-- filtros separados para roupa e câmera;
-- imagem/análise por IA;
-- execução periódica;
-- notificações.
-
-## Observação
-
-Alguns marketplaces bloqueiam scraping automatizado ou exigem APIs próprias.
-Por isso a integração será feita fonte por fonte, escolhendo o método mais estável e permitido.
+- autenticação própria do Radar antes de uso multiusuário;
+- adapters por fonte em `server/services/sources/`;
+- execução periódica de radares;
+- alertas de preço e disponibilidade;
+- score visual para peças/câmeras;
+- integração com outras plataformas via APIs autorizadas.

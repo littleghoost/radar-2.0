@@ -70,6 +70,28 @@ function run(sql, params = []) {
 }
 
 /* =========================
+   HEALTH
+========================= */
+
+app.get("/api/health", async (_req, res) => {
+  try {
+    await get("SELECT 1 AS ok");
+    res.json({
+      ok: true,
+      service: "radar-2.0",
+      database: "ok",
+      uptime_seconds: Math.round(process.uptime()),
+    });
+  } catch (err) {
+    res.status(503).json({
+      ok: false,
+      service: "radar-2.0",
+      database: "error",
+    });
+  }
+});
+
+/* =========================
    RADARES
 ========================= */
 
