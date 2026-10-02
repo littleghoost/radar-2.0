@@ -1196,6 +1196,7 @@ async function loadConnections() {
       mercadolivre: "Mercado Livre",
 
       ebay: "eBay",
+      depop: "Depop",
     };
 
     const descriptions = {
@@ -1204,6 +1205,7 @@ async function loadConnections() {
       mercadolivre: "Conecte sua conta do Mercado Livre.",
 
       ebay: "Conecte sua conta do eBay.",
+      depop: "API oficial de parceiros da Depop; não possui busca geral do marketplace.",
     };
 
     const grid = $("#connectionsGrid");
@@ -1214,6 +1216,7 @@ async function loadConnections() {
         const needsAuth = connection.status === "reauthorization_required";
         const pendingCredentials = connection.status === "pending_credentials";
         const pendingHomologation = connection.status === "pending_homologation";
+        const partnerAccessRequired = connection.status === "partner_access_required";
         const accountLabel =
           connected && connection.provider_username
             ? `Conta conectada: @${escapeHtml(connection.provider_username)}`
@@ -1221,7 +1224,9 @@ async function loadConnections() {
               ? "Cadastro do eBay Developer aguardando aprovação/credenciais."
               : pendingHomologation
                 ? "Integração oficial da OLX aguardando homologação."
-                : descriptions[connection.provider];
+                : partnerAccessRequired
+                  ? "Acesso à API de parceiros da Depop ainda não concedido. A API oficial não oferece busca geral do marketplace."
+                  : descriptions[connection.provider];
 
         return `
 
@@ -1252,7 +1257,7 @@ async function loadConnections() {
 
                 >
 
-                  ${connected ? "Conectado" : needsAuth ? "Reconectar" : pendingCredentials || pendingHomologation ? "Aguardando" : "Não conectado"}
+                  ${connected ? "Conectado" : needsAuth ? "Reconectar" : pendingCredentials || pendingHomologation || partnerAccessRequired ? "Aguardando" : "Não conectado"}
 
                 </span>
 
@@ -1285,8 +1290,8 @@ async function loadConnections() {
                     </button>
 
                   `
-                  : pendingCredentials || pendingHomologation
-                    ? `<button class="secondary" type="button" disabled>${pendingHomologation ? "Aguardando homologação" : "Aguardando aprovação"}</button>`
+                  : pendingCredentials || pendingHomologation || partnerAccessRequired
+                    ? `<button class="secondary" type="button" disabled>${pendingHomologation ? "Aguardando homologação" : partnerAccessRequired ? "Aguardando acesso" : "Aguardando aprovação"}</button>`
                     : `
 
                     <button
@@ -1329,6 +1334,7 @@ function connectProvider(provider) {
   const names = {
     olx: "OLX",
     ebay: "eBay",
+    depop: "Depop",
   };
 
   alert(

@@ -2,7 +2,7 @@ const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
 const db = require("./database");
-const { getEbayStatus, getOlxStatus } = require("./services/sources");
+const { getEbayStatus, getOlxStatus, getDepopStatus } = require("./services/sources");
 const { createRadarRunner } = require("./services/radarRunner");
 
 const app = express();
@@ -585,6 +585,7 @@ app.get("/api/sources/status", (_req, res) => {
   res.json({
     ebay: getEbayStatus(),
     olx: getOlxStatus(),
+    depop: getDepopStatus(),
   });
 });
 
@@ -1361,9 +1362,10 @@ app.get(
         [user.id],
       );
 
-      const providers = ["olx", "mercadolivre", "ebay"];
+      const providers = ["olx", "mercadolivre", "ebay", "depop"];
       const ebayStatus = getEbayStatus();
       const olxStatus = getOlxStatus();
+      const depopStatus = getDepopStatus();
 
       const result = providers.map((provider) => {
         const existing = connections.find((item) => item.provider === provider);
@@ -1372,6 +1374,7 @@ app.get(
         let status = "disconnected";
         if (provider === "ebay" && !ebayStatus.configured) status = "pending_credentials";
         if (provider === "olx" && !olxStatus.configured) status = "pending_homologation";
+        if (provider === "depop" && !depopStatus.configured) status = "partner_access_required";
 
         return {
           provider,
