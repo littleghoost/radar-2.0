@@ -1011,6 +1011,11 @@ async function loadConnections() {
     grid.innerHTML = connections
       .map((connection) => {
         const connected = connection.status === "connected";
+        const needsAuth = connection.status === "reauthorization_required";
+        const accountLabel =
+          connected && connection.provider_username
+            ? `Conta conectada: @${escapeHtml(connection.provider_username)}`
+            : descriptions[connection.provider];
 
         return `
 
@@ -1041,7 +1046,7 @@ async function loadConnections() {
 
                 >
 
-                  ${connected ? "Conectado" : "Não conectado"}
+                  ${connected ? "Conectado" : needsAuth ? "Reconectar" : "Não conectado"}
 
                 </span>
 
@@ -1050,7 +1055,7 @@ async function loadConnections() {
 
               <p>
 
-                ${descriptions[connection.provider]}
+                ${accountLabel}
 
               </p>
 

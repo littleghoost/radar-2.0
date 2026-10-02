@@ -950,6 +950,89 @@ app.get("/auth/mercadolivre/callback", async (req, res) => {
 });
 
 /* =========================
+   TOKEN MERCADO LIVRE
+========================= */
+
+async function getValidMercadoLivreConnection(userId) {
+  const connection = await get(
+    `SELECT * FROM connections WHERE user_id = ? AND provider = 'mercadolivre' LIMIT 1`,
+    [userId],
+  );
+
+  if (!connection || connection.status !== "connected") {
+    return connection;
+  }
+
+  const expiresAt = connection.expires_at
+    ? new Date(connection.expires_at).getTime()
+    : 0;
+  const shouldRefresh = !expiresAt || expiresAt - Date.now() <= 5 * 60 * 1000;
+
+  if (!shouldRefresh) {
+    return connection;
+  }
+
+  if (!connection.refresh_token) {
+    await run(
+      `UPDATE connections
+       SET status = 'reauthorization_required', updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [connection.id],
+    );
+    return { ...connection, status: "reauthorization_required" };
+  }
+
+  const { clientId, clientSecret } = getMlConfig();
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: connection.refresh_token,
+  });
+
+  const response = await fetch("https://api.mercadolibre.com/oauth/token", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    console.error("Falha ao renovar token do Mercado Livre:", data);
+    await run(
+      `UPDATE connections
+       SET status = 'reauthorization_required', updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [connection.id],
+    );
+    return { ...connection, status: "reauthorization_required" };
+  }
+
+  const nextExpiresAt = data.expires_in
+    ? new Date(Date.now() + Number(data.expires_in) * 1000).toISOString()
+    : null;
+
+  await run(
+    `UPDATE connections
+     SET access_token = ?, refresh_token = ?, expires_at = ?,
+         status = 'connected', updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [
+      data.access_token,
+      data.refresh_token || connection.refresh_token,
+      nextExpiresAt,
+      connection.id,
+    ],
+  );
+
+  return get("SELECT * FROM connections WHERE id = ?", [connection.id]);
+}
+
+/* =========================
    CONEXÕES
 ========================= */
 
@@ -963,6 +1046,8 @@ app.get(
       if (!user) {
         return res.json([]);
       }
+
+      await getValidMercadoLivreConnection(user.id);
 
       const connections = await all(
         `
