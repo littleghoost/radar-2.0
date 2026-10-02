@@ -1,5 +1,6 @@
 const express = require("express");
 const path = require("path");
+const crypto = require("crypto");
 const db = require("./database");
 
 const app = express();
@@ -815,6 +816,139 @@ app.get(
     }
   },
 );
+/* =========================
+   OAUTH MERCADO LIVRE
+========================= */
+
+function getMlConfig() {
+  const clientId = process.env.ML_CLIENT_ID;
+  const clientSecret = process.env.ML_CLIENT_SECRET;
+  const redirectUri = process.env.ML_REDIRECT_URI;
+  const stateSecret = process.env.OAUTH_STATE_SECRET;
+
+  if (!clientId || !clientSecret || !redirectUri || !stateSecret) {
+    throw new Error("OAuth do Mercado Livre ainda não está configurado no servidor.");
+  }
+
+  return { clientId, clientSecret, redirectUri, stateSecret };
+}
+
+function createOAuthState(secret) {
+  const payload = `${Date.now()}.${crypto.randomBytes(24).toString("hex")}`;
+  const signature = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  return `${payload}.${signature}`;
+}
+
+function validateOAuthState(state, secret) {
+  if (!state) return false;
+  const parts = String(state).split(".");
+  if (parts.length !== 3) return false;
+
+  const [timestamp, nonce, signature] = parts;
+  const payload = `${timestamp}.${nonce}`;
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+
+  if (signature.length !== expected.length) return false;
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return false;
+
+  const age = Date.now() - Number(timestamp);
+  return Number.isFinite(age) && age >= 0 && age <= 10 * 60 * 1000;
+}
+
+app.get("/auth/mercadolivre", (_req, res) => {
+  try {
+    const { clientId, redirectUri, stateSecret } = getMlConfig();
+    const state = createOAuthState(stateSecret);
+    const url = new URL("https://auth.mercadolivre.com.br/authorization");
+
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", clientId);
+    url.searchParams.set("redirect_uri", redirectUri);
+    url.searchParams.set("state", state);
+
+    res.redirect(url.toString());
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
+
+app.get("/auth/mercadolivre/callback", async (req, res) => {
+  try {
+    const { code, state } = req.query;
+    const { clientId, clientSecret, redirectUri, stateSecret } = getMlConfig();
+
+    if (!code || !validateOAuthState(state, stateSecret)) {
+      return res.status(400).send("Resposta OAuth inválida ou expirada.");
+    }
+
+    const tokenBody = new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      client_secret: clientSecret,
+      code: String(code),
+      redirect_uri: redirectUri,
+    });
+
+    const tokenResponse = await fetch("https://api.mercadolibre.com/oauth/token", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: tokenBody,
+    });
+
+    const tokenData = await tokenResponse.json();
+    if (!tokenResponse.ok) {
+      throw new Error(tokenData.message || tokenData.error || "Falha ao obter token do Mercado Livre.");
+    }
+
+    const profileResponse = await fetch("https://api.mercadolibre.com/users/me", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const profile = await profileResponse.json();
+
+    if (!profileResponse.ok) {
+      throw new Error(profile.message || "Falha ao carregar perfil do Mercado Livre.");
+    }
+
+    const user = await get("SELECT * FROM users LIMIT 1");
+    if (!user) throw new Error("Usuário local não encontrado.");
+
+    const expiresAt = tokenData.expires_in
+      ? new Date(Date.now() + Number(tokenData.expires_in) * 1000).toISOString()
+      : null;
+
+    await run(
+      `INSERT INTO connections (
+        user_id, provider, provider_user_id, provider_username,
+        access_token, refresh_token, expires_at, status, updated_at
+      ) VALUES (?, 'mercadolivre', ?, ?, ?, ?, ?, 'connected', CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, provider) DO UPDATE SET
+        provider_user_id = excluded.provider_user_id,
+        provider_username = excluded.provider_username,
+        access_token = excluded.access_token,
+        refresh_token = excluded.refresh_token,
+        expires_at = excluded.expires_at,
+        status = 'connected',
+        updated_at = CURRENT_TIMESTAMP`,
+      [
+        user.id,
+        String(tokenData.user_id || profile.id || ""),
+        profile.nickname || profile.email || null,
+        tokenData.access_token,
+        tokenData.refresh_token || null,
+        expiresAt,
+      ],
+    );
+
+    res.redirect("/?connected=mercadolivre");
+  } catch (err) {
+    console.error("Erro OAuth Mercado Livre:", err);
+    res.status(500).send(`Erro ao conectar Mercado Livre: ${err.message}`);
+  }
+});
+
 /* =========================
    CONEXÕES
 ========================= */

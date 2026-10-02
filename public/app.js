@@ -1108,17 +1108,18 @@ async function loadConnections() {
 ========================= */
 
 function connectProvider(provider) {
+  if (provider === "mercadolivre") {
+    window.location.href = "/auth/mercadolivre";
+    return;
+  }
+
   const names = {
     olx: "OLX",
-
-    mercadolivre: "Mercado Livre",
-
     ebay: "eBay",
   };
 
   alert(
-    `Conexão com ${names[provider]} preparada.\n\n` +
-      "Agora precisamos implementar o fluxo oficial de autorização dessa plataforma.",
+    `Conexão com ${names[provider]} ainda não está disponível.`,
   );
 }
 
