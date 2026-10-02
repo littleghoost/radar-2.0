@@ -35,6 +35,8 @@
 
       <button class="nav-button" data-page="connections">Conexões</button>
 
+      <button class="nav-button" data-page="activity">Atividade</button>
+
       <button class="nav-button" data-page="profile">Perfil</button>
     </nav>
 
@@ -146,6 +148,26 @@
           </div>
 
           <div id="connectionsGrid" class="connections-grid"></div>
+        </section>
+      </section>
+
+      <!-- =========================
+         ATIVIDADE
+    ========================== -->
+
+      <section id="activityPage" class="page">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <span class="eyebrow"> HISTÓRICO </span>
+              <h2>Atividade</h2>
+              <p>Execuções, anúncios novos, quedas de preço e falhas das fontes.</p>
+            </div>
+            <button id="refreshActivity" class="secondary">Atualizar</button>
+          </div>
+
+          <div id="activityStats" class="activity-summary"></div>
+          <div id="activityList" class="activity-list"></div>
         </section>
       </section>
 

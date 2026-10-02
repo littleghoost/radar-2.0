@@ -119,6 +119,40 @@ db.serialize(() => {
   );
 
   /* =========================
+     EXECUÇÕES DO RADAR
+  ========================= */
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS radar_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      radar_id INTEGER NOT NULL,
+      status TEXT DEFAULT 'running',
+      sources_total INTEGER DEFAULT 0,
+      sources_ok INTEGER DEFAULT 0,
+      found_count INTEGER DEFAULT 0,
+      added_count INTEGER DEFAULT 0,
+      updated_count INTEGER DEFAULT 0,
+      error_message TEXT,
+      started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      finished_at DATETIME
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS activity_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      radar_id INTEGER,
+      run_id INTEGER,
+      listing_id INTEGER,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT,
+      metadata_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  /* =========================
      HISTÓRICO DE PREÇO
   ========================= */
 

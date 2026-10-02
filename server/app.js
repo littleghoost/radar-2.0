@@ -200,7 +200,10 @@ app.get(
               ELSE 0
             END
           )
-            AS interesting_count
+            AS interesting_count,
+
+          (SELECT rr.started_at FROM radar_runs rr WHERE rr.radar_id = r.id ORDER BY rr.id DESC LIMIT 1) AS last_run_at,
+          (SELECT rr.status FROM radar_runs rr WHERE rr.radar_id = r.id ORDER BY rr.id DESC LIMIT 1) AS last_run_status
 
         FROM radars r
 
@@ -420,12 +423,20 @@ app.delete(
 ========================= */
 
 app.post("/api/radars/:id/run", async (req, res) => {
+  let runRecord = null;
+
   try {
     const radar = await get("SELECT * FROM radars WHERE id = ?", [req.params.id]);
     if (!radar) return res.status(404).json({ error: "Radar não encontrado." });
 
+    const started = await run(
+      `INSERT INTO radar_runs (radar_id, status) VALUES (?, 'running')`,
+      [radar.id],
+    );
+    runRecord = { id: started.id, radar_id: radar.id };
+
     const user = await get("SELECT * FROM users LIMIT 1");
-    if (!user) return res.status(500).json({ error: "Usuário local não encontrado." });
+    if (!user) throw new Error("Usuário local não encontrado.");
 
     const mlConnection = await getValidMercadoLivreConnection(user.id);
     const sourceRuns = await searchAllSources({
@@ -451,6 +462,7 @@ app.post("/api/radars/:id/run", async (req, res) => {
 
     let added = 0;
     let updated = 0;
+    let priceDrops = 0;
 
     for (const item of results) {
       const existing = await get("SELECT * FROM listings WHERE url = ?", [item.url]);
@@ -483,12 +495,30 @@ app.post("/api/radars/:id/run", async (req, res) => {
             [insert.id, nextPrice],
           );
         }
+
+        await run(
+          `INSERT INTO activity_events
+            (radar_id, run_id, listing_id, type, title, detail, metadata_json)
+           VALUES (?, ?, ?, 'new_listing', ?, ?, ?)`,
+          [
+            radar.id,
+            runRecord.id,
+            insert.id,
+            `Novo anúncio: ${item.title}`,
+            `${item.platform}${nextPrice === null ? "" : ` • ${currency} ${nextPrice}`}`,
+            JSON.stringify({ url: item.url, platform: item.platform }),
+          ],
+        );
         added += 1;
         continue;
       }
 
+      const previousPrice =
+        existing.current_price === null ? null : Number(existing.current_price);
       const priceChanged =
-        nextPrice !== null && Number(existing.current_price) !== Number(nextPrice);
+        nextPrice !== null && previousPrice !== null && previousPrice !== nextPrice;
+      const priceDropped =
+        priceChanged && nextPrice < previousPrice && (existing.currency || "BRL") === currency;
 
       await run(
         `UPDATE listings
@@ -512,6 +542,30 @@ app.post("/api/radars/:id/run", async (req, res) => {
           [existing.id, nextPrice],
         );
       }
+
+      if (priceDropped) {
+        await run(
+          `INSERT INTO activity_events
+            (radar_id, run_id, listing_id, type, title, detail, metadata_json)
+           VALUES (?, ?, ?, 'price_drop', ?, ?, ?)`,
+          [
+            radar.id,
+            runRecord.id,
+            existing.id,
+            `Preço caiu: ${item.title}`,
+            `${currency} ${previousPrice} → ${currency} ${nextPrice}`,
+            JSON.stringify({
+              url: item.url,
+              platform: item.platform,
+              previous_price: previousPrice,
+              current_price: nextPrice,
+              currency,
+            }),
+          ],
+        );
+        priceDrops += 1;
+      }
+
       updated += 1;
     }
 
@@ -524,9 +578,24 @@ app.post("/api/radars/:id/run", async (req, res) => {
       found: source.items?.length || 0,
     }));
 
+    for (const source of sourceSummary.filter((entry) => !entry.ok && !entry.skipped)) {
+      await run(
+        `INSERT INTO activity_events
+          (radar_id, run_id, type, title, detail, metadata_json)
+         VALUES (?, ?, 'source_error', ?, ?, ?)`,
+        [
+          radar.id,
+          runRecord.id,
+          `Falha em ${source.source}`,
+          source.reason || `HTTP ${source.status || "erro"}`,
+          JSON.stringify(source),
+        ],
+      );
+    }
+
     const activeSources = sourceSummary.filter((source) => source.ok).length;
     const unavailableSources = sourceSummary.filter((source) => !source.ok);
-    let message = `${results.length} anúncios recebidos de ${activeSources} fonte(s). ${added} novos e ${updated} atualizados.`;
+    let message = `${results.length} anúncios recebidos de ${activeSources} fonte(s). ${added} novos, ${updated} atualizados e ${priceDrops} queda(s) de preço.`;
 
     if (unavailableSources.length) {
       const labels = unavailableSources
@@ -537,29 +606,106 @@ app.post("/api/radars/:id/run", async (req, res) => {
           if (source.source === "mercadolivre" && source.status === 403) {
             return "Mercado Livre bloqueou busca geral (403)";
           }
+          if (source.skipped) return `${source.source} não configurado`;
           return `${source.source} indisponível`;
         })
         .join("; ");
       message += ` ${labels}.`;
     }
 
+    await run(
+      `UPDATE radar_runs
+       SET status = 'completed', sources_total = ?, sources_ok = ?, found_count = ?,
+           added_count = ?, updated_count = ?, finished_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [sourceSummary.length, activeSources, results.length, added, updated, runRecord.id],
+    );
+
+    await run(
+      `INSERT INTO activity_events
+        (radar_id, run_id, type, title, detail, metadata_json)
+       VALUES (?, ?, 'run_completed', ?, ?, ?)`,
+      [
+        radar.id,
+        runRecord.id,
+        `Radar executado: ${radar.name}`,
+        message,
+        JSON.stringify({ sources: sourceSummary, added, updated, priceDrops }),
+      ],
+    );
+
     res.json({
       ok: true,
       radar,
+      run_id: runRecord.id,
       added,
       updated,
+      price_drops: priceDrops,
       sources: sourceSummary,
       message,
     });
+  } catch (err) {
+    if (runRecord?.id) {
+      await run(
+        `UPDATE radar_runs
+         SET status = 'failed', error_message = ?, finished_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [err.message, runRecord.id],
+      ).catch(() => {});
+
+      await run(
+        `INSERT INTO activity_events
+          (radar_id, run_id, type, title, detail)
+         VALUES (?, ?, 'run_failed', 'Falha ao executar radar', ?)`,
+        [runRecord.radar_id, runRecord.id, err.message],
+      ).catch(() => {});
+    }
+
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/activity", async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+    const rows = await all(
+      `SELECT
+         e.*,
+         r.name AS radar_name,
+         l.url AS listing_url,
+         l.platform AS listing_platform
+       FROM activity_events e
+       LEFT JOIN radars r ON r.id = e.radar_id
+       LEFT JOIN listings l ON l.id = e.listing_id
+       ORDER BY e.created_at DESC, e.id DESC
+       LIMIT ?`,
+      [limit],
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/runs", async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    const rows = await all(
+      `SELECT rr.*, r.name AS radar_name
+       FROM radar_runs rr
+       LEFT JOIN radars r ON r.id = rr.radar_id
+       ORDER BY rr.started_at DESC, rr.id DESC
+       LIMIT ?`,
+      [limit],
+    );
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 app.get("/api/sources/status", (_req, res) => {
-  res.json({
-    ebay: getEbayStatus(),
-  });
+  res.json({ ebay: getEbayStatus() });
 });
 
 /* =========================

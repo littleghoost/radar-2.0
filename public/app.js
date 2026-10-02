@@ -46,6 +46,14 @@ function money(value, currency = "BRL") {
   );
 }
 
+function dateTime(value) {
+  if (!value) return "Nunca executado";
+  const normalized = String(value).includes("T") ? value : `${value.replace(" ", "T")}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
 /* =========================
    API
 ========================= */
@@ -133,6 +141,11 @@ async function loadRadars() {
 
                   ${escapeHtml(radar.query)}
 
+                </p>
+
+                <p class="radar-last-run">
+                  Última execução: ${escapeHtml(dateTime(radar.last_run_at))}
+                  ${radar.last_run_status ? ` • ${escapeHtml(radar.last_run_status)}` : ""}
                 </p>
 
 
@@ -302,6 +315,7 @@ async function runRadar(id) {
 
     await loadRadars();
     await loadListings();
+    if ($("#activityPage")?.classList.contains("active")) await loadActivity();
 
     alert(`${result.radar.name}\n\n` + result.message);
   } catch (err) {
@@ -982,8 +996,83 @@ document.querySelectorAll(".nav-button").forEach((button) => {
     if (page === "connections") {
       loadConnections();
     }
+
+    if (page === "activity") {
+      loadActivity();
+    }
   };
 });
+
+/* =========================
+   ATIVIDADE
+========================= */
+
+function activityIcon(type) {
+  return {
+    new_listing: "+",
+    price_drop: "↓",
+    source_error: "!",
+    run_failed: "×",
+    run_completed: "✓",
+  }[type] || "•";
+}
+
+async function loadActivity() {
+  try {
+    const [events, runs] = await Promise.all([
+      api("/api/activity?limit=80"),
+      api("/api/runs?limit=30"),
+    ]);
+
+    const completed = runs.filter((run) => run.status === "completed").length;
+    const failed = runs.filter((run) => run.status === "failed").length;
+    const newListings = events.filter((event) => event.type === "new_listing").length;
+    const priceDrops = events.filter((event) => event.type === "price_drop").length;
+
+    $("#activityStats").innerHTML = `
+      <article><span>Execuções</span><strong>${runs.length}</strong></article>
+      <article><span>Concluídas</span><strong>${completed}</strong></article>
+      <article><span>Novos anúncios</span><strong>${newListings}</strong></article>
+      <article><span>Quedas de preço</span><strong>${priceDrops}</strong></article>
+      ${failed ? `<article><span>Falhas</span><strong>${failed}</strong></article>` : ""}
+    `;
+
+    const list = $("#activityList");
+    if (!events.length) {
+      list.innerHTML = `<div class="empty">Nenhuma atividade registrada ainda. Rode um radar para começar.</div>`;
+      return;
+    }
+
+    list.innerHTML = events
+      .map((event) => {
+        const link = event.listing_url
+          ? `<a href="${escapeAttr(event.listing_url)}" target="_blank" rel="noopener">Abrir anúncio</a>`
+          : "";
+
+        return `
+          <article class="activity-item ${escapeAttr(event.type)}">
+            <div class="activity-icon">${activityIcon(event.type)}</div>
+            <div class="activity-body">
+              <div class="activity-top">
+                <strong>${escapeHtml(event.title)}</strong>
+                <time>${escapeHtml(dateTime(event.created_at))}</time>
+              </div>
+              ${event.detail ? `<p>${escapeHtml(event.detail)}</p>` : ""}
+              <div class="activity-meta">
+                ${event.radar_name ? `<span>${escapeHtml(event.radar_name)}</span>` : ""}
+                ${event.listing_platform ? `<span>${escapeHtml(event.listing_platform)}</span>` : ""}
+                ${link}
+              </div>
+            </div>
+          </article>`;
+      })
+      .join("");
+  } catch (err) {
+    $("#activityList").innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+$("#refreshActivity")?.addEventListener("click", loadActivity);
 
 /* =========================
    CONEXÕES
