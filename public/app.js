@@ -300,6 +300,9 @@ async function runRadar(id) {
       },
     );
 
+    await loadRadars();
+    await loadListings();
+
     alert(`${result.radar.name}\n\n` + result.message);
   } catch (err) {
     alert(err.message);

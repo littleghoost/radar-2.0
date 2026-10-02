@@ -319,7 +319,6 @@ app.post(
     try {
       const radar = await get(
         "SELECT * FROM radars WHERE id = ?",
-
         [req.params.id],
       );
 
@@ -329,24 +328,111 @@ app.post(
         });
       }
 
-      /*
-        Aqui entraremos depois com:
+      const user = await get("SELECT * FROM users LIMIT 1");
+      if (!user) {
+        return res.status(500).json({ error: "Usuário local não encontrado." });
+      }
 
-        Mercado Livre
-        OLX
-        Enjoei
-        eBay
-        Mercari
-        etc.
-      */
+      const connection = await getValidMercadoLivreConnection(user.id);
+      if (!connection || connection.status !== "connected") {
+        return res.status(409).json({
+          error: "Conecte ou reconecte sua conta do Mercado Livre antes de rodar o radar.",
+        });
+      }
+
+      const url = new URL("https://api.mercadolibre.com/sites/MLB/search");
+      url.searchParams.set("q", radar.query);
+      url.searchParams.set("limit", "50");
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${connection.access_token}`,
+          accept: "application/json",
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        console.error("Falha na busca do Mercado Livre:", data);
+        return res.status(response.status).json({
+          error: data.message || data.error || "Falha ao buscar anúncios no Mercado Livre.",
+        });
+      }
+
+      const sourceResults = Array.isArray(data.results) ? data.results : [];
+      const maxPrice = radar.max_price === null ? null : Number(radar.max_price);
+      const results = sourceResults
+        .filter((item) => {
+          if (!item?.permalink || !item?.title) return false;
+          if (maxPrice === null || Number.isNaN(maxPrice)) return true;
+          return Number(item.price) <= maxPrice;
+        })
+        .slice(0, 30);
+
+      let added = 0;
+      let updated = 0;
+
+      for (const item of results) {
+        const existing = await get(
+          "SELECT * FROM listings WHERE url = ?",
+          [item.permalink],
+        );
+
+        const nextPrice = item.price === undefined ? null : Number(item.price);
+        const imageUrl = item.thumbnail || item.secure_thumbnail || null;
+
+        if (!existing) {
+          const insert = await run(
+            `INSERT INTO listings
+              (radar_id, title, platform, url, image_url, current_price, status, notes)
+             VALUES (?, ?, 'Mercado Livre', ?, ?, ?, 'novo', ?)`,
+            [
+              radar.id,
+              item.title,
+              item.permalink,
+              imageUrl,
+              nextPrice,
+              item.id ? `ID Mercado Livre: ${item.id}` : null,
+            ],
+          );
+
+          if (nextPrice !== null && !Number.isNaN(nextPrice)) {
+            await run(
+              "INSERT INTO price_history (listing_id, price) VALUES (?, ?)",
+              [insert.id, nextPrice],
+            );
+          }
+          added += 1;
+          continue;
+        }
+
+        const priceChanged =
+          nextPrice !== null && Number(existing.current_price) !== Number(nextPrice);
+
+        await run(
+          `UPDATE listings
+           SET title = ?, image_url = ?, current_price = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [item.title, imageUrl, nextPrice, existing.id],
+        );
+
+        if (priceChanged) {
+          await run(
+            "INSERT INTO price_history (listing_id, price) VALUES (?, ?)",
+            [existing.id, nextPrice],
+          );
+        }
+        updated += 1;
+      }
 
       res.json({
         ok: true,
-
         radar,
-
-        message:
-          "Radar preparado. Ainda precisamos conectar uma fonte automática.",
+        found: sourceResults.length,
+        matched: results.length,
+        added,
+        updated,
+        message: `${results.length} anúncios dentro dos filtros. ${added} novos e ${updated} atualizados.`,
       });
     } catch (err) {
       res.status(500).json({
