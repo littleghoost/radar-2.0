@@ -2,6 +2,7 @@ const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
 const db = require("./database");
+const { searchAllSources, getEbayStatus } = require("./services/sources");
 
 const app = express();
 
@@ -418,138 +419,148 @@ app.delete(
    RODAR RADAR
 ========================= */
 
-app.post(
-  "/api/radars/:id/run",
+app.post("/api/radars/:id/run", async (req, res) => {
+  try {
+    const radar = await get("SELECT * FROM radars WHERE id = ?", [req.params.id]);
+    if (!radar) return res.status(404).json({ error: "Radar não encontrado." });
 
-  async (req, res) => {
-    try {
-      const radar = await get(
-        "SELECT * FROM radars WHERE id = ?",
-        [req.params.id],
-      );
+    const user = await get("SELECT * FROM users LIMIT 1");
+    if (!user) return res.status(500).json({ error: "Usuário local não encontrado." });
 
-      if (!radar) {
-        return res.status(404).json({
-          error: "Radar não encontrado.",
-        });
-      }
+    const mlConnection = await getValidMercadoLivreConnection(user.id);
+    const sourceRuns = await searchAllSources({
+      query: radar.query,
+      mercadoLivreAccessToken:
+        mlConnection?.status === "connected" ? mlConnection.access_token : null,
+      limit: 50,
+    });
 
-      const user = await get("SELECT * FROM users LIMIT 1");
-      if (!user) {
-        return res.status(500).json({ error: "Usuário local não encontrado." });
-      }
+    const maxPrice = radar.max_price === null ? null : Number(radar.max_price);
+    const successfulItems = sourceRuns.flatMap((source) =>
+      source.ok ? source.items : [],
+    );
 
-      const connection = await getValidMercadoLivreConnection(user.id);
-      if (!connection || connection.status !== "connected") {
-        return res.status(409).json({
-          error: "Conecte ou reconecte sua conta do Mercado Livre antes de rodar o radar.",
-        });
-      }
+    const results = successfulItems
+      .filter((item) => {
+        if (!item.url || !item.title) return false;
+        if (maxPrice === null || Number.isNaN(maxPrice)) return true;
+        if (item.currency && item.currency !== "BRL") return true;
+        return item.price === null || Number(item.price) <= maxPrice;
+      })
+      .slice(0, 60);
 
-      const url = new URL("https://api.mercadolibre.com/sites/MLB/search");
-      url.searchParams.set("q", radar.query);
-      url.searchParams.set("limit", "50");
+    let added = 0;
+    let updated = 0;
 
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${connection.access_token}`,
-          accept: "application/json",
-        },
-      });
+    for (const item of results) {
+      const existing = await get("SELECT * FROM listings WHERE url = ?", [item.url]);
+      const nextPrice = item.price === null ? null : Number(item.price);
+      const currency = item.currency || "BRL";
+      const sourceNote = item.external_id
+        ? `ID ${item.platform}: ${item.external_id}`
+        : null;
 
-      const data = await response.json();
-      if (!response.ok) {
-        console.error("Falha na busca do Mercado Livre:", data);
-        const message =
-          response.status === 403
-            ? "O Mercado Livre não liberou busca geral por palavra-chave para este aplicativo. A conexão continua válida; use links diretos enquanto adicionamos outras fontes autorizadas."
-            : data.message || data.error || "Falha ao buscar anúncios no Mercado Livre.";
-
-        return res.status(response.status).json({ error: message });
-      }
-
-      const sourceResults = Array.isArray(data.results) ? data.results : [];
-      const maxPrice = radar.max_price === null ? null : Number(radar.max_price);
-      const results = sourceResults
-        .filter((item) => {
-          if (!item?.permalink || !item?.title) return false;
-          if (maxPrice === null || Number.isNaN(maxPrice)) return true;
-          return Number(item.price) <= maxPrice;
-        })
-        .slice(0, 30);
-
-      let added = 0;
-      let updated = 0;
-
-      for (const item of results) {
-        const existing = await get(
-          "SELECT * FROM listings WHERE url = ?",
-          [item.permalink],
+      if (!existing) {
+        const insert = await run(
+          `INSERT INTO listings
+            (radar_id, title, platform, url, image_url, current_price, currency, status, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?)`,
+          [
+            radar.id,
+            item.title,
+            item.platform,
+            item.url,
+            item.image_url,
+            nextPrice,
+            currency,
+            sourceNote,
+          ],
         );
 
-        const nextPrice = item.price === undefined ? null : Number(item.price);
-        const imageUrl = item.thumbnail || item.secure_thumbnail || null;
-
-        if (!existing) {
-          const insert = await run(
-            `INSERT INTO listings
-              (radar_id, title, platform, url, image_url, current_price, status, notes)
-             VALUES (?, ?, 'Mercado Livre', ?, ?, ?, 'novo', ?)`,
-            [
-              radar.id,
-              item.title,
-              item.permalink,
-              imageUrl,
-              nextPrice,
-              item.id ? `ID Mercado Livre: ${item.id}` : null,
-            ],
-          );
-
-          if (nextPrice !== null && !Number.isNaN(nextPrice)) {
-            await run(
-              "INSERT INTO price_history (listing_id, price) VALUES (?, ?)",
-              [insert.id, nextPrice],
-            );
-          }
-          added += 1;
-          continue;
-        }
-
-        const priceChanged =
-          nextPrice !== null && Number(existing.current_price) !== Number(nextPrice);
-
-        await run(
-          `UPDATE listings
-           SET title = ?, image_url = ?, current_price = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [item.title, imageUrl, nextPrice, existing.id],
-        );
-
-        if (priceChanged) {
+        if (nextPrice !== null && !Number.isNaN(nextPrice)) {
           await run(
             "INSERT INTO price_history (listing_id, price) VALUES (?, ?)",
-            [existing.id, nextPrice],
+            [insert.id, nextPrice],
           );
         }
-        updated += 1;
+        added += 1;
+        continue;
       }
 
-      res.json({
-        ok: true,
-        radar,
-        found: sourceResults.length,
-        matched: results.length,
-        added,
-        updated,
-        message: `${results.length} anúncios dentro dos filtros. ${added} novos e ${updated} atualizados.`,
-      });
-    } catch (err) {
-      res.status(500).json({
-        error: err.message,
-      });
+      const priceChanged =
+        nextPrice !== null && Number(existing.current_price) !== Number(nextPrice);
+
+      await run(
+        `UPDATE listings
+         SET radar_id = ?, title = ?, platform = ?, image_url = ?,
+             current_price = ?, currency = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          radar.id,
+          item.title,
+          item.platform,
+          item.image_url,
+          nextPrice,
+          currency,
+          existing.id,
+        ],
+      );
+
+      if (priceChanged) {
+        await run(
+          "INSERT INTO price_history (listing_id, price) VALUES (?, ?)",
+          [existing.id, nextPrice],
+        );
+      }
+      updated += 1;
     }
-  },
-);
+
+    const sourceSummary = sourceRuns.map((source) => ({
+      source: source.source,
+      ok: source.ok,
+      skipped: Boolean(source.skipped),
+      status: source.status || null,
+      reason: source.reason || null,
+      found: source.items?.length || 0,
+    }));
+
+    const activeSources = sourceSummary.filter((source) => source.ok).length;
+    const unavailableSources = sourceSummary.filter((source) => !source.ok);
+    let message = `${results.length} anúncios recebidos de ${activeSources} fonte(s). ${added} novos e ${updated} atualizados.`;
+
+    if (unavailableSources.length) {
+      const labels = unavailableSources
+        .map((source) => {
+          if (source.source === "ebay" && source.reason === "credentials_pending") {
+            return "eBay aguardando credenciais";
+          }
+          if (source.source === "mercadolivre" && source.status === 403) {
+            return "Mercado Livre bloqueou busca geral (403)";
+          }
+          return `${source.source} indisponível`;
+        })
+        .join("; ");
+      message += ` ${labels}.`;
+    }
+
+    res.json({
+      ok: true,
+      radar,
+      added,
+      updated,
+      sources: sourceSummary,
+      message,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/sources/status", (_req, res) => {
+  res.json({
+    ebay: getEbayStatus(),
+  });
+});
 
 /* =========================
    LISTAR ANÚNCIOS
@@ -1325,21 +1336,21 @@ app.get(
       );
 
       const providers = ["olx", "mercadolivre", "ebay"];
+      const ebayStatus = getEbayStatus();
 
       const result = providers.map((provider) => {
         const existing = connections.find((item) => item.provider === provider);
+        if (existing) return existing;
 
-        return (
-          existing || {
-            provider,
-
-            status: "disconnected",
-
-            provider_username: null,
-
-            expires_at: null,
-          }
-        );
+        return {
+          provider,
+          status:
+            provider === "ebay" && !ebayStatus.configured
+              ? "pending_credentials"
+              : "disconnected",
+          provider_username: null,
+          expires_at: null,
+        };
       });
 
       res.json(result);

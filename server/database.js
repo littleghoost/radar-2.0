@@ -95,12 +95,28 @@ db.serialize(() => {
       url TEXT NOT NULL UNIQUE,
       image_url TEXT,
       current_price REAL,
+      currency TEXT DEFAULT 'BRL',
       status TEXT DEFAULT 'novo',
       notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  db.all(
+    "PRAGMA table_info(listings)",
+    (err, columns) => {
+      if (err) {
+        console.error(err);
+        return;
+      }
+
+      const hasCurrency = columns.some((column) => column.name === "currency");
+      if (!hasCurrency) {
+        db.run("ALTER TABLE listings ADD COLUMN currency TEXT DEFAULT 'BRL'");
+      }
+    },
+  );
 
   /* =========================
      HISTÓRICO DE PREÇO

@@ -30,7 +30,7 @@ document.querySelectorAll(".close-modal").forEach((button) => {
    DINHEIRO
 ========================= */
 
-function money(value) {
+function money(value, currency = "BRL") {
   if (value === null || value === undefined || value === "") {
     return "Preço não informado";
   }
@@ -41,7 +41,7 @@ function money(value) {
     {
       style: "currency",
 
-      currency: "BRL",
+      currency: currency || "BRL",
     },
   );
 }
@@ -489,7 +489,7 @@ async function loadListings() {
 
                   ↓ caiu de
 
-                  ${money(listing.first_price)}
+                  ${money(listing.first_price, listing.currency)}
 
                 </div>
 
@@ -570,7 +570,7 @@ async function loadListings() {
                   class="price"
                 >
 
-                  ${money(listing.current_price)}
+                  ${money(listing.current_price, listing.currency)}
 
                 </div>
 
@@ -1015,10 +1015,13 @@ async function loadConnections() {
       .map((connection) => {
         const connected = connection.status === "connected";
         const needsAuth = connection.status === "reauthorization_required";
+        const pendingCredentials = connection.status === "pending_credentials";
         const accountLabel =
           connected && connection.provider_username
             ? `Conta conectada: @${escapeHtml(connection.provider_username)}`
-            : descriptions[connection.provider];
+            : pendingCredentials
+              ? "Cadastro do eBay Developer aguardando aprovação/credenciais."
+              : descriptions[connection.provider];
 
         return `
 
@@ -1049,7 +1052,7 @@ async function loadConnections() {
 
                 >
 
-                  ${connected ? "Conectado" : needsAuth ? "Reconectar" : "Não conectado"}
+                  ${connected ? "Conectado" : needsAuth ? "Reconectar" : pendingCredentials ? "Aguardando" : "Não conectado"}
 
                 </span>
 
@@ -1082,7 +1085,9 @@ async function loadConnections() {
                     </button>
 
                   `
-                  : `
+                  : pendingCredentials
+                    ? `<button class="secondary" type="button" disabled>Aguardando aprovação</button>`
+                    : `
 
                     <button
                       class="primary"
