@@ -354,9 +354,12 @@ app.post(
       const data = await response.json();
       if (!response.ok) {
         console.error("Falha na busca do Mercado Livre:", data);
-        return res.status(response.status).json({
-          error: data.message || data.error || "Falha ao buscar anúncios no Mercado Livre.",
-        });
+        const message =
+          response.status === 403
+            ? "O Mercado Livre não liberou busca geral por palavra-chave para este aplicativo. A conexão continua válida; use links diretos enquanto adicionamos outras fontes autorizadas."
+            : data.message || data.error || "Falha ao buscar anúncios no Mercado Livre.";
+
+        return res.status(response.status).json({ error: message });
       }
 
       const sourceResults = Array.isArray(data.results) ? data.results : [];
@@ -1117,6 +1120,69 @@ async function getValidMercadoLivreConnection(userId) {
 
   return get("SELECT * FROM connections WHERE id = ?", [connection.id]);
 }
+
+/* =========================
+   IMPORTAR ITEM MERCADO LIVRE
+========================= */
+
+app.get("/api/mercadolivre/item", async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || "").trim();
+    const match = rawUrl.match(/MLB-?(\d{6,})/i);
+
+    if (!match) {
+      return res.status(400).json({
+        error: "Não encontrei um ID de anúncio MLB nesse link.",
+      });
+    }
+
+    const itemId = `MLB${match[1]}`;
+    const user = await get("SELECT * FROM users LIMIT 1");
+    if (!user) {
+      return res.status(500).json({ error: "Usuário local não encontrado." });
+    }
+
+    const connection = await getValidMercadoLivreConnection(user.id);
+    if (!connection || connection.status !== "connected") {
+      return res.status(409).json({
+        error: "Conecte sua conta do Mercado Livre antes de importar anúncios.",
+      });
+    }
+
+    const response = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+      headers: {
+        Authorization: `Bearer ${connection.access_token}`,
+        accept: "application/json",
+      },
+    });
+
+    const item = await response.json();
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: item.message || item.error || "Não consegui carregar esse anúncio.",
+      });
+    }
+
+    const picture =
+      item.pictures?.[0]?.secure_url ||
+      item.pictures?.[0]?.url ||
+      item.secure_thumbnail ||
+      item.thumbnail ||
+      null;
+
+    res.json({
+      id: item.id,
+      title: item.title,
+      platform: "Mercado Livre",
+      current_price: item.price ?? null,
+      url: item.permalink || rawUrl,
+      image_url: picture,
+      status: item.status || null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 /* =========================
    CONEXÕES

@@ -1157,6 +1157,43 @@ async function disconnectProvider(provider) {
   }
 }
 
+
+/* =========================
+   IMPORTAR LINK MERCADO LIVRE
+========================= */
+
+$("#importMercadoLivreBtn")?.addEventListener("click", async () => {
+  const form = $("#listingForm");
+  const url = form.elements.url.value.trim();
+
+  if (!url) {
+    alert("Cole primeiro o link direto do anúncio do Mercado Livre.");
+    return;
+  }
+
+  const button = $("#importMercadoLivreBtn");
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Buscando...";
+
+  try {
+    const item = await api(
+      `/api/mercadolivre/item?url=${encodeURIComponent(url)}`,
+    );
+
+    form.elements.title.value = item.title || "";
+    form.elements.platform.value = item.platform || "Mercado Livre";
+    form.elements.current_price.value = item.current_price ?? "";
+    form.elements.url.value = item.url || url;
+    form.elements.image_url.value = item.image_url || "";
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+});
+
 /* =========================
    INICIAR
 ========================= */
