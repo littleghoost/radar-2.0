@@ -522,6 +522,48 @@ app.get("/api/activity", async (req, res) => {
   }
 });
 
+app.get("/api/notifications/summary", async (_req, res) => {
+  try {
+    const importantTypes = ["new_listing", "price_drop", "source_error", "run_failed"];
+    const placeholders = importantTypes.map(() => "?").join(", ");
+
+    const summary = await get(
+      `SELECT
+         COUNT(*) AS unseen_total,
+         SUM(CASE WHEN type = 'new_listing' THEN 1 ELSE 0 END) AS new_listings,
+         SUM(CASE WHEN type = 'price_drop' THEN 1 ELSE 0 END) AS price_drops,
+         SUM(CASE WHEN type IN ('source_error', 'run_failed') THEN 1 ELSE 0 END) AS errors
+       FROM activity_events
+       WHERE seen = 0 AND type IN (${placeholders})`,
+      importantTypes,
+    );
+
+    res.json({
+      unseen_total: Number(summary?.unseen_total || 0),
+      new_listings: Number(summary?.new_listings || 0),
+      price_drops: Number(summary?.price_drops || 0),
+      errors: Number(summary?.errors || 0),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/notifications/mark-seen", async (_req, res) => {
+  try {
+    const result = await run(
+      `UPDATE activity_events
+       SET seen = 1
+       WHERE seen = 0
+         AND type IN ('new_listing', 'price_drop', 'source_error', 'run_failed')`,
+    );
+
+    res.json({ ok: true, marked: result.changes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/runs", async (req, res) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);

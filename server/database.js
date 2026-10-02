@@ -171,9 +171,23 @@ db.serialize(() => {
       title TEXT NOT NULL,
       detail TEXT,
       metadata_json TEXT,
+      seen INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  db.all(
+    "PRAGMA table_info(activity_events)",
+    (err, columns) => {
+      if (err) {
+        console.error(err);
+        return;
+      }
+      if (!columns.some((column) => column.name === "seen")) {
+        db.run("ALTER TABLE activity_events ADD COLUMN seen INTEGER DEFAULT 0");
+      }
+    },
+  );
 
   /* =========================
      HISTÓRICO DE PREÇO

@@ -338,6 +338,8 @@ async function runRadar(id) {
 
     await loadRadars();
     await loadListings();
+    await loadNotifications();
+    await loadNotifications();
     if ($("#activityPage")?.classList.contains("active")) await loadActivity();
 
     alert(`${result.radar.name}\n\n` + result.message);
@@ -1078,6 +1080,25 @@ document.querySelectorAll(".nav-button").forEach((button) => {
   };
 });
 
+async function loadNotifications() {
+  try {
+    const summary = await api("/api/notifications/summary");
+    const total = Number(summary.unseen_total || 0);
+    const badge = $("#activityBadge");
+    const stat = $("#statUnseen");
+
+    if (stat) stat.textContent = total;
+    if (badge) {
+      badge.textContent = total > 99 ? "99+" : String(total);
+      badge.hidden = total === 0;
+    }
+
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
 /* =========================
    ATIVIDADE
 ========================= */
@@ -1147,7 +1168,19 @@ async function loadActivity() {
   }
 }
 
-$("#refreshActivity")?.addEventListener("click", loadActivity);
+$("#refreshActivity")?.addEventListener("click", async () => {
+  await loadActivity();
+  await loadNotifications();
+});
+
+$("#markActivitySeen")?.addEventListener("click", async () => {
+  try {
+    await api("/api/notifications/mark-seen", { method: "POST" });
+    await Promise.all([loadActivity(), loadNotifications()]);
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
 /* =========================
    CONEXÕES

@@ -35,7 +35,10 @@
 
       <button class="nav-button" data-page="connections">Conexões</button>
 
-      <button class="nav-button" data-page="activity">Atividade</button>
+      <button class="nav-button" data-page="activity">
+        Atividade
+        <span id="activityBadge" class="nav-badge" hidden>0</span>
+      </button>
 
       <button class="nav-button" data-page="profile">Perfil</button>
     </nav>
@@ -69,6 +72,12 @@
             <span> Interessantes </span>
 
             <strong id="statInteresting"> 0 </strong>
+          </article>
+
+          <article>
+            <span> Novos achados </span>
+
+            <strong id="statUnseen"> 0 </strong>
           </article>
         </section>
 
@@ -163,7 +172,10 @@
               <h2>Atividade</h2>
               <p>Execuções, anúncios novos, quedas de preço e falhas das fontes.</p>
             </div>
-            <button id="refreshActivity" class="secondary">Atualizar</button>
+            <div class="activity-actions">
+              <button id="markActivitySeen" class="secondary">Marcar como visto</button>
+              <button id="refreshActivity" class="secondary">Atualizar</button>
+            </div>
           </div>
 
           <div id="activityStats" class="activity-summary"></div>
