@@ -8,6 +8,90 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+function parseCookies(req) {
+  const header = req.headers.cookie || "";
+  return Object.fromEntries(
+    header
+      .split(";")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const index = part.indexOf("=");
+        return index === -1
+          ? [part, ""]
+          : [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
+      }),
+  );
+}
+
+function safeEqualText(a, b) {
+  const left = Buffer.from(String(a));
+  const right = Buffer.from(String(b));
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+function createSessionToken() {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET não configurado.");
+  return crypto.createHmac("sha256", secret).update("radar-auth-v1").digest("hex");
+}
+
+function authEnabled() {
+  return Boolean(process.env.RADAR_PASSWORD && process.env.SESSION_SECRET);
+}
+
+function isAuthenticated(req) {
+  try {
+    const token = parseCookies(req).radar_session;
+    return Boolean(token && safeEqualText(token, createSessionToken()));
+  } catch {
+    return false;
+  }
+}
+
+app.get("/login", (req, res) => {
+  if (!authEnabled()) return res.redirect("/");
+  if (isAuthenticated(req)) return res.redirect("/");
+  res.sendFile(path.join(__dirname, "..", "public", "login.html"));
+});
+
+app.post("/login", (req, res) => {
+  const expected = process.env.RADAR_PASSWORD;
+  const supplied = req.body.password || "";
+
+  if (!expected || !safeEqualText(supplied, expected)) {
+    return res.redirect("/login?error=1");
+  }
+
+  const token = createSessionToken();
+  res.setHeader(
+    "Set-Cookie",
+    `radar_session=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000`,
+  );
+  res.redirect("/");
+});
+
+app.post("/logout", (_req, res) => {
+  res.setHeader(
+    "Set-Cookie",
+    "radar_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
+  );
+  res.redirect("/login");
+});
+
+app.use((req, res, next) => {
+  if (!authEnabled()) return next();
+  if (req.path === "/api/health") return next();
+  if (isAuthenticated(req)) return next();
+
+  if (req.path.startsWith("/api/")) {
+    return res.status(401).json({ error: "Faça login para acessar o Radar." });
+  }
+
+  return res.redirect("/login");
+});
 
 app.use(express.static(path.join(__dirname, "..", "public")));
 
