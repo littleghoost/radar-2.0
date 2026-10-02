@@ -2,7 +2,7 @@ const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
 const db = require("./database");
-const { getEbayStatus } = require("./services/sources");
+const { getEbayStatus, getOlxStatus } = require("./services/sources");
 const { createRadarRunner } = require("./services/radarRunner");
 
 const app = express();
@@ -582,7 +582,10 @@ app.get("/api/runs", async (req, res) => {
 });
 
 app.get("/api/sources/status", (_req, res) => {
-  res.json({ ebay: getEbayStatus() });
+  res.json({
+    ebay: getEbayStatus(),
+    olx: getOlxStatus(),
+  });
 });
 
 /* =========================
@@ -1360,17 +1363,19 @@ app.get(
 
       const providers = ["olx", "mercadolivre", "ebay"];
       const ebayStatus = getEbayStatus();
+      const olxStatus = getOlxStatus();
 
       const result = providers.map((provider) => {
         const existing = connections.find((item) => item.provider === provider);
         if (existing) return existing;
 
+        let status = "disconnected";
+        if (provider === "ebay" && !ebayStatus.configured) status = "pending_credentials";
+        if (provider === "olx" && !olxStatus.configured) status = "pending_homologation";
+
         return {
           provider,
-          status:
-            provider === "ebay" && !ebayStatus.configured
-              ? "pending_credentials"
-              : "disconnected",
+          status,
           provider_username: null,
           expires_at: null,
         };

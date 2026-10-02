@@ -1213,12 +1213,15 @@ async function loadConnections() {
         const connected = connection.status === "connected";
         const needsAuth = connection.status === "reauthorization_required";
         const pendingCredentials = connection.status === "pending_credentials";
+        const pendingHomologation = connection.status === "pending_homologation";
         const accountLabel =
           connected && connection.provider_username
             ? `Conta conectada: @${escapeHtml(connection.provider_username)}`
             : pendingCredentials
               ? "Cadastro do eBay Developer aguardando aprovação/credenciais."
-              : descriptions[connection.provider];
+              : pendingHomologation
+                ? "Integração oficial da OLX aguardando homologação."
+                : descriptions[connection.provider];
 
         return `
 
@@ -1249,7 +1252,7 @@ async function loadConnections() {
 
                 >
 
-                  ${connected ? "Conectado" : needsAuth ? "Reconectar" : pendingCredentials ? "Aguardando" : "Não conectado"}
+                  ${connected ? "Conectado" : needsAuth ? "Reconectar" : pendingCredentials || pendingHomologation ? "Aguardando" : "Não conectado"}
 
                 </span>
 
@@ -1282,8 +1285,8 @@ async function loadConnections() {
                     </button>
 
                   `
-                  : pendingCredentials
-                    ? `<button class="secondary" type="button" disabled>Aguardando aprovação</button>`
+                  : pendingCredentials || pendingHomologation
+                    ? `<button class="secondary" type="button" disabled>${pendingHomologation ? "Aguardando homologação" : "Aguardando aprovação"}</button>`
                     : `
 
                     <button
