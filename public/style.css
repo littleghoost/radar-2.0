@@ -582,3 +582,9 @@ label textarea {
     gap: 4px;
   }
 }
+
+.radar-schedule {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}

@@ -32,6 +32,9 @@ db.serialize(() => {
       query TEXT NOT NULL,
       max_price REAL,
       category TEXT DEFAULT 'geral',
+      schedule_enabled INTEGER DEFAULT 0,
+      schedule_interval_minutes INTEGER DEFAULT 240,
+      next_run_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -49,13 +52,19 @@ db.serialize(() => {
         return;
       }
 
-      const hasUserId = columns.some((column) => column.name === "user_id");
+      const names = new Set(columns.map((column) => column.name));
 
-      if (!hasUserId) {
-        db.run(`
-          ALTER TABLE radars
-          ADD COLUMN user_id INTEGER
-        `);
+      if (!names.has("user_id")) {
+        db.run("ALTER TABLE radars ADD COLUMN user_id INTEGER");
+      }
+      if (!names.has("schedule_enabled")) {
+        db.run("ALTER TABLE radars ADD COLUMN schedule_enabled INTEGER DEFAULT 0");
+      }
+      if (!names.has("schedule_interval_minutes")) {
+        db.run("ALTER TABLE radars ADD COLUMN schedule_interval_minutes INTEGER DEFAULT 240");
+      }
+      if (!names.has("next_run_at")) {
+        db.run("ALTER TABLE radars ADD COLUMN next_run_at DATETIME");
       }
     },
   );
@@ -127,6 +136,7 @@ db.serialize(() => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       radar_id INTEGER NOT NULL,
       status TEXT DEFAULT 'running',
+      trigger_type TEXT DEFAULT 'manual',
       sources_total INTEGER DEFAULT 0,
       sources_ok INTEGER DEFAULT 0,
       found_count INTEGER DEFAULT 0,
@@ -137,6 +147,19 @@ db.serialize(() => {
       finished_at DATETIME
     )
   `);
+
+  db.all(
+    "PRAGMA table_info(radar_runs)",
+    (err, columns) => {
+      if (err) {
+        console.error(err);
+        return;
+      }
+      if (!columns.some((column) => column.name === "trigger_type")) {
+        db.run("ALTER TABLE radar_runs ADD COLUMN trigger_type TEXT DEFAULT 'manual'");
+      }
+    },
+  );
 
   db.run(`
     CREATE TABLE IF NOT EXISTS activity_events (

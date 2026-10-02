@@ -13,6 +13,9 @@ Radar pessoal para organizar garimpos de roupas, câmeras e outros anúncios.
 - Histórico de preços e prevenção de URLs duplicadas.
 - Importação manual de anúncios por link preparada para APIs autorizadas.
 - Health check em `/api/health`.
+- Histórico de execuções e atividade.
+- Motor de radar desacoplado das rotas HTTP.
+- Agendamento preparado por radar, sem worker 24/7 ativo no Fly.
 
 ## Desenvolvimento local
 
@@ -56,7 +59,7 @@ A API oficial atualmente retorna 403 para busca geral por palavra-chave neste ap
 
 - autenticação própria do Radar antes de uso multiusuário;
 - adapters por fonte em `server/services/sources/`;
-- execução periódica de radares;
+- ligar o worker periódico quando houver servidor/app desktop disponível;
 - alertas de preço e disponibilidade;
 - score visual para peças/câmeras;
 - integração com outras plataformas via APIs autorizadas.

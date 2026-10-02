@@ -148,6 +148,14 @@ async function loadRadars() {
                   ${radar.last_run_status ? ` • ${escapeHtml(radar.last_run_status)}` : ""}
                 </p>
 
+                <p class="radar-schedule">
+                  ${
+                    radar.schedule_enabled
+                      ? `Agendamento preparado: a cada ${Math.round((radar.schedule_interval_minutes || 240) / 60)}h • próxima ${escapeHtml(dateTime(radar.next_run_at))}`
+                      : "Execução manual"
+                  }
+                </p>
+
 
                 <div class="meta">
 
@@ -198,6 +206,21 @@ async function loadRadars() {
 
                   </button>
 
+
+                  <button
+
+                    class="secondary"
+
+                    onclick="
+                      event.stopPropagation();
+                      configureSchedule(${radar.id});
+                    "
+
+                  >
+
+                    Agendamento
+
+                  </button>
 
                   <button
 
@@ -318,6 +341,58 @@ async function runRadar(id) {
     if ($("#activityPage")?.classList.contains("active")) await loadActivity();
 
     alert(`${result.radar.name}\n\n` + result.message);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+/* =========================
+   AGENDAMENTO PREPARADO
+========================= */
+
+async function configureSchedule(id) {
+  const radar = state.radars.find((item) => Number(item.id) === Number(id));
+  if (!radar) return;
+
+  if (radar.schedule_enabled) {
+    const disable = confirm(
+      "Este radar está com agendamento preparado.\n\nOK = desligar agendamento\nCancelar = manter como está",
+    );
+    if (!disable) return;
+
+    try {
+      await api(`/api/radars/${id}/schedule`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: false }),
+      });
+      await loadRadars();
+    } catch (err) {
+      alert(err.message);
+    }
+    return;
+  }
+
+  const hours = prompt(
+    "Preparar este radar para rodar a cada quantas horas?\n\nO Fly NÃO executará sozinho por enquanto. Isso deixa a configuração pronta para o futuro app/servidor.",
+    "4",
+  );
+  if (hours === null) return;
+
+  const value = Number(hours.replace?.(",", ".") ?? hours);
+  if (!Number.isFinite(value) || value < 1) {
+    alert("Use um intervalo de pelo menos 1 hora.");
+    return;
+  }
+
+  try {
+    await api(`/api/radars/${id}/schedule`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        enabled: true,
+        interval_minutes: Math.round(value * 60),
+      }),
+    });
+    await loadRadars();
   } catch (err) {
     alert(err.message);
   }
