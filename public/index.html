@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Radar 2.0</title>
+
+    <link rel="stylesheet" href="style.css" />
+  </head>
+
+  <body>
+    <!-- =========================
+       CABEÇALHO
+  ========================== -->
+
+    <header class="topbar">
+      <div>
+        <span class="eyebrow"> LOCAL • MVP 0.1 </span>
+
+        <h1>RADAR 2.0</h1>
+
+        <p>Garimpo organizado. Sem perder anúncio bom no meio da bagunça.</p>
+      </div>
+
+      <button id="openRadarModal" class="primary">+ Novo radar</button>
+    </header>
+
+    <!-- =========================
+       NAVEGAÇÃO
+  ========================== -->
+
+    <nav class="main-nav">
+      <button class="nav-button active" data-page="dashboard">Dashboard</button>
+
+      <button class="nav-button" data-page="connections">Conexões</button>
+
+      <button class="nav-button" data-page="profile">Perfil</button>
+    </nav>
+
+    <!-- =========================
+       CONTEÚDO
+  ========================== -->
+
+    <main>
+      <!-- =========================
+         DASHBOARD
+    ========================== -->
+
+      <section id="dashboardPage" class="page active">
+        <!-- ESTATÍSTICAS -->
+
+        <section class="stats">
+          <article>
+            <span> Radares </span>
+
+            <strong id="statRadars"> 0 </strong>
+          </article>
+
+          <article>
+            <span> Anúncios </span>
+
+            <strong id="statListings"> 0 </strong>
+          </article>
+
+          <article>
+            <span> Interessantes </span>
+
+            <strong id="statInteresting"> 0 </strong>
+          </article>
+        </section>
+
+        <!-- RADARES -->
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <span class="eyebrow"> BUSCAS </span>
+
+              <h2>Seus radares</h2>
+            </div>
+          </div>
+
+          <div id="radarList" class="radar-grid"></div>
+        </section>
+
+        <!-- ANÚNCIOS -->
+
+        <section class="panel">
+          <div class="panel-header listing-header">
+            <div>
+              <span class="eyebrow"> FEED </span>
+
+              <h2>Anúncios</h2>
+            </div>
+
+            <button id="openListingModal" class="primary">
+              + Adicionar anúncio
+            </button>
+          </div>
+
+          <!-- FILTROS -->
+
+          <div class="filters">
+            <input
+              id="searchInput"
+              type="search"
+              placeholder="Pesquisar anúncio..."
+            />
+
+            <select id="radarFilter">
+              <option value="">Todos os radares</option>
+            </select>
+
+            <select id="statusFilter">
+              <option value="todos">Todos os status</option>
+
+              <option value="novo">Novo</option>
+
+              <option value="interessante">Interessante</option>
+
+              <option value="descartado">Descartado</option>
+
+              <option value="vendido">Vendido</option>
+            </select>
+          </div>
+
+          <div id="listingGrid" class="listing-grid"></div>
+        </section>
+      </section>
+
+      <!-- =========================
+         CONEXÕES
+    ========================== -->
+
+      <section id="connectionsPage" class="page">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <span class="eyebrow"> CONTAS </span>
+
+              <h2>Conexões</h2>
+
+              <p>Conecte suas plataformas ao Radar.</p>
+            </div>
+          </div>
+
+          <div id="connectionsGrid" class="connections-grid"></div>
+        </section>
+      </section>
+
+      <!-- =========================
+         PERFIL
+    ========================== -->
+
+      <section id="profilePage" class="page">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <span class="eyebrow"> USUÁRIO </span>
+
+              <h2>Perfil</h2>
+
+              <p>Configurações do usuário local.</p>
+            </div>
+          </div>
+
+          <div class="profile-card">
+            <span class="eyebrow"> CONTA ATUAL </span>
+
+            <h3>Usuário local</h3>
+
+            <p>local@radar.app</p>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <!-- =========================
+       MODAL CRIAR RADAR
+  ========================== -->
+
+    <dialog id="radarModal">
+      <form id="radarForm">
+        <div class="modal-head">
+          <div>
+            <span class="eyebrow"> NOVO </span>
+
+            <h3>Criar radar</h3>
+          </div>
+
+          <button type="button" class="icon-btn close-modal">×</button>
+        </div>
+
+        <label>
+          Nome
+
+          <input name="name" required placeholder="Ex.: JNCO Grails" />
+        </label>
+
+        <label>
+          Busca / palavras-chave
+
+          <input
+            name="query"
+            required
+            placeholder="Ex.: JNCO baggy kangaroo vintage"
+          />
+        </label>
+
+        <div class="two-cols">
+          <label>
+            Preço máximo
+
+            <input
+              name="max_price"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="150"
+            />
+          </label>
+
+          <label>
+            Categoria
+
+            <select name="category">
+              <option value="roupas">Roupas</option>
+
+              <option value="cameras">Câmeras</option>
+
+              <option value="geral">Geral</option>
+            </select>
+          </label>
+        </div>
+
+        <button class="primary wide" type="submit">Criar radar</button>
+      </form>
+    </dialog>
+
+    <!-- =========================
+       MODAL CRIAR ANÚNCIO
+  ========================== -->
+
+    <dialog id="listingModal">
+      <form id="listingForm">
+        <div class="modal-head">
+          <div>
+            <span class="eyebrow"> NOVO </span>
+
+            <h3>Salvar anúncio</h3>
+          </div>
+
+          <button type="button" class="icon-btn close-modal">×</button>
+        </div>
+
+        <label>
+          Título
+
+          <input name="title" required placeholder="Ex.: JNCO Kangaroo W34" />
+        </label>
+
+        <div class="two-cols">
+          <label>
+            Plataforma
+
+            <input name="platform" required placeholder="OLX, Depop, eBay..." />
+          </label>
+
+          <label>
+            Preço
+
+            <input
+              name="current_price"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="175"
+            />
+          </label>
+        </div>
+
+        <label>
+          Link direto
+
+          <input name="url" type="url" required placeholder="https://..." />
+        </label>
+
+        <label>
+          Imagem
+
+          <input name="image_url" type="url" placeholder="https://..." />
+        </label>
+
+        <label>
+          Radar
+
+          <select name="radar_id" id="listingRadarSelect">
+            <option value="">Sem radar</option>
+          </select>
+        </label>
+
+        <label>
+          Observações
+
+          <textarea
+            name="notes"
+            rows="3"
+            placeholder="Ex.: vendedor aceita proposta, tamanho W34..."
+          ></textarea>
+        </label>
+
+        <button class="primary wide" type="submit">Salvar anúncio</button>
+      </form>
+    </dialog>
+
+    <!-- =========================
+       SCRIPT
+  ========================== -->
+
+    <script src="app.js"></script>
+  </body>
+</html>

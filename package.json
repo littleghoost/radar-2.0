@@ -1,0 +1,14 @@
+{
+  "name": "radar-2.0",
+  "version": "0.1.0",
+  "description": "MVP local para organizar radares e anúncios de garimpo.",
+  "main": "server/app.js",
+  "scripts": {
+    "start": "node server/app.js",
+    "dev": "node --watch server/app.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "sqlite3": "^5.1.7"
+  }
+}
