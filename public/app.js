@@ -338,6 +338,8 @@ async function runRadar(id) {
 
     await loadRadars();
     await loadListings();
+
+    await loadDesktopSettings();
     await loadNotifications();
     await loadNotifications();
     if ($("#activityPage")?.classList.contains("active")) await loadActivity();
@@ -1402,6 +1404,91 @@ $("#importMercadoLivreBtn")?.addEventListener("click", async () => {
   } finally {
     button.disabled = false;
     button.textContent = originalText;
+  }
+});
+
+
+/* =========================
+   CONFIGURAÇÕES DESKTOP
+========================= */
+
+async function loadDesktopSettings() {
+  const form = $("#desktopSettingsForm");
+  if (!form) return;
+
+  const status = $("#desktopSettingsStatus");
+  try {
+    const settings = await api("/api/desktop/settings");
+    for (const [key, value] of Object.entries(settings)) {
+      const field = form.elements[key];
+      if (!field) continue;
+      if (field.type === "checkbox") field.checked = Boolean(value);
+      else field.value = String(value);
+    }
+    if (status) {
+      status.textContent = "Pronto";
+      status.classList.remove("saved");
+    }
+  } catch (err) {
+    if (status) status.textContent = "Indisponível";
+  }
+}
+
+$("#desktopSettingsForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const status = $("#desktopSettingsStatus");
+  if (button) button.disabled = true;
+  if (status) status.textContent = "Salvando...";
+
+  const payload = {
+    autostart_enabled: form.elements.autostart_enabled.checked,
+    background_enabled: form.elements.background_enabled.checked,
+    poll_interval_minutes: Number(form.elements.poll_interval_minutes.value),
+    notify_new_listings: form.elements.notify_new_listings.checked,
+    notify_price_drops: form.elements.notify_price_drops.checked,
+    notify_errors: form.elements.notify_errors.checked,
+    start_minimized: form.elements.start_minimized.checked,
+  };
+
+  try {
+    await api("/api/desktop/settings", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+    if (status) {
+      status.textContent = "Salvo";
+      status.classList.add("saved");
+    }
+  } catch (err) {
+    if (status) status.textContent = "Erro ao salvar";
+    alert(err.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+});
+
+$("#runBackgroundNow")?.addEventListener("click", async () => {
+  const button = $("#runBackgroundNow");
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Rodando...";
+  try {
+    const result = await api("/api/scheduler/run-due", {
+      method: "POST",
+      body: JSON.stringify({ limit: 5 }),
+    });
+    button.textContent = `Concluído (${result.ran ?? result.length ?? 0})`;
+    await Promise.all([loadRadars(), loadActivity(), loadNotifications()]);
+    setTimeout(() => {
+      button.textContent = original;
+    }, 1800);
+  } catch (err) {
+    alert(err.message);
+    button.textContent = original;
+  } finally {
+    button.disabled = false;
   }
 });
 

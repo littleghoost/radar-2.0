@@ -202,6 +202,30 @@ db.serialize(() => {
     )
   `);
 
+
+  /* =========================
+     CONFIGURAÇÕES DO DESKTOP
+  ========================= */
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS desktop_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      autostart_enabled INTEGER DEFAULT 0,
+      background_enabled INTEGER DEFAULT 1,
+      poll_interval_minutes INTEGER DEFAULT 5,
+      notify_new_listings INTEGER DEFAULT 1,
+      notify_price_drops INTEGER DEFAULT 1,
+      notify_errors INTEGER DEFAULT 1,
+      start_minimized INTEGER DEFAULT 0,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.run(`
+    INSERT OR IGNORE INTO desktop_settings (id)
+    VALUES (1)
+  `);
+
   /* =========================
      USUÁRIO LOCAL
   ========================= */

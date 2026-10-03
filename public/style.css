@@ -616,3 +616,96 @@ label textarea {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* =========================
+   DESKTOP SETTINGS
+========================= */
+.desktop-settings-card {
+  margin-bottom: 18px;
+}
+
+.settings-head,
+.setting-row,
+.settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.settings-head {
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.settings-status {
+  font-size: 12px;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
+.settings-status.saved {
+  opacity: 1;
+}
+
+.desktop-settings-form {
+  display: grid;
+  gap: 12px;
+}
+
+.setting-row,
+.setting-group {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.setting-row span {
+  display: grid;
+  gap: 4px;
+}
+
+.setting-row small,
+.setting-group small {
+  opacity: 0.65;
+}
+
+.setting-row input[type="checkbox"],
+.setting-group input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: currentColor;
+}
+
+.setting-select-row select {
+  min-width: 150px;
+}
+
+.setting-group {
+  display: grid;
+  gap: 10px;
+}
+
+.setting-group label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.settings-actions {
+  justify-content: flex-start;
+  margin-top: 4px;
+}
+
+@media (max-width: 720px) {
+  .setting-row,
+  .settings-head,
+  .settings-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .setting-select-row select {
+    width: 100%;
+  }
+}

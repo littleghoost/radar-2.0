@@ -199,6 +199,68 @@
             </div>
           </div>
 
+          <div class="profile-card desktop-settings-card">
+            <div class="settings-head">
+              <div>
+                <span class="eyebrow"> RADAR DESKTOP </span>
+                <h3>Segundo plano</h3>
+                <p>Controle como o Radar trabalha enquanto seu computador está ligado.</p>
+              </div>
+              <span id="desktopSettingsStatus" class="settings-status">Carregando...</span>
+            </div>
+
+            <form id="desktopSettingsForm" class="desktop-settings-form">
+              <label class="setting-row">
+                <span>
+                  <strong>Iniciar com o Windows</strong>
+                  <small>Abre o Radar automaticamente ao entrar no Windows.</small>
+                </span>
+                <input type="checkbox" name="autostart_enabled" />
+              </label>
+
+              <label class="setting-row">
+                <span>
+                  <strong>Monitoramento em segundo plano</strong>
+                  <small>Executa os radares agendados mesmo com a janela fechada.</small>
+                </span>
+                <input type="checkbox" name="background_enabled" />
+              </label>
+
+              <label class="setting-row setting-select-row">
+                <span>
+                  <strong>Checar agendamentos</strong>
+                  <small>Frequência com que o app verifica se algum radar está na hora de rodar.</small>
+                </span>
+                <select name="poll_interval_minutes">
+                  <option value="5">A cada 5 min</option>
+                  <option value="15">A cada 15 min</option>
+                  <option value="30">A cada 30 min</option>
+                  <option value="60">A cada 1 hora</option>
+                </select>
+              </label>
+
+              <div class="setting-group">
+                <strong>Notificações do Windows</strong>
+                <label><input type="checkbox" name="notify_new_listings" /> Novos anúncios</label>
+                <label><input type="checkbox" name="notify_price_drops" /> Quedas de preço</label>
+                <label><input type="checkbox" name="notify_errors" /> Falhas nas fontes</label>
+              </div>
+
+              <label class="setting-row">
+                <span>
+                  <strong>Iniciar minimizado</strong>
+                  <small>Quando abrir com o Windows, fica direto no tray.</small>
+                </span>
+                <input type="checkbox" name="start_minimized" />
+              </label>
+
+              <div class="settings-actions">
+                <button type="submit">Salvar configurações</button>
+                <button type="button" class="secondary" id="runBackgroundNow">Rodar radares agora</button>
+              </div>
+            </form>
+          </div>
+
           <div class="profile-card">
             <span class="eyebrow"> CONTA ATUAL </span>
 

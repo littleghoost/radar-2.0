@@ -467,6 +467,74 @@ app.patch("/api/radars/:id/schedule", async (req, res) => {
   }
 });
 
+
+app.get("/api/desktop/settings", async (_req, res) => {
+  try {
+    const row = await get("SELECT * FROM desktop_settings WHERE id = 1");
+    res.json({
+      autostart_enabled: Boolean(row?.autostart_enabled),
+      background_enabled: row ? Boolean(row.background_enabled) : true,
+      poll_interval_minutes: Number(row?.poll_interval_minutes || 5),
+      notify_new_listings: row ? Boolean(row.notify_new_listings) : true,
+      notify_price_drops: row ? Boolean(row.notify_price_drops) : true,
+      notify_errors: row ? Boolean(row.notify_errors) : true,
+      start_minimized: Boolean(row?.start_minimized),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch("/api/desktop/settings", async (req, res) => {
+  try {
+    const current = await get("SELECT * FROM desktop_settings WHERE id = 1");
+    const allowedIntervals = [5, 15, 30, 60];
+    const requestedInterval = Number(req.body.poll_interval_minutes);
+    const interval = allowedIntervals.includes(requestedInterval)
+      ? requestedInterval
+      : Number(current?.poll_interval_minutes || 5);
+
+    const asBool = (value, fallback) =>
+      value === undefined ? fallback : Boolean(value);
+
+    const next = {
+      autostart_enabled: asBool(req.body.autostart_enabled, Boolean(current?.autostart_enabled)),
+      background_enabled: asBool(req.body.background_enabled, current ? Boolean(current.background_enabled) : true),
+      poll_interval_minutes: interval,
+      notify_new_listings: asBool(req.body.notify_new_listings, current ? Boolean(current.notify_new_listings) : true),
+      notify_price_drops: asBool(req.body.notify_price_drops, current ? Boolean(current.notify_price_drops) : true),
+      notify_errors: asBool(req.body.notify_errors, current ? Boolean(current.notify_errors) : true),
+      start_minimized: asBool(req.body.start_minimized, Boolean(current?.start_minimized)),
+    };
+
+    await run(
+      `UPDATE desktop_settings
+       SET autostart_enabled = ?,
+           background_enabled = ?,
+           poll_interval_minutes = ?,
+           notify_new_listings = ?,
+           notify_price_drops = ?,
+           notify_errors = ?,
+           start_minimized = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = 1`,
+      [
+        next.autostart_enabled ? 1 : 0,
+        next.background_enabled ? 1 : 0,
+        next.poll_interval_minutes,
+        next.notify_new_listings ? 1 : 0,
+        next.notify_price_drops ? 1 : 0,
+        next.notify_errors ? 1 : 0,
+        next.start_minimized ? 1 : 0,
+      ],
+    );
+
+    res.json(next);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/scheduler/status", async (_req, res) => {
   try {
     const due = await get(

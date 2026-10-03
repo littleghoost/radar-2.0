@@ -9,6 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use serde::Deserialize;
 use serde_json::Value;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -16,11 +17,38 @@ use tauri::{
     webview::WebviewWindowBuilder,
     Manager, State, WebviewUrl, WindowEvent,
 };
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
 };
+
+
+#[derive(Clone, Debug, Deserialize)]
+struct DesktopSettings {
+    autostart_enabled: bool,
+    background_enabled: bool,
+    poll_interval_minutes: u64,
+    notify_new_listings: bool,
+    notify_price_drops: bool,
+    notify_errors: bool,
+    start_minimized: bool,
+}
+
+impl Default for DesktopSettings {
+    fn default() -> Self {
+        Self {
+            autostart_enabled: false,
+            background_enabled: true,
+            poll_interval_minutes: 5,
+            notify_new_listings: true,
+            notify_price_drops: true,
+            notify_errors: true,
+            start_minimized: false,
+        }
+    }
+}
 
 struct AppState {
     backend: Mutex<Option<CommandChild>>,
@@ -91,6 +119,23 @@ fn http_json(method: &str, path: &str, body: Option<&str>) -> Result<Value, Stri
     serde_json::from_str(body).map_err(|error| error.to_string())
 }
 
+fn get_desktop_settings() -> DesktopSettings {
+    http_json("GET", "/api/desktop/settings", None)
+        .ok()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default()
+}
+
+fn sync_autostart(app: &tauri::AppHandle, desired: bool) {
+    let manager = app.autolaunch();
+    let current = manager.is_enabled().unwrap_or(false);
+    if desired && !current {
+        let _ = manager.enable();
+    } else if !desired && current {
+        let _ = manager.disable();
+    }
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -99,7 +144,7 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
-fn run_due_once(app: &tauri::AppHandle, notify: bool) {
+fn run_due_once(app: &tauri::AppHandle, notify: bool, settings: &DesktopSettings) {
     let before = http_json("GET", "/api/notifications/summary", None).ok();
     let _ = http_json("POST", "/api/scheduler/run-due", Some("{\"limit\":5}"));
     let after = http_json("GET", "/api/notifications/summary", None).ok();
@@ -129,21 +174,20 @@ fn run_due_once(app: &tauri::AppHandle, notify: bool) {
     let errors = data.get("errors").and_then(Value::as_i64).unwrap_or(0);
 
     let mut parts = Vec::new();
-    if new_listings > 0 {
+    if settings.notify_new_listings && new_listings > 0 {
         parts.push(format!("{new_listings} novo(s) anúncio(s)"));
     }
-    if price_drops > 0 {
+    if settings.notify_price_drops && price_drops > 0 {
         parts.push(format!("{price_drops} queda(s) de preço"));
     }
-    if errors > 0 {
+    if settings.notify_errors && errors > 0 {
         parts.push(format!("{errors} alerta(s) de fonte"));
     }
 
-    let body = if parts.is_empty() {
-        "O Radar encontrou atividade nova.".to_string()
-    } else {
-        parts.join(" • ")
-    };
+    if parts.is_empty() {
+        return;
+    }
+    let body = parts.join(" • ");
 
     let _ = app
         .notification()
@@ -155,14 +199,24 @@ fn run_due_once(app: &tauri::AppHandle, notify: bool) {
 
 fn start_scheduler(app: tauri::AppHandle, running: Arc<AtomicBool>) {
     thread::spawn(move || {
-        thread::sleep(Duration::from_secs(8));
+        thread::sleep(Duration::from_secs(3));
+        let mut last_poll = Instant::now() - Duration::from_secs(60 * 60);
+
         while running.load(Ordering::Relaxed) {
-            run_due_once(&app, true);
-            for _ in 0..60 {
+            let settings = get_desktop_settings();
+            sync_autostart(&app, settings.autostart_enabled);
+
+            let poll_interval = Duration::from_secs(settings.poll_interval_minutes.clamp(5, 60) * 60);
+            if settings.background_enabled && last_poll.elapsed() >= poll_interval {
+                run_due_once(&app, true, &settings);
+                last_poll = Instant::now();
+            }
+
+            for _ in 0..5 {
                 if !running.load(Ordering::Relaxed) {
                     return;
                 }
-                thread::sleep(Duration::from_secs(5));
+                thread::sleep(Duration::from_secs(1));
             }
         }
     });
@@ -183,6 +237,11 @@ pub fn run() {
             quitting: AtomicBool::new(false),
         })
         .setup(move |app| {
+            app.handle().plugin(tauri_plugin_autostart::init(
+                MacosLauncher::LaunchAgent,
+                Some(vec!["--background"]),
+            ))?;
+
             let app_data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data)?;
             let db_path = app_data.join("radar-desktop.db");
@@ -222,12 +281,20 @@ pub fn run() {
                 return Err("o backend empacotado do Radar não respondeu na porta 3130".into());
             }
 
+            let desktop_settings = get_desktop_settings();
+            sync_autostart(app.handle(), desktop_settings.autostart_enabled);
+
             let url = format!("http://127.0.0.1:{PORT}").parse().unwrap();
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+            let main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Radar 2.0")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(980.0, 640.0)
                 .build()?;
+
+            let launched_in_background = std::env::args().any(|arg| arg == "--background");
+            if launched_in_background && desktop_settings.start_minimized {
+                let _ = main_window.hide();
+            }
 
             let open_item = MenuItem::with_id(app, "open", "Abrir Radar", true, None::<&str>)?;
             let run_item = MenuItem::with_id(app, "run_now", "Rodar radares agora", true, None::<&str>)?;
@@ -242,7 +309,10 @@ pub fn run() {
                     "open" => show_main_window(app),
                     "run_now" => {
                         let app = app.clone();
-                        thread::spawn(move || run_due_once(&app, true));
+                        thread::spawn(move || {
+                            let settings = get_desktop_settings();
+                            run_due_once(&app, true, &settings);
+                        });
                     }
                     "quit" => {
                         app.state::<AppState>().quitting.store(true, Ordering::Relaxed);

@@ -44,3 +44,15 @@ npm run build:desktop
 O Desktop mantém o Radar ativo ao fechar a janela: o clique no X oculta a interface e deixa o processo no system tray. O menu do tray permite abrir o Radar, rodar os radares imediatamente ou sair de verdade.
 
 O scheduler local consulta os radares preparados a cada 5 minutos e chama `POST /api/scheduler/run-due`. Quando uma execução cria novos anúncios, quedas de preço ou alertas importantes, o app dispara uma notificação nativa do Windows.
+
+## Configurações do modo background
+
+A página **Perfil** agora inclui um painel do Radar Desktop com:
+
+- iniciar com o Windows;
+- ativar/desativar o monitoramento em segundo plano;
+- intervalo de verificação dos agendamentos (5, 15, 30 ou 60 minutos);
+- filtros para notificações de novos anúncios, quedas de preço e falhas;
+- opção de iniciar minimizado no tray quando o Windows abrir o app.
+
+As preferências ficam salvas no SQLite local do desktop. O autostart usa o plugin oficial `tauri-plugin-autostart` e é sincronizado pelo processo desktop; o app só registra a inicialização automática quando a opção estiver ligada.
