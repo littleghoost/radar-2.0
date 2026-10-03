@@ -35,6 +35,11 @@ db.serialize(() => {
       schedule_enabled INTEGER DEFAULT 0,
       schedule_interval_minutes INTEGER DEFAULT 240,
       next_run_at DATETIME,
+      visual_enabled INTEGER DEFAULT 0,
+      visual_weight INTEGER DEFAULT 70,
+      min_visual_similarity REAL DEFAULT 0.45,
+      reference_image_path TEXT,
+      reference_features_json TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -65,6 +70,21 @@ db.serialize(() => {
       }
       if (!names.has("next_run_at")) {
         db.run("ALTER TABLE radars ADD COLUMN next_run_at DATETIME");
+      }
+      if (!names.has("visual_enabled")) {
+        db.run("ALTER TABLE radars ADD COLUMN visual_enabled INTEGER DEFAULT 0");
+      }
+      if (!names.has("visual_weight")) {
+        db.run("ALTER TABLE radars ADD COLUMN visual_weight INTEGER DEFAULT 70");
+      }
+      if (!names.has("min_visual_similarity")) {
+        db.run("ALTER TABLE radars ADD COLUMN min_visual_similarity REAL DEFAULT 0.45");
+      }
+      if (!names.has("reference_image_path")) {
+        db.run("ALTER TABLE radars ADD COLUMN reference_image_path TEXT");
+      }
+      if (!names.has("reference_features_json")) {
+        db.run("ALTER TABLE radars ADD COLUMN reference_features_json TEXT");
       }
     },
   );
@@ -107,6 +127,9 @@ db.serialize(() => {
       currency TEXT DEFAULT 'BRL',
       status TEXT DEFAULT 'novo',
       notes TEXT,
+      visual_score REAL,
+      hybrid_score REAL,
+      image_features_json TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -123,6 +146,15 @@ db.serialize(() => {
       const hasCurrency = columns.some((column) => column.name === "currency");
       if (!hasCurrency) {
         db.run("ALTER TABLE listings ADD COLUMN currency TEXT DEFAULT 'BRL'");
+      }
+      if (!columns.some((column) => column.name === "visual_score")) {
+        db.run("ALTER TABLE listings ADD COLUMN visual_score REAL");
+      }
+      if (!columns.some((column) => column.name === "hybrid_score")) {
+        db.run("ALTER TABLE listings ADD COLUMN hybrid_score REAL");
+      }
+      if (!columns.some((column) => column.name === "image_features_json")) {
+        db.run("ALTER TABLE listings ADD COLUMN image_features_json TEXT");
       }
     },
   );

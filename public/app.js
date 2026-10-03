@@ -16,6 +16,13 @@ $("#openRadarModal").onclick = () => radarModal.showModal();
 
 $("#openListingModal").onclick = () => listingModal.showModal();
 
+
+$("#radarReferenceImage")?.addEventListener("change", (event) => {
+  const file = event.currentTarget.files?.[0];
+  const label = $("#radarReferenceLabel");
+  if (label) label.textContent = file ? file.name : "Escolher imagem";
+});
+
 document.querySelectorAll(".close-modal").forEach((button) => {
   button.addEventListener(
     "click",
@@ -126,8 +133,15 @@ async function loadRadars() {
                 <span class="eyebrow">
 
                   ${escapeHtml(radar.category || "GERAL")}
+                  ${radar.visual_enabled ? " • VISUAL" : ""}
 
                 </span>
+
+                ${
+                  radar.visual_enabled && radar.reference_image_path
+                    ? `<div class="radar-reference-wrap"><img class="radar-reference-image" src="/api/radars/${radar.id}/reference-image" alt="Imagem de referência do radar"></div>`
+                    : ""
+                }
 
 
                 <h3>
@@ -221,6 +235,12 @@ async function loadRadars() {
                     Agendamento
 
                   </button>
+
+                  ${
+                    radar.visual_enabled
+                      ? `<button class="secondary" onclick="event.stopPropagation(); reindexVisualRadar(${radar.id}, this);">Reanalisar visual</button>`
+                      : ""
+                  }
 
                   <button
 
@@ -325,6 +345,25 @@ async function loadRadars() {
 /* =========================
    RODAR RADAR
 ========================= */
+
+async function reindexVisualRadar(id, button) {
+  const original = button?.textContent || "Reanalisar visual";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Analisando...";
+  }
+  try {
+    const result = await api(`/api/radars/${id}/reindex-visual`, { method: "POST" });
+    if (button) button.textContent = `${result.analyzed} analisado(s)`;
+    await loadListings();
+    setTimeout(() => { if (button) button.textContent = original; }, 1800);
+  } catch (err) {
+    alert(err.message);
+    if (button) button.textContent = original;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
 
 async function runRadar(id) {
   try {
@@ -670,6 +709,21 @@ async function loadListings() {
 
                 ${drop}
 
+                ${
+                  listing.hybrid_score !== null && listing.hybrid_score !== undefined
+                    ? `
+                      <div class="score-row">
+                        <span class="score-chip">Score ${Math.round(Number(listing.hybrid_score))}/100</span>
+                        ${
+                          listing.visual_score !== null && listing.visual_score !== undefined
+                            ? `<span class="score-chip">Imagem ${Math.round(Number(listing.visual_score))}%</span>`
+                            : ""
+                        }
+                      </div>
+                    `
+                    : ""
+                }
+
 
                 ${
                   listing.radar_name
@@ -846,28 +900,43 @@ $("#radarForm").onsubmit = async (event) => {
   event.preventDefault();
 
   const formElement = event.currentTarget;
-
   const form = new FormData(formElement);
+  const referenceImage = formElement.elements.reference_image?.files?.[0] || null;
 
-  const payload = Object.fromEntries(form.entries());
+  const payload = {
+    name: form.get("name"),
+    query: form.get("query"),
+    max_price: form.get("max_price"),
+    category: form.get("category"),
+    visual_enabled: Boolean(referenceImage),
+    visual_weight: Number(form.get("visual_weight") || 70),
+    min_visual_similarity: Number(form.get("min_visual_similarity") || 0.45),
+  };
 
   try {
-    await api(
-      "/api/radars",
+    const radar = await api("/api/radars", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
 
-      {
-        method: "POST",
-
-        body: JSON.stringify(payload),
-      },
-    );
+    if (referenceImage) {
+      const response = await fetch(`/api/radars/${radar.id}/reference-image`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": referenceImage.type || "application/octet-stream",
+        },
+        body: referenceImage,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Não consegui enviar a imagem de referência.");
+    }
 
     formElement.reset();
-
+    const label = $("#radarReferenceLabel");
+    if (label) label.textContent = "Escolher imagem";
     radarModal.close();
 
     await loadRadars();
-
     await loadListings();
   } catch (err) {
     alert(err.message);

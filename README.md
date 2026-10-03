@@ -67,3 +67,7 @@ A API oficial atualmente retorna 403 para busca geral por palavra-chave neste ap
 ## Desktop
 
 O MVP desktop em Tauri 2 fica em `desktop/`. O backend Node.js já é empacotado como sidecar nativo, então a instalação do Windows pode rodar sem WSL e sem Node.js. O app usa um SQLite próprio em `%APPDATA%\com.littleghoost.radar2\radar-desktop.db`, inicia o backend local na porta 3130 e encerra o processo auxiliar ao fechar a janela.
+
+## Radar por imagem
+
+Radares podem receber uma imagem JPEG/PNG de referência. O backend calcula similaridade visual local e combina imagem + palavras-chave + preço em um `hybrid_score` de 0 a 100. Os anúncios são ordenados pelo score dentro da prioridade de status, e radares visuais podem filtrar por similaridade mínima. Veja `docs/visual-radar.md`.

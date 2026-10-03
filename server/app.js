@@ -1,13 +1,18 @@
 const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
+const fs = require("fs");
+const fsp = require("fs/promises");
 const db = require("./database");
 const { getEbayStatus, getOlxStatus, getDepopStatus } = require("./services/sources");
 const { createRadarRunner } = require("./services/radarRunner");
+const { extractVisualFeatures, downloadImage, visualSimilarity, hybridScore } = require("./services/visualSimilarity");
 
 const app = express();
 
 const PORT = process.env.PORT || 3000;
+const IMAGE_DIR = process.env.IMAGE_DIR || path.join(process.env.DB_PATH ? path.dirname(process.env.DB_PATH) : path.join(__dirname, "..", "data"), "reference-images");
+fs.mkdirSync(IMAGE_DIR, { recursive: true });
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -162,6 +167,44 @@ const radarRunner = createRadarRunner({
   getValidMercadoLivreConnection,
 });
 
+async function scoreListingForRadar({ radarId, title, imageUrl, currentPrice, currency = "BRL" }) {
+  if (!radarId) {
+    return { visual_score: null, hybrid_score: null, image_features_json: null };
+  }
+
+  const radar = await get("SELECT * FROM radars WHERE id = ?", [radarId]);
+  if (!radar) {
+    return { visual_score: null, hybrid_score: null, image_features_json: null };
+  }
+
+  let visual = null;
+  let features = null;
+  if (radar.visual_enabled && radar.reference_features_json && imageUrl) {
+    try {
+      features = await extractVisualFeatures(await downloadImage(imageUrl));
+      visual = visualSimilarity(JSON.parse(radar.reference_features_json), features);
+    } catch {
+      visual = 0;
+    }
+  }
+
+  const hybrid = hybridScore({
+    visual: radar.visual_enabled && radar.reference_features_json ? visual : null,
+    query: radar.query,
+    title,
+    price: currentPrice === "" ? null : currentPrice,
+    maxPrice: radar.max_price,
+    currency,
+    visualWeight: radar.visual_weight || 70,
+  });
+
+  return {
+    visual_score: visual === null ? null : Math.round(visual * 100),
+    hybrid_score: hybrid,
+    image_features_json: features ? JSON.stringify(features) : null,
+  };
+}
+
 /* =========================
    HEALTH
 ========================= */
@@ -242,7 +285,7 @@ app.post(
 
   async (req, res) => {
     try {
-      const { name, query, max_price, category } = req.body;
+      const { name, query, max_price, category, visual_enabled, visual_weight, min_visual_similarity } = req.body;
 
       if (!name || !query) {
         return res.status(400).json({
@@ -257,10 +300,13 @@ app.post(
           name,
           query,
           max_price,
-          category
+          category,
+          visual_enabled,
+          visual_weight,
+          min_visual_similarity
         )
 
-        VALUES (?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
 
         [
@@ -270,6 +316,9 @@ app.post(
           max_price === "" ? null : max_price,
 
           category || "geral",
+          visual_enabled ? 1 : 0,
+          Math.min(100, Math.max(0, Number(visual_weight) || 70)),
+          Math.min(1, Math.max(0, Number(min_visual_similarity) || 0.45)),
         ],
       );
 
@@ -287,6 +336,118 @@ app.post(
     }
   },
 );
+
+/* =========================
+   IMAGEM DE REFERÊNCIA
+========================= */
+
+app.put(
+  "/api/radars/:id/reference-image",
+  express.raw({ type: ["image/*", "application/octet-stream"], limit: "8mb" }),
+  async (req, res) => {
+    try {
+      const radar = await get("SELECT * FROM radars WHERE id = ?", [req.params.id]);
+      if (!radar) return res.status(404).json({ error: "Radar não encontrado." });
+      if (!Buffer.isBuffer(req.body) || !req.body.length) {
+        return res.status(400).json({ error: "Envie uma imagem válida." });
+      }
+
+      const contentType = req.headers["content-type"] || "image/jpeg";
+      const ext = contentType.includes("png") ? ".png" : contentType.includes("webp") ? ".webp" : ".jpg";
+      const filePath = path.join(IMAGE_DIR, `radar-${radar.id}${ext}`);
+      await fsp.writeFile(filePath, req.body);
+      const features = await extractVisualFeatures(req.body);
+
+      await run(
+        `UPDATE radars
+         SET reference_image_path = ?, reference_features_json = ?, visual_enabled = 1
+         WHERE id = ?`,
+        [filePath, JSON.stringify(features), radar.id],
+      );
+
+      res.json({
+        ok: true,
+        radar_id: radar.id,
+        visual_enabled: true,
+        reference_image_url: `/api/radars/${radar.id}/reference-image`,
+        features: {
+          width: features.width,
+          height: features.height,
+          average_rgb: features.average_rgb,
+        },
+      });
+    } catch (err) {
+      res.status(400).json({ error: `Não consegui analisar a imagem: ${err.message}` });
+    }
+  },
+);
+
+app.post("/api/radars/:id/reindex-visual", async (req, res) => {
+  try {
+    const radar = await get("SELECT * FROM radars WHERE id = ?", [req.params.id]);
+    if (!radar) return res.status(404).json({ error: "Radar não encontrado." });
+
+    const listings = await all(
+      "SELECT * FROM listings WHERE radar_id = ? ORDER BY updated_at DESC LIMIT 100",
+      [radar.id],
+    );
+
+    let analyzed = 0;
+    let failed = 0;
+    for (const listing of listings) {
+      try {
+        const score = await scoreListingForRadar({
+          radarId: radar.id,
+          title: listing.title,
+          imageUrl: listing.image_url,
+          currentPrice: listing.current_price,
+          currency: listing.currency || "BRL",
+        });
+        await run(
+          `UPDATE listings
+           SET visual_score = ?, hybrid_score = ?,
+               image_features_json = COALESCE(?, image_features_json),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [score.visual_score, score.hybrid_score, score.image_features_json, listing.id],
+        );
+        analyzed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+
+    res.json({ ok: true, analyzed, failed });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/radars/:id/reference-image", async (req, res) => {
+  try {
+    const radar = await get("SELECT reference_image_path FROM radars WHERE id = ?", [req.params.id]);
+    if (!radar?.reference_image_path) return res.status(404).end();
+    res.sendFile(path.resolve(radar.reference_image_path));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/radars/:id/reference-image", async (req, res) => {
+  try {
+    const radar = await get("SELECT reference_image_path FROM radars WHERE id = ?", [req.params.id]);
+    if (radar?.reference_image_path) {
+      await fsp.unlink(radar.reference_image_path).catch(() => {});
+    }
+    await run(
+      "UPDATE radars SET reference_image_path = NULL, reference_features_json = NULL, visual_enabled = 0 WHERE id = ?",
+      [req.params.id],
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 /* =========================
    EDITAR RADAR
@@ -321,6 +482,12 @@ app.patch(
 
         category:
           req.body.category !== undefined ? req.body.category : radar.category,
+        visual_enabled:
+          req.body.visual_enabled !== undefined ? Boolean(req.body.visual_enabled) : Boolean(radar.visual_enabled),
+        visual_weight:
+          req.body.visual_weight !== undefined ? Math.min(100, Math.max(0, Number(req.body.visual_weight) || 70)) : Number(radar.visual_weight || 70),
+        min_visual_similarity:
+          req.body.min_visual_similarity !== undefined ? Math.min(1, Math.max(0, Number(req.body.min_visual_similarity) || 0.45)) : Number(radar.min_visual_similarity || 0.45),
       };
 
       if (!next.name || !next.query) {
@@ -337,7 +504,10 @@ app.patch(
           name = ?,
           query = ?,
           max_price = ?,
-          category = ?
+          category = ?,
+          visual_enabled = ?,
+          visual_weight = ?,
+          min_visual_similarity = ?
 
         WHERE id = ?
         `,
@@ -349,6 +519,9 @@ app.patch(
           next.max_price === "" ? null : next.max_price,
 
           next.category || "geral",
+          next.visual_enabled ? 1 : 0,
+          next.visual_weight,
+          next.min_visual_similarity,
 
           req.params.id,
         ],
@@ -408,6 +581,10 @@ app.delete(
 
         [req.params.id],
       );
+
+      if (radar.reference_image_path) {
+        await fsp.unlink(radar.reference_image_path).catch(() => {});
+      }
 
       await run(
         "DELETE FROM radars WHERE id = ?",
@@ -761,6 +938,7 @@ app.get(
 
           END,
 
+          COALESCE(l.hybrid_score, 0) DESC,
           l.updated_at DESC
 
         `,
@@ -821,6 +999,14 @@ app.post(
         });
       }
 
+      const intelligence = await scoreListingForRadar({
+        radarId: radar_id || null,
+        title: title.trim(),
+        imageUrl: image_url?.trim() || null,
+        currentPrice: current_price,
+        currency: "BRL",
+      });
+
       const result = await run(
         `
 
@@ -833,11 +1019,14 @@ app.post(
             image_url,
             current_price,
             status,
-            notes
+            notes,
+            visual_score,
+            hybrid_score,
+            image_features_json
           )
 
           VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
 
           `,
@@ -858,6 +1047,9 @@ app.post(
           status || "novo",
 
           notes?.trim() || null,
+          intelligence.visual_score,
+          intelligence.hybrid_score,
+          intelligence.image_features_json,
         ],
       );
 

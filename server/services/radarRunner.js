@@ -1,4 +1,24 @@
 const { searchAllSources } = require('./sources');
+const { downloadImage, extractVisualFeatures, visualSimilarity, hybridScore } = require('./visualSimilarity');
+
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let index = 0;
+
+  async function worker() {
+    while (true) {
+      const current = index;
+      index += 1;
+      if (current >= items.length) return;
+      results[current] = await mapper(items[current], current);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
 
 function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
   async function executeRadarById(radarId, options = {}) {
@@ -36,7 +56,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         source.ok ? source.items : [],
       );
 
-      const results = successfulItems
+      let results = successfulItems
         .filter((item) => {
           if (!item.url || !item.title) return false;
           if (maxPrice === null || Number.isNaN(maxPrice)) return true;
@@ -44,6 +64,53 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
           return item.price === null || Number(item.price) <= maxPrice;
         })
         .slice(0, 60);
+
+      const visualEnabled = Boolean(radar.visual_enabled && radar.reference_features_json);
+      const referenceFeatures = visualEnabled
+        ? JSON.parse(radar.reference_features_json)
+        : null;
+      const minVisualSimilarity = Number(radar.min_visual_similarity ?? 0.45);
+      const visualWeight = Number(radar.visual_weight ?? 70);
+
+      results = await mapWithConcurrency(results, 4, async (item) => {
+        let candidateFeatures = null;
+        let visualScore = null;
+
+        if (visualEnabled && item.image_url) {
+          try {
+            const imageBuffer = await downloadImage(item.image_url);
+            candidateFeatures = await extractVisualFeatures(imageBuffer);
+            visualScore = visualSimilarity(referenceFeatures, candidateFeatures);
+          } catch {
+            visualScore = 0;
+          }
+        }
+
+        const combinedScore = hybridScore({
+          visual: visualEnabled ? visualScore : null,
+          query: radar.query,
+          title: item.title,
+          price: item.price,
+          maxPrice,
+          currency: item.currency || 'BRL',
+          visualWeight,
+        });
+
+        return {
+          ...item,
+          visual_score: visualScore === null ? null : Math.round(visualScore * 100),
+          hybrid_score: combinedScore,
+          image_features_json: candidateFeatures ? JSON.stringify(candidateFeatures) : null,
+        };
+      });
+
+      if (visualEnabled) {
+        results = results
+          .filter((item) => (Number(item.visual_score) || 0) >= minVisualSimilarity * 100)
+          .sort((a, b) => Number(b.hybrid_score || 0) - Number(a.hybrid_score || 0));
+      } else {
+        results.sort((a, b) => Number(b.hybrid_score || 0) - Number(a.hybrid_score || 0));
+      }
 
       let added = 0;
       let updated = 0;
@@ -60,8 +127,8 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         if (!existing) {
           const insert = await run(
             `INSERT INTO listings
-              (radar_id, title, platform, url, image_url, current_price, currency, status, notes)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?)`,
+              (radar_id, title, platform, url, image_url, current_price, currency, status, notes, visual_score, hybrid_score, image_features_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, ?)`,
             [
               radar.id,
               item.title,
@@ -71,6 +138,9 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
               nextPrice,
               currency,
               sourceNote,
+              item.visual_score,
+              item.hybrid_score,
+              item.image_features_json,
             ],
           );
 
@@ -91,7 +161,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
               insert.id,
               `Novo anúncio: ${item.title}`,
               `${item.platform}${nextPrice === null ? '' : ` • ${currency} ${nextPrice}`}`,
-              JSON.stringify({ url: item.url, platform: item.platform }),
+              JSON.stringify({ url: item.url, platform: item.platform, visual_score: item.visual_score, hybrid_score: item.hybrid_score }),
             ],
           );
           added += 1;
@@ -110,7 +180,8 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         await run(
           `UPDATE listings
            SET radar_id = ?, title = ?, platform = ?, image_url = ?,
-               current_price = ?, currency = ?, updated_at = CURRENT_TIMESTAMP
+               current_price = ?, currency = ?, visual_score = ?, hybrid_score = ?,
+               image_features_json = COALESCE(?, image_features_json), updated_at = CURRENT_TIMESTAMP
            WHERE id = ?`,
           [
             radar.id,
@@ -119,6 +190,9 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
             item.image_url,
             nextPrice,
             currency,
+            item.visual_score,
+            item.hybrid_score,
+            item.image_features_json,
             existing.id,
           ],
         );
@@ -182,7 +256,8 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
 
       const activeSources = sourceSummary.filter((source) => source.ok).length;
       const unavailableSources = sourceSummary.filter((source) => !source.ok);
-      let message = `${results.length} anúncios recebidos de ${activeSources} fonte(s). ${added} novos, ${updated} atualizados e ${priceDrops} queda(s) de preço.`;
+      let message = `${results.length} anúncios selecionados de ${activeSources} fonte(s). ${added} novos, ${updated} atualizados e ${priceDrops} queda(s) de preço.`;
+      if (visualEnabled) message += ` Radar visual ativo (mínimo ${Math.round(minVisualSimilarity * 100)}%).`;
 
       if (unavailableSources.length) {
         const labels = unavailableSources

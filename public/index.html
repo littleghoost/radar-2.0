@@ -308,6 +308,40 @@
           />
         </label>
 
+        <div class="visual-radar-box">
+          <div>
+            <span class="eyebrow"> RADAR POR IMAGEM </span>
+            <strong>Imagem de referência</strong>
+            <small>Opcional. Use uma foto do item/estilo que você quer encontrar.</small>
+          </div>
+
+          <label class="visual-upload">
+            <input id="radarReferenceImage" name="reference_image" type="file" accept="image/png,image/jpeg" />
+            <span id="radarReferenceLabel">Escolher imagem</span>
+          </label>
+
+          <div class="two-cols">
+            <label>
+              Peso da imagem
+              <select name="visual_weight">
+                <option value="50">50% — equilibrado</option>
+                <option value="70" selected>70% — visual forte</option>
+                <option value="85">85% — quase só imagem</option>
+              </select>
+            </label>
+
+            <label>
+              Similaridade mínima
+              <select name="min_visual_similarity">
+                <option value="0.35">35% — mais amplo</option>
+                <option value="0.45" selected>45% — normal</option>
+                <option value="0.60">60% — parecido</option>
+                <option value="0.75">75% — bem parecido</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
         <div class="two-cols">
           <label>
             Preço máximo
