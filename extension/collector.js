@@ -64,10 +64,23 @@
     return { price: Number.isFinite(number) ? number : null, currency };
   }
 
-  function cardFor(anchor) {
-    return anchor.closest(
+  function cardFor(anchor, platform) {
+    const direct = anchor.closest(
       'article,li,[data-cy="l-card"],[data-testid="l-card"],[data-testid*="item"],[data-testid*="card"],[class*="listing"],[class*="product"],[class*="card"]',
-    ) || anchor.parentElement || anchor;
+    );
+    if (direct) return direct;
+
+    if (platform === 'OLX') {
+      let node = anchor;
+      for (let depth = 0; node && depth < 9; depth += 1, node = node.parentElement) {
+        const text = String(node.innerText || '').replace(/\s+/g, ' ').trim();
+        const hasImage = Boolean(node.querySelector?.('img'));
+        const hasPrice = /R\$\s*\d/.test(text);
+        if (hasImage && hasPrice && text.length >= 8 && text.length <= 1200) return node;
+      }
+    }
+
+    return anchor.parentElement || anchor;
   }
 
   function looksLikeListingUrl(url, platform) {
@@ -104,7 +117,7 @@
       if (!url || !/^https?:/i.test(url) || seen.has(url)) continue;
       if (!looksLikeListingUrl(url, platform)) continue;
 
-      const card = cardFor(anchor);
+      const card = cardFor(anchor, platform);
       const rect = card.getBoundingClientRect?.();
       if (rect && rect.width === 0 && rect.height === 0) continue;
 
