@@ -66,4 +66,4 @@ A API oficial atualmente retorna 403 para busca geral por palavra-chave neste ap
 
 ## Desktop
 
-O MVP desktop em Tauri 2 fica em `desktop/`. No Windows de desenvolvimento ele inicia o backend local pelo WSL na porta 3130 e abre a interface do Radar em uma janela nativa. O banco desktop usa `data/radar-desktop.db`. A fase seguinte é empacotar o backend como sidecar para remover a dependência de WSL na instalação final.
+O MVP desktop em Tauri 2 fica em `desktop/`. O backend Node.js já é empacotado como sidecar nativo, então a instalação do Windows pode rodar sem WSL e sem Node.js. O app usa um SQLite próprio em `%APPDATA%\com.littleghoost.radar2\radar-desktop.db`, inicia o backend local na porta 3130 e encerra o processo auxiliar ao fechar a janela.

@@ -1,32 +1,40 @@
 # Radar 2.0 Desktop
 
-Primeiro shell desktop do Radar usando Tauri 2.
+Aplicativo desktop do Radar usando Tauri 2.
 
 ## Estado atual
 
-O app desktop inicia o backend local do Radar na porta `3130` e abre a interface web existente dentro de uma janela nativa. Nesta primeira fase no Windows, o launcher usa `wsl.exe` para executar o backend que já existe em `/home/little/Projects/radar-2.0`.
+O app agora empacota o backend Node.js como um **sidecar nativo**. A instalação final não precisa de WSL nem de Node.js para iniciar o Radar. O sidecar sobe o mesmo backend Express na porta local `3130`, e a janela Tauri abre a interface web existente.
 
-O banco desktop é separado do banco de testes local e fica em:
+O SQLite do desktop fica no diretório de dados do aplicativo. No Windows:
 
-`data/radar-desktop.db`
+`%APPDATA%\com.littleghoost.radar2\radar-desktop.db`
 
-Isso permite desenvolver o app sem depender do Fly.io para as funções principais.
+O processo auxiliar é encerrado junto com a janela do Radar.
 
-## Próximas fases
+## Build Windows
 
-1. Instalar toolchain Tauri/Rust no Windows e gerar a primeira build nativa.
-2. Adicionar ícone próprio, tray, notificações nativas e iniciar com o Windows.
-3. Empacotar o backend Node como sidecar para remover a dependência de WSL/Node na máquina final.
-4. Implementar sincronização opcional com o servidor.
-5. Adicionar integrações assistidas locais para fontes sem API pública adequada.
-
-## Desenvolvimento
-
-Dentro da pasta `desktop`:
+Pré-requisitos de desenvolvimento: Rust/MSVC, WebView2 e Node.js. Na raiz do projeto, instale as dependências do backend; depois, em `desktop/`:
 
 ```bash
 npm install
-npm run tauri dev
+npm run build:sidecar
+npm run tauri build
 ```
 
-Para uma build Windows nativa, o Tauri exige Rust com toolchain MSVC, Microsoft C++ Build Tools e WebView2.
+Ou use:
+
+```bash
+npm run build:desktop
+```
+
+`build:sidecar` usa `@yao-pkg/pkg` para gerar `src-tauri/binaries/radar-backend-<target>.exe`. O Tauri inclui esse executável automaticamente no instalador por `bundle.externalBin`.
+
+## Próximas fases
+
+- ícone próprio e identidade visual do Radar;
+- tray e execução em segundo plano;
+- notificações nativas para novos achados/queda de preço;
+- iniciar com o Windows;
+- scheduler local chamando `runDueRadars`;
+- sincronização opcional com o servidor.

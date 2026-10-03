@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Sidecars gerados por plataforma
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
