@@ -38,3 +38,9 @@ npm run build:desktop
 - iniciar com o Windows;
 - scheduler local chamando `runDueRadars`;
 - sincronização opcional com o servidor.
+
+## Modo em segundo plano
+
+O Desktop mantém o Radar ativo ao fechar a janela: o clique no X oculta a interface e deixa o processo no system tray. O menu do tray permite abrir o Radar, rodar os radares imediatamente ou sair de verdade.
+
+O scheduler local consulta os radares preparados a cada 5 minutos e chama `POST /api/scheduler/run-due`. Quando uma execução cria novos anúncios, quedas de preço ou alertas importantes, o app dispara uma notificação nativa do Windows.
