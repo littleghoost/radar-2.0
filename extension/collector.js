@@ -86,6 +86,13 @@
   function collectVisibleListings(limit = 100) {
     const platform = detectPlatform(location.hostname);
     const anchors = [...document.querySelectorAll('a[href]')];
+    const diagnostics = {
+      anchors: anchors.length,
+      olxCards: document.querySelectorAll('[data-cy="l-card"], [data-testid="l-card"], article').length,
+      images: document.querySelectorAll('img').length,
+      priceTexts: [...document.querySelectorAll('body *')].filter((el) => /R\s*\d/.test(el.textContent || ')).length,
+      listingUrls: anchors.filter((a) => { try { return looksLikeListingUrl(new URL(a.href, location.href).href, platform); } catch { return false; } }).length,
+    };
     const seen = new Set();
     const items = [];
 
@@ -137,6 +144,7 @@
       platform,
       captured_at: new Date().toISOString(),
       items,
+      diagnostics,
     };
   }
 

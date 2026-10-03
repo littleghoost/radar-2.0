@@ -74,7 +74,8 @@ function renderPreview() {
   const preview = $('#preview');
   const send = $('#sendItems');
   if (!lastCapture?.items?.length) {
-    preview.innerHTML = '<strong>0 anúncios detectados</strong>Tente rolar a página para carregar mais cards e analisar novamente.';
+    const d = lastCapture && lastCapture.diagnostics ? lastCapture.diagnostics : {};
+    preview.innerHTML = '<strong>0 anúncios detectados</strong>' + 'Links: ' + (d.anchors ?? '?') + ' • Cards OLX: ' + (d.olxCards ?? '?') + ' • Imagens: ' + (d.images ?? '?') + ' • Preços: ' + (d.priceTexts ?? '?') + ' • URLs de anúncio: ' + (d.listingUrls ?? '?');
     send.disabled = true;
     return;
   }
