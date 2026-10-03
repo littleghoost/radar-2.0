@@ -72,12 +72,14 @@
 
     if (platform === 'OLX') {
       let node = anchor;
-      for (let depth = 0; node && depth < 9; depth += 1, node = node.parentElement) {
-        const text = String(node.innerText || '').replace(/\s+/g, ' ').trim();
+      let firstWithImage = null;
+      for (let depth = 0; node && depth < 10; depth += 1, node = node.parentElement) {
         const hasImage = Boolean(node.querySelector?.('img'));
-        const hasPrice = /R\$\s*\d/.test(text);
-        if (hasImage && hasPrice && text.length >= 8 && text.length <= 1200) return node;
+        if (hasImage && !firstWithImage) firstWithImage = node;
+        const text = String(node.innerText || '').replace(/\s+/g, ' ').trim();
+        if (hasImage && /R\$\s*\d/.test(text) && text.length <= 1800) return node;
       }
+      if (firstWithImage) return firstWithImage;
     }
 
     return anchor.parentElement || anchor;
@@ -135,7 +137,6 @@
       if (title.length < 3) continue;
 
       const { price, currency } = parsePrice(text);
-      if (platform === 'OLX' && price === null) continue;
       const imageUrl = absoluteUrl(
         image.currentSrc || image.src || image.getAttribute('data-src') || image.getAttribute('data-lazy-src'),
       );
