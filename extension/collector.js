@@ -107,6 +107,11 @@
       images: document.querySelectorAll('img').length,
       priceTexts: [...document.querySelectorAll('body *')].filter((el) => /R\$\s*\d/.test(el.textContent || '')).length,
       listingUrls: anchors.filter((a) => { try { return looksLikeListingUrl(new URL(a.href, location.href).href, platform); } catch { return false; } }).length,
+      passedUrl: 0,
+      passedVisible: 0,
+      passedImage: 0,
+      passedText: 0,
+      passedTitle: 0,
     };
     const seen = new Set();
     const items = [];
@@ -118,16 +123,20 @@
       const url = rawUrl ? cleanUrl(rawUrl) : null;
       if (!url || !/^https?:/i.test(url) || seen.has(url)) continue;
       if (!looksLikeListingUrl(url, platform)) continue;
+      diagnostics.passedUrl += 1;
 
       const card = cardFor(anchor, platform);
       const rect = card.getBoundingClientRect?.();
       if (rect && rect.width === 0 && rect.height === 0) continue;
+      diagnostics.passedVisible += 1;
 
       const image = card.querySelector('img') || anchor.querySelector('img');
       if (!image) continue;
+      diagnostics.passedImage += 1;
 
       const text = String(card.innerText || anchor.innerText || '').replace(/\s+/g, ' ').trim();
       if (text.length < 8) continue;
+      diagnostics.passedText += 1;
 
       const heading = card.querySelector('h1,h2,h3,h4,h5,h6,[role="heading"]');
       let title = String(
@@ -135,6 +144,7 @@
       ).replace(/\s+/g, ' ').trim();
       if (title.length > 180) title = title.slice(0, 180);
       if (title.length < 3) continue;
+      diagnostics.passedTitle += 1;
 
       const { price, currency } = parsePrice(text);
       const imageUrl = absoluteUrl(

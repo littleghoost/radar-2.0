@@ -75,7 +75,7 @@ function renderPreview() {
   const send = $('#sendItems');
   if (!lastCapture?.items?.length) {
     const d = lastCapture && lastCapture.diagnostics ? lastCapture.diagnostics : {};
-    preview.innerHTML = '<strong>0 anúncios detectados</strong>' + 'Links: ' + (d.anchors ?? '?') + ' • Cards OLX: ' + (d.olxCards ?? '?') + ' • Imagens: ' + (d.images ?? '?') + ' • Preços: ' + (d.priceTexts ?? '?') + ' • URLs de anúncio: ' + (d.listingUrls ?? '?');
+    preview.innerHTML = '<strong>0 anúncios detectados</strong>' + 'URLs: ' + (d.listingUrls ?? '?') + ' → válidas: ' + (d.passedUrl ?? '?') + ' → visíveis: ' + (d.passedVisible ?? '?') + ' → c/ imagem: ' + (d.passedImage ?? '?') + ' → c/ texto: ' + (d.passedText ?? '?') + ' → c/ título: ' + (d.passedTitle ?? '?') + '<br><small>Links: ' + (d.anchors ?? '?') + ' • Imagens pág.: ' + (d.images ?? '?') + ' • Preços pág.: ' + (d.priceTexts ?? '?') + '</small>';
     send.disabled = true;
     return;
   }
