@@ -3,10 +3,10 @@ const { searchEbay, getEbayStatus } = require('./ebay');
 const { searchOlx, getOlxStatus } = require('./olx');
 const { getDepopStatus } = require('./depop');
 
-async function searchAllSources({ query, mercadoLivreAccessToken, limit = 50 }) {
+async function searchAllSources({ query, mercadoLivreAccessToken, referenceImageBuffer = null, limit = 50 }) {
   const results = await Promise.all([
     searchMercadoLivre({ query, accessToken: mercadoLivreAccessToken, limit }),
-    searchEbay({ query, limit }),
+    searchEbay({ query, limit, referenceImageBuffer }),
     searchOlx({ query, limit }),
   ]);
 

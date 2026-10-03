@@ -48,7 +48,39 @@ async function getApplicationToken() {
   return tokenCache.accessToken;
 }
 
-async function searchEbay({ query, limit = 50 }) {
+function normalizeItems(data) {
+  return (Array.isArray(data.itemSummaries) ? data.itemSummaries : []).map((item) => ({
+    source: 'ebay',
+    external_id: item.itemId || null,
+    title: item.title || '',
+    platform: 'eBay',
+    url: item.itemWebUrl || null,
+    image_url: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || null,
+    price: item.price?.value == null ? null : Number(item.price.value),
+    currency: item.price?.currency || null,
+  }));
+}
+
+async function requestBrowse(url, accessToken, marketplaceId, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'X-EBAY-C-MARKETPLACE-ID': marketplaceId,
+      accept: 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.errors?.[0]?.message || 'request_failed');
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+async function searchEbay({ query, limit = 50, referenceImageBuffer = null }) {
   const { clientId, clientSecret, marketplaceId } = getConfig();
 
   if (!clientId || !clientSecret) {
@@ -63,41 +95,62 @@ async function searchEbay({ query, limit = 50 }) {
 
   try {
     const accessToken = await getApplicationToken();
-    const url = new URL('https://api.ebay.com/buy/browse/v1/item_summary/search');
-    url.searchParams.set('q', query);
-    url.searchParams.set('limit', String(limit));
+    const keywordUrl = new URL('https://api.ebay.com/buy/browse/v1/item_summary/search');
+    keywordUrl.searchParams.set('q', query);
+    keywordUrl.searchParams.set('limit', String(Math.min(200, Math.max(1, limit))));
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'X-EBAY-C-MARKETPLACE-ID': marketplaceId,
-        accept: 'application/json',
-      },
-    });
+    const requests = [
+      requestBrowse(keywordUrl, accessToken, marketplaceId).then((data) => ({ mode: 'keyword', data })),
+    ];
 
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
+    const imageSupported = ['EBAY_US', 'EBAY_DE', 'EBAY_GB', 'EBAY_AU'].includes(marketplaceId);
+    if (referenceImageBuffer && imageSupported) {
+      const imageUrl = new URL('https://api.ebay.com/buy/browse/v1/item_summary/search_by_image');
+      imageUrl.searchParams.set('limit', String(Math.min(200, Math.max(1, limit))));
+      requests.push(
+        requestBrowse(imageUrl, accessToken, marketplaceId, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ image: referenceImageBuffer.toString('base64') }),
+        }).then((data) => ({ mode: 'image', data })),
+      );
+    }
+
+    const settled = await Promise.allSettled(requests);
+    const itemsByKey = new Map();
+    const modes = [];
+    const errors = [];
+
+    for (const result of settled) {
+      if (result.status === 'rejected') {
+        errors.push(result.reason?.message || String(result.reason));
+        continue;
+      }
+      modes.push(result.value.mode);
+      for (const item of normalizeItems(result.value.data)) {
+        const key = item.external_id || item.url || `${item.title}|${item.price}`;
+        if (!itemsByKey.has(key)) itemsByKey.set(key, item);
+      }
+    }
+
+    if (!itemsByKey.size && errors.length) {
       return {
         source: 'ebay',
         ok: false,
-        status: response.status,
-        reason: data.errors?.[0]?.message || 'request_failed',
+        status: 502,
+        reason: errors.join(' | '),
         items: [],
       };
     }
 
-    const items = (Array.isArray(data.itemSummaries) ? data.itemSummaries : []).map((item) => ({
+    return {
       source: 'ebay',
-      external_id: item.itemId || null,
-      title: item.title || '',
-      platform: 'eBay',
-      url: item.itemWebUrl || null,
-      image_url: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || null,
-      price: item.price?.value == null ? null : Number(item.price.value),
-      currency: item.price?.currency || null,
-    }));
-
-    return { source: 'ebay', ok: true, items };
+      ok: true,
+      modes,
+      image_search_supported: imageSupported,
+      partial_errors: errors,
+      items: [...itemsByKey.values()].slice(0, limit * 2),
+    };
   } catch (err) {
     return {
       source: 'ebay',
@@ -115,6 +168,8 @@ function getEbayStatus() {
     source: 'ebay',
     configured: Boolean(clientId && clientSecret),
     marketplace_id: marketplaceId,
+    keyword_search: true,
+    image_search: ['EBAY_US', 'EBAY_DE', 'EBAY_GB', 'EBAY_AU'].includes(marketplaceId),
   };
 }
 

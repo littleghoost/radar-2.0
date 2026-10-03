@@ -1,3 +1,4 @@
+const fs = require('fs/promises');
 const { searchAllSources } = require('./sources');
 const { downloadImage, extractVisualFeatures, visualSimilarity, hybridScore } = require('./visualSimilarity');
 const { embedImage, cosineSimilarity: semanticSimilarity } = require('./semanticVision');
@@ -46,8 +47,17 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
       if (!user) throw new Error('Usuário local não encontrado.');
 
       const mlConnection = await getValidMercadoLivreConnection(user.id);
+      let referenceImageBuffer = null;
+      if (radar.reference_image_path) {
+        try {
+          referenceImageBuffer = await fs.readFile(radar.reference_image_path);
+        } catch {
+          referenceImageBuffer = null;
+        }
+      }
       const sourceRuns = await searchAllSources({
         query: radar.query,
+        referenceImageBuffer,
         mercadoLivreAccessToken:
           mlConnection?.status === 'connected' ? mlConnection.access_token : null,
         limit: 50,

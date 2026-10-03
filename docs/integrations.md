@@ -47,3 +47,11 @@ Estado das fontes pesquisadas para o Radar. A regra do projeto é usar APIs e fl
 ## Estratégia para app desktop
 
 Fontes sem API de busca pública devem ficar separadas das fontes de servidor. No futuro, o app desktop poderá oferecer fluxos assistidos pelo usuário e importação de links, enquanto `radarRunner` continua sendo o motor comum de normalização, histórico e eventos.
+
+## Cobertura de busca por imagem
+
+O adapter do eBay agora combina busca por palavras-chave com o endpoint oficial `search_by_image` quando o radar possui imagem de referência e o marketplace configurado suporta o recurso. Resultados das duas buscas são normalizados e deduplicados antes de entrar no motor de score do Radar.
+
+A busca oficial por imagem do eBay é usada apenas nos marketplaces em que o Browse API declara suporte (`EBAY_US`, `EBAY_DE`, `EBAY_GB` e `EBAY_AU`). Sem credenciais de produção, o adapter continua em estado `credentials_pending` e não tenta contornar a API.
+
+Depop e Vinted continuam fora da busca geral automática: as APIs oficiais documentadas são voltadas a integrações de vendedores/parceiros, não a uma busca pública geral do marketplace. Para essas fontes, o caminho do Radar é importação assistida/autorizada em vez de scraping ou bypass.
