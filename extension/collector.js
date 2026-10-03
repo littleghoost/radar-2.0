@@ -70,6 +70,19 @@
     ) || anchor.parentElement || anchor;
   }
 
+  function looksLikeListingUrl(url, platform) {
+    try {
+      const u = new URL(url);
+      const path = u.pathname.toLowerCase();
+      if (platform === 'OLX') return /\/d\/|\/item\/|\/anuncio\//.test(path) || /-[0-9]{6,}(?:\/|$)/.test(path);
+      if (platform === 'Mercado Livre') return /\/mlb-?[0-9]+|\/p\/mlb/i.test(path);
+      if (platform === 'eBay') return /\/itm\//.test(path);
+      if (platform === 'Depop') return /\/products\//.test(path);
+      if (platform === 'Vinted') return /\/items\//.test(path);
+      return true;
+    } catch { return false; }
+  }
+
   function collectVisibleListings(limit = 100) {
     const platform = detectPlatform(location.hostname);
     const anchors = [...document.querySelectorAll('a[href]')];
@@ -82,6 +95,7 @@
       const rawUrl = absoluteUrl(anchor.getAttribute('href'));
       const url = rawUrl ? cleanUrl(rawUrl) : null;
       if (!url || !/^https?:/i.test(url) || seen.has(url)) continue;
+      if (!looksLikeListingUrl(url, platform)) continue;
 
       const card = cardFor(anchor);
       const rect = card.getBoundingClientRect?.();
@@ -101,6 +115,7 @@
       if (title.length < 3) continue;
 
       const { price, currency } = parsePrice(text);
+      if (platform === 'OLX' && price === null) continue;
       const imageUrl = absoluteUrl(
         image.currentSrc || image.src || image.getAttribute('data-src') || image.getAttribute('data-lazy-src'),
       );
