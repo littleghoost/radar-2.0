@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Radar 2.0 Bridge</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <span class="eyebrow">RADAR 2.0</span>
+          <h1>Bridge</h1>
+        </div>
+        <span id="statusDot" class="dot offline" title="Status do Radar"></span>
+      </header>
+
+      <section id="offlineCard" class="card" hidden>
+        <strong>Radar local não encontrado</strong>
+        <p>Abra o Radar 2.0 Desktop antes de enviar anúncios.</p>
+        <button id="openRadar" class="secondary">Abrir Radar local</button>
+      </section>
+
+      <section id="mainCard" class="card">
+        <label>
+          Radar de destino
+          <select id="radarSelect">
+            <option value="">Sem radar</option>
+          </select>
+        </label>
+
+        <button id="scanPage" class="primary">Analisar página atual</button>
+
+        <div id="preview" class="preview muted">Nenhuma página analisada ainda.</div>
+
+        <button id="sendItems" class="primary" disabled>Enviar para o Radar</button>
+      </section>
+
+      <footer>
+        <span id="pageHost">—</span>
+        <span>somente conteúdo visível</span>
+      </footer>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

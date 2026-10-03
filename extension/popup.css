@@ -1,0 +1,29 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0d0f12;
+  color: #f3f4f6;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 360px; background: #0d0f12; }
+main { padding: 16px; display: grid; gap: 14px; }
+header { display: flex; align-items: center; justify-content: space-between; }
+h1 { margin: 2px 0 0; font-size: 22px; }
+.eyebrow { font-size: 10px; letter-spacing: .18em; opacity: .6; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: #555; box-shadow: 0 0 0 4px rgba(255,255,255,.05); }
+.dot.online { background: #70e29b; }
+.dot.offline { background: #ef6a6a; }
+.card { border: 1px solid rgba(255,255,255,.1); background: #15181d; border-radius: 14px; padding: 14px; display: grid; gap: 12px; }
+label { display: grid; gap: 6px; font-size: 12px; opacity: .9; }
+select, button { width: 100%; border-radius: 10px; min-height: 38px; border: 1px solid rgba(255,255,255,.12); }
+select { background: #0f1216; color: inherit; padding: 0 10px; }
+button { cursor: pointer; font-weight: 700; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.primary { background: #f2f4f7; color: #0c0e11; }
+.secondary { background: #20252c; color: #f3f4f6; }
+.preview { padding: 10px; border-radius: 10px; background: rgba(255,255,255,.04); font-size: 12px; line-height: 1.45; }
+.preview strong { display: block; font-size: 14px; margin-bottom: 4px; }
+.muted { opacity: .65; }
+p { margin: 0; opacity: .7; font-size: 12px; line-height: 1.45; }
+footer { display: flex; justify-content: space-between; gap: 10px; font-size: 10px; opacity: .48; }

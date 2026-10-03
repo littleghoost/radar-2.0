@@ -79,3 +79,7 @@ O Radar aprende com os estados **interessante** e **descartado** usando os embed
 ## Browser Bridge / importação assistida
 
 Para marketplaces sem busca oficial disponível, o Radar pode importar anúncios que o usuário já está visualizando no próprio navegador. Um coletor em formato bookmarklet copia cards visíveis para o clipboard; o app valida, deduplica e passa cada item pelo mesmo pipeline de IA/Grail Score. Não há coleta de senha/cookie nem bypass de anti-bot. Veja `docs/assisted-import.md`.
+
+## Extensão Radar 2.0 Bridge
+
+A pasta `extension/` contém uma extensão Chromium/Opera GX Manifest V3 que analisa a aba ativa sob demanda e envia os cards visíveis diretamente para o backend local do Radar, sem copiar/colar JSON. Ela usa apenas `activeTab`, `scripting` e `storage`, com acesso de rede restrito ao `127.0.0.1:3130`. Veja `docs/browser-extension.md`.

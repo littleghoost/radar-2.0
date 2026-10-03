@@ -1420,7 +1420,7 @@ async function loadConnections() {
 
     const grid = $("#connectionsGrid");
 
-    grid.innerHTML = connections
+    const providerCards = connections
       .map((connection) => {
         const connected = connection.status === "connected";
         const needsAuth = connection.status === "reauthorization_required";
@@ -1526,9 +1526,31 @@ async function loadConnections() {
           `;
       })
       .join("");
+
+    grid.innerHTML = `${providerCards}
+      <article class="connection-card">
+        <div class="connection-top">
+          <span class="connection-name">Radar 2.0 Bridge</span>
+          <span class="connection-status connected">Desktop</span>
+        </div>
+        <p>Extensão local para enviar anúncios visíveis de OLX, Enjoei, Depop, Vinted, Marketplace e outros sites direto para o Radar.</p>
+        <button class="primary" type="button" onclick="showExtensionInstall()">Como instalar</button>
+      </article>
+    `;
   } catch (err) {
     alert(err.message);
   }
+}
+
+function showExtensionInstall() {
+  alert(
+    "Radar 2.0 Bridge\n\n" +
+      "1. Abra opera://extensions no Opera GX.\n" +
+      "2. Ative o Modo do desenvolvedor.\n" +
+      "3. Clique em Carregar sem compactação.\n" +
+      "4. Escolha a pasta 'Radar 2.0 Bridge' na sua Área de Trabalho.\n\n" +
+      "Depois é só abrir um marketplace, clicar na extensão, escolher o radar e enviar os anúncios."
+  );
 }
 
 /* =========================

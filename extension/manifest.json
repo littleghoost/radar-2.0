@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Radar 2.0 Bridge",
+  "version": "0.1.0",
+  "description": "Envia anúncios visíveis da página atual para o Radar 2.0 local.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": [
+    "http://127.0.0.1:3130/*",
+    "http://localhost:3130/*"
+  ],
+  "action": {
+    "default_title": "Radar 2.0 Bridge",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "32": "icons/icon32.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "32": "icons/icon32.png",
+    "128": "icons/icon128.png"
+  }
+}
