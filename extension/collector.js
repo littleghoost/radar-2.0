@@ -66,7 +66,7 @@
 
   function cardFor(anchor) {
     return anchor.closest(
-      'article,li,[data-testid*="item"],[data-testid*="card"],[class*="listing"],[class*="product"],[class*="card"]',
+      'article,li,[data-cy="l-card"],[data-testid="l-card"],[data-testid*="item"],[data-testid*="card"],[class*="listing"],[class*="product"],[class*="card"]',
     ) || anchor.parentElement || anchor;
   }
 
@@ -107,7 +107,7 @@
       const text = String(card.innerText || anchor.innerText || '').replace(/\s+/g, ' ').trim();
       if (text.length < 8) continue;
 
-      const heading = card.querySelector('h1,h2,h3,h4,[role="heading"]');
+      const heading = card.querySelector('h1,h2,h3,h4,h5,h6,[role="heading"]');
       let title = String(
         heading?.innerText || image.alt || anchor.getAttribute('title') || anchor.innerText || text,
       ).replace(/\s+/g, ' ').trim();
