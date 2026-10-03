@@ -105,9 +105,12 @@
               <h2>Anúncios</h2>
             </div>
 
-            <button id="openListingModal" class="primary">
-              + Adicionar anúncio
-            </button>
+            <div class="listing-actions">
+              <button id="openImportModal" class="secondary">Importar página</button>
+              <button id="openListingModal" class="primary">
+                + Adicionar anúncio
+              </button>
+            </div>
           </div>
 
           <!-- FILTROS -->
@@ -399,6 +402,59 @@
         </div>
 
         <button class="primary wide" type="submit">Criar radar</button>
+      </form>
+    </dialog>
+
+    <!-- =========================
+       MODAL IMPORTAÇÃO ASSISTIDA
+  ========================== -->
+
+    <dialog id="importModal" class="wide-dialog">
+      <form id="importForm">
+        <div class="modal-head">
+          <div>
+            <span class="eyebrow"> BROWSER BRIDGE </span>
+            <h3>Importar página</h3>
+          </div>
+          <button type="button" class="icon-btn close-modal">×</button>
+        </div>
+
+        <p class="import-help">Abra uma página de resultados no navegador, rode o coletor do Radar e cole aqui a captura. O coletor lê somente o conteúdo já visível na página.</p>
+
+        <div class="two-cols">
+          <label>
+            Radar de destino
+            <select id="importRadar" name="radar_id">
+              <option value="">Sem radar</option>
+            </select>
+          </label>
+
+          <label>
+            Origem da página (opcional)
+            <input id="importSourceUrl" name="source_url" type="url" placeholder="https://..." />
+          </label>
+        </div>
+
+        <div class="collector-card">
+          <div>
+            <strong>1. Copie o coletor</strong>
+            <small>Crie um favorito no navegador e cole o código como URL. Depois clique nele numa página da OLX, Enjoei, Depop, Vinted, Marketplace ou outro marketplace.</small>
+          </div>
+          <button type="button" class="secondary" id="copyCollector">Copiar coletor</button>
+        </div>
+
+        <label>
+          2. Cole a captura
+          <textarea id="importPayload" name="payload" rows="11" placeholder='{"source_url":"...","items":[...]}'></textarea>
+        </label>
+
+        <div id="importPreview" class="import-preview">Nenhuma captura analisada.</div>
+
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="pasteImportPayload">Colar do clipboard</button>
+          <button type="button" class="secondary" id="previewImport">Analisar captura</button>
+          <button type="submit" class="primary">Importar anúncios</button>
+        </div>
       </form>
     </dialog>
 

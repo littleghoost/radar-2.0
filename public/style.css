@@ -831,3 +831,58 @@ label textarea {
     grid-template-columns: 1fr;
   }
 }
+
+.listing-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wide-dialog {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.import-help {
+  opacity: .75;
+  line-height: 1.5;
+}
+
+.collector-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid var(--border, rgba(255,255,255,.1));
+  border-radius: 14px;
+}
+
+.collector-card > div {
+  display: grid;
+  gap: 5px;
+}
+
+.collector-card small {
+  opacity: .65;
+  line-height: 1.4;
+}
+
+#importPayload {
+  min-height: 220px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.import-preview {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.04);
+  min-height: 44px;
+  line-height: 1.45;
+}
+
+@media (max-width: 720px) {
+  .collector-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

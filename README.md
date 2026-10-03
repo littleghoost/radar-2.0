@@ -75,3 +75,7 @@ Radares podem receber uma imagem JPEG/PNG de referência. O motor combina compar
 ## Grail Score personalizado
 
 O Radar aprende com os estados **interessante** e **descartado** usando os embeddings visuais já calculados. O perfil é separado por categoria e alimenta `preference_score` e `grail_score`, sem substituir o score híbrido existente. O peso do gosto pessoal cresce conforme há mais feedback. Veja `docs/preference-learning.md`.
+
+## Browser Bridge / importação assistida
+
+Para marketplaces sem busca oficial disponível, o Radar pode importar anúncios que o usuário já está visualizando no próprio navegador. Um coletor em formato bookmarklet copia cards visíveis para o clipboard; o app valida, deduplica e passa cada item pelo mesmo pipeline de IA/Grail Score. Não há coleta de senha/cookie nem bypass de anti-bot. Veja `docs/assisted-import.md`.

@@ -1108,6 +1108,102 @@ app.get(
 );
 
 /* =========================
+   IMPORTAÇÃO ASSISTIDA
+========================= */
+
+app.post("/api/import/assisted", async (req, res) => {
+  try {
+    const radarId = req.body?.radar_id || null;
+    const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 100) : [];
+    if (!items.length) {
+      return res.status(400).json({ error: "Nenhum anúncio válido foi recebido." });
+    }
+
+    if (radarId) {
+      const radar = await get("SELECT id FROM radars WHERE id = ?", [radarId]);
+      if (!radar) return res.status(404).json({ error: "Radar não encontrado." });
+    }
+
+    const summary = { imported: 0, duplicates: 0, invalid: 0, failed: 0, listings: [] };
+
+    for (const raw of items) {
+      try {
+        const title = String(raw?.title || "").trim().slice(0, 300);
+        const platform = String(raw?.platform || "Importação assistida").trim().slice(0, 80);
+        const url = String(raw?.url || "").trim();
+        const imageUrl = raw?.image_url ? String(raw.image_url).trim() : null;
+        const currency = String(raw?.currency || "BRL").trim().toUpperCase().slice(0, 8) || "BRL";
+        const priceRaw = raw?.current_price ?? raw?.price ?? null;
+        const currentPrice = priceRaw === null || priceRaw === "" ? null : Number(priceRaw);
+
+        let parsedUrl;
+        try { parsedUrl = new URL(url); } catch { parsedUrl = null; }
+        if (!title || !parsedUrl || !["http:", "https:"].includes(parsedUrl.protocol)) {
+          summary.invalid += 1;
+          continue;
+        }
+
+        const existing = await get("SELECT id FROM listings WHERE url = ?", [url]);
+        if (existing) {
+          summary.duplicates += 1;
+          continue;
+        }
+
+        const intelligence = await scoreListingForRadar({
+          radarId,
+          title,
+          imageUrl,
+          currentPrice: Number.isFinite(currentPrice) ? currentPrice : null,
+          currency,
+        });
+
+        const notes = [
+          "Importação assistida pelo navegador",
+          req.body?.source_url ? `Origem: ${String(req.body.source_url).slice(0, 500)}` : null,
+        ].filter(Boolean).join(" • ");
+
+        const result = await run(
+          `INSERT INTO listings (
+            radar_id, title, platform, url, image_url, current_price, currency, status, notes,
+            visual_score, semantic_score, hybrid_score, image_features_json, image_embedding_json,
+            preference_score, grail_score
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            radarId, title, platform, url, imageUrl,
+            Number.isFinite(currentPrice) ? currentPrice : null, currency, notes,
+            intelligence.visual_score, intelligence.semantic_score, intelligence.hybrid_score,
+            intelligence.image_features_json, intelligence.image_embedding_json,
+            intelligence.preference_score, intelligence.grail_score,
+          ],
+        );
+
+        if (Number.isFinite(currentPrice)) {
+          await run("INSERT INTO price_history (listing_id, price) VALUES (?, ?)", [result.id, currentPrice]);
+        }
+
+        const listing = await get("SELECT * FROM listings WHERE id = ?", [result.id]);
+        summary.imported += 1;
+        summary.listings.push(listing);
+      } catch {
+        summary.failed += 1;
+      }
+    }
+
+    if (summary.imported > 0) {
+      await run(
+        `INSERT INTO activity_events (radar_id, type, title, detail, metadata_json)
+         VALUES (?, 'assisted_import', 'Importação assistida concluída', ?, ?)`,
+        [radarId, `${summary.imported} anúncio(s) importado(s) do navegador.`, JSON.stringify(summary)],
+      );
+    }
+
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* =========================
    CRIAR ANÚNCIO
 ========================= */
 

@@ -12,9 +12,13 @@ const radarModal = $("#radarModal");
 
 const listingModal = $("#listingModal");
 
+const importModal = $("#importModal");
+
 $("#openRadarModal").onclick = () => radarModal.showModal();
 
 $("#openListingModal").onclick = () => listingModal.showModal();
+
+$("#openImportModal")?.addEventListener("click", () => importModal.showModal());
 
 
 $("#radarReferenceImage")?.addEventListener("change", (event) => {
@@ -31,6 +35,102 @@ document.querySelectorAll(".close-modal").forEach((button) => {
       button.closest("dialog").close();
     },
   );
+});
+
+/* =========================
+   BROWSER BRIDGE
+========================= */
+
+function collectorBookmarklet() {
+  const source = `(()=>{const d=location.hostname.toLowerCase();const names=[['olx','OLX'],['enjoei','Enjoei'],['depop','Depop'],['vinted','Vinted'],['facebook','Facebook Marketplace'],['ebay','eBay'],['mercadolivre','Mercado Livre'],['mercadolibre','Mercado Libre']];const platform=(names.find(([k])=>d.includes(k))||[])[1]||d.replace(/^www\\./,'');const abs=(u)=>{try{return new URL(u,location.href).href}catch{return null}};const clean=(u)=>{try{const x=new URL(u);x.hash='';['utm_source','utm_medium','utm_campaign','utm_content','utm_term','fbclid','gclid'].forEach(k=>x.searchParams.delete(k));return x.href}catch{return u}};const parsePrice=(text)=>{const m=String(text||'').match(/(?:R\\$|US\\$|USD|EUR|€|GBP|£|\\$)\\s*([0-9][0-9.,\\s]*)/i);if(!m)return {price:null,currency:'BRL'};const sym=m[0].slice(0,m[0].indexOf(m[1])).trim().toUpperCase();let raw=m[1].replace(/\\s/g,'');let currency=sym.includes('R$')?'BRL':sym.includes('€')||sym.includes('EUR')?'EUR':sym.includes('£')||sym.includes('GBP')?'GBP':'USD';if(currency==='BRL'||currency==='EUR'){if(raw.includes(','))raw=raw.replace(/\\./g,'').replace(',','.');else if((raw.match(/\\./g)||[]).length>1)raw=raw.replace(/\\./g,'')}else{if(raw.includes('.')&&raw.includes(','))raw=raw.replace(/,/g,'');else if((raw.match(/,/g)||[]).length===1&&/,[0-9]{2}$/.test(raw))raw=raw.replace(',','.');else raw=raw.replace(/,/g,'')}const n=Number(raw);return {price:Number.isFinite(n)?n:null,currency}};const candidates=[...document.querySelectorAll('a[href]')];const out=[];const seen=new Set();for(const a of candidates){if(out.length>=80)break;const url=clean(abs(a.getAttribute('href')));if(!url||seen.has(url)||!/^https?:/.test(url))continue;let card=a.closest('article,li,[data-testid*="item"],[data-testid*="card"],[class*="listing"],[class*="product"],[class*="card"]');if(!card){card=a;for(let i=0;i<4&&card.parentElement;i++)card=card.parentElement}const img=card.querySelector('img')||a.querySelector('img');if(!img)continue;const text=(card.innerText||a.innerText||'').replace(/\\s+/g,' ').trim();if(text.length<8)continue;const h=card.querySelector('h1,h2,h3,h4,[role="heading"]');let title=(h?.innerText||img.alt||a.getAttribute('title')||a.innerText||text).replace(/\\s+/g,' ').trim();if(title.length>180)title=title.slice(0,180);if(title.length<3)continue;const {price,currency}=parsePrice(text);const image=abs(img.currentSrc||img.src||img.getAttribute('data-src')||'');seen.add(url);out.push({title,platform,url,image_url:image,current_price:price,currency})}const payload=JSON.stringify({version:1,source_url:location.href,platform,captured_at:new Date().toISOString(),items:out},null,2);const done=()=>alert('Radar: '+out.length+' anúncio(s) copiado(s). Agora cole no Importar página.');navigator.clipboard?.writeText(payload).then(done).catch(()=>prompt('Copie esta captura do Radar:',payload));if(!navigator.clipboard)prompt('Copie esta captura do Radar:',payload)})()`;
+  return `javascript:${source.replace(/\n/g, "")}`;
+}
+
+function parseImportPayload() {
+  const text = $("#importPayload")?.value?.trim();
+  if (!text) throw new Error("Cole primeiro a captura gerada pelo coletor.");
+  const data = JSON.parse(text);
+  const items = Array.isArray(data) ? data : data.items;
+  if (!Array.isArray(items)) throw new Error("A captura não contém uma lista de anúncios.");
+  return {
+    source_url: Array.isArray(data) ? null : data.source_url || null,
+    platform: Array.isArray(data) ? null : data.platform || null,
+    items: items.filter((item) => item && item.url && item.title).slice(0, 100),
+  };
+}
+
+function renderImportPreview() {
+  const preview = $("#importPreview");
+  try {
+    const data = parseImportPayload();
+    if ($("#importSourceUrl") && data.source_url && !$("#importSourceUrl").value) {
+      $("#importSourceUrl").value = data.source_url;
+    }
+    const withImages = data.items.filter((item) => item.image_url).length;
+    const withPrices = data.items.filter((item) => item.current_price !== null && item.current_price !== undefined).length;
+    preview.innerHTML = `<strong>${data.items.length} anúncio(s) detectado(s)</strong><br>${withImages} com imagem • ${withPrices} com preço${data.platform ? ` • ${escapeHtml(data.platform)}` : ""}`;
+    return data;
+  } catch (err) {
+    preview.textContent = err.message;
+    return null;
+  }
+}
+
+$("#copyCollector")?.addEventListener("click", async () => {
+  const button = $("#copyCollector");
+  try {
+    await navigator.clipboard.writeText(collectorBookmarklet());
+    const old = button.textContent;
+    button.textContent = "Coletor copiado";
+    setTimeout(() => { button.textContent = old; }, 1800);
+  } catch {
+    prompt("Copie este código e use como URL de um favorito:", collectorBookmarklet());
+  }
+});
+
+$("#pasteImportPayload")?.addEventListener("click", async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text) throw new Error("A área de transferência está vazia.");
+    $("#importPayload").value = text;
+    renderImportPreview();
+  } catch (err) {
+    alert(err.message || "Não consegui ler a área de transferência.");
+  }
+});
+
+$("#previewImport")?.addEventListener("click", renderImportPreview);
+$("#importPayload")?.addEventListener("input", () => {
+  const preview = $("#importPreview");
+  if (preview) preview.textContent = "Captura alterada. Clique em Analisar captura.";
+});
+
+$("#importForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const data = renderImportPreview();
+  if (!data || !data.items.length) return;
+  button.disabled = true;
+  button.textContent = "Importando...";
+  try {
+    const result = await api("/api/import/assisted", {
+      method: "POST",
+      body: JSON.stringify({
+        radar_id: form.elements.radar_id.value || null,
+        source_url: form.elements.source_url.value || data.source_url || null,
+        items: data.items,
+      }),
+    });
+    $("#importPreview").innerHTML = `<strong>${result.imported} importado(s)</strong> • ${result.duplicates} duplicado(s) • ${result.invalid} inválido(s) • ${result.failed} falha(s)`;
+    await Promise.all([loadListings(), loadRadars(), loadActivity().catch(() => {})]);
+    if (result.imported > 0) setTimeout(() => importModal.close(), 1200);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Importar anúncios";
+  }
 });
 
 /* =========================
@@ -340,6 +440,10 @@ async function loadRadars() {
       ${options}
 
     `;
+
+  if ($("#importRadar")) {
+    $("#importRadar").innerHTML = `<option value="">Sem radar</option>${options}`;
+  }
 }
 
 /* =========================
