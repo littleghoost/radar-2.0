@@ -1,14 +1,14 @@
 {
   "pkg": {
     "scripts": [
-      "server/**/*.js"
+      "../server/**/*.js"
     ],
     "assets": [
-      "public/**/*",
-      "node_modules/sqlite3/build/Release/*.node",
-      "node_modules/sqlite3/lib/**/*.js",
-      "node_modules/bindings/**/*.js",
-      "node_modules/file-uri-to-path/**/*.js"
+      "../public/**/*",
+      "../node_modules/sqlite3/build/Release/*.node",
+      "../node_modules/sqlite3/lib/**/*.js",
+      "../node_modules/bindings/**/*.js",
+      "../node_modules/file-uri-to-path/**/*.js"
     ]
   }
 }
