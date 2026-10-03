@@ -776,3 +776,29 @@ label textarea {
   object-fit: cover;
   display: block;
 }
+
+.three-cols {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.semantic-toggle {
+  margin: 0;
+}
+
+.score-chip.semantic {
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .three-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.semantic-availability {
+  display: block;
+  opacity: .7;
+  line-height: 1.4;
+}

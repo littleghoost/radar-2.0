@@ -26,3 +26,7 @@ dist-ssr
 # Sidecars gerados por plataforma
 src-tauri/binaries/*
 !src-tauri/binaries/.gitkeep
+
+# Modelo semântico baixado durante a build
+src-tauri/resources/models/*
+!src-tauri/resources/models/.gitkeep

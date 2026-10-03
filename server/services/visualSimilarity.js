@@ -172,14 +172,25 @@ function priceScore(price, maxPrice, currency = 'BRL') {
   return Math.max(0, 0.6 - (ratio - 1));
 }
 
-function hybridScore({ visual = null, query, title, price, maxPrice, currency, visualWeight = 70 }) {
+function hybridScore({ visual = null, semantic = null, query, title, price, maxPrice, currency, visualWeight = 70, semanticWeight = 70 }) {
   const visualEnabled = visual !== null && Number.isFinite(Number(visual));
+  const semanticEnabled = semantic !== null && Number.isFinite(Number(semantic));
   const text = textSimilarity(query, title);
   const priceComponent = priceScore(price, maxPrice, currency);
-  if (!visualEnabled) return Math.round((text * 0.75 + priceComponent * 0.25) * 100);
+
+  if (!visualEnabled && !semanticEnabled) {
+    return Math.round((text * 0.75 + priceComponent * 0.25) * 100);
+  }
+
+  let visualBlend = visualEnabled ? clamp01(visual) : clamp01(semantic);
+  if (visualEnabled && semanticEnabled) {
+    const sw = clamp01(Number(semanticWeight) / 100);
+    visualBlend = clamp01(visual) * (1 - sw) + clamp01(semantic) * sw;
+  }
+
   const vw = clamp01(Number(visualWeight) / 100);
   const remaining = 1 - vw;
-  return Math.round((clamp01(visual) * vw + text * remaining * 0.7 + priceComponent * remaining * 0.3) * 100);
+  return Math.round((visualBlend * vw + text * remaining * 0.7 + priceComponent * remaining * 0.3) * 100);
 }
 
 module.exports = {

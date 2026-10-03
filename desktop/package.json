@@ -6,7 +6,8 @@
   "scripts": {
     "tauri": "tauri",
     "build:sidecar": "node scripts/build-sidecar.mjs",
-    "build:desktop": "npm run build:sidecar && tauri build"
+    "build:desktop": "npm run prepare:model && npm run build:sidecar && tauri build",
+    "prepare:model": "node scripts/prepare-semantic-model.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

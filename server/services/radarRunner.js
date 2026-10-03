@@ -1,5 +1,6 @@
 const { searchAllSources } = require('./sources');
 const { downloadImage, extractVisualFeatures, visualSimilarity, hybridScore } = require('./visualSimilarity');
+const { embedImage, cosineSimilarity: semanticSimilarity } = require('./semanticVision');
 
 
 async function mapWithConcurrency(items, limit, mapper) {
@@ -71,42 +72,78 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         : null;
       const minVisualSimilarity = Number(radar.min_visual_similarity ?? 0.45);
       const visualWeight = Number(radar.visual_weight ?? 70);
+      const semanticEnabled = Boolean(radar.semantic_enabled && radar.reference_embedding_json);
+      const referenceEmbedding = semanticEnabled
+        ? JSON.parse(radar.reference_embedding_json)
+        : null;
+      const semanticWeight = Number(radar.semantic_weight ?? 70);
 
-      results = await mapWithConcurrency(results, 4, async (item) => {
+      results = await mapWithConcurrency(results, semanticEnabled ? 2 : 4, async (item) => {
         let candidateFeatures = null;
+        let candidateEmbedding = null;
         let visualScore = null;
+        let semanticScore = null;
+        let imageBuffer = null;
 
-        if (visualEnabled && item.image_url) {
+        if ((visualEnabled || semanticEnabled) && item.image_url) {
           try {
-            const imageBuffer = await downloadImage(item.image_url);
-            candidateFeatures = await extractVisualFeatures(imageBuffer);
-            visualScore = visualSimilarity(referenceFeatures, candidateFeatures);
+            imageBuffer = await downloadImage(item.image_url);
           } catch {
+            imageBuffer = null;
+          }
+        }
+
+        if (visualEnabled) {
+          if (imageBuffer) {
+            try {
+              candidateFeatures = await extractVisualFeatures(imageBuffer);
+              visualScore = visualSimilarity(referenceFeatures, candidateFeatures);
+            } catch {
+              visualScore = 0;
+            }
+          } else {
             visualScore = 0;
+          }
+        }
+
+        if (semanticEnabled) {
+          if (imageBuffer) {
+            try {
+              candidateEmbedding = await embedImage(imageBuffer);
+              semanticScore = semanticSimilarity(referenceEmbedding, candidateEmbedding);
+            } catch {
+              semanticScore = 0;
+            }
+          } else {
+            semanticScore = 0;
           }
         }
 
         const combinedScore = hybridScore({
           visual: visualEnabled ? visualScore : null,
+          semantic: semanticEnabled ? semanticScore : null,
           query: radar.query,
           title: item.title,
           price: item.price,
           maxPrice,
           currency: item.currency || 'BRL',
           visualWeight,
+          semanticWeight,
         });
 
         return {
           ...item,
           visual_score: visualScore === null ? null : Math.round(visualScore * 100),
+          semantic_score: semanticScore === null ? null : Math.round(semanticScore * 100),
           hybrid_score: combinedScore,
           image_features_json: candidateFeatures ? JSON.stringify(candidateFeatures) : null,
+          image_embedding_json: candidateEmbedding ? JSON.stringify(candidateEmbedding) : null,
         };
       });
 
-      if (visualEnabled) {
+      if (visualEnabled || semanticEnabled) {
         results = results
-          .filter((item) => (Number(item.visual_score) || 0) >= minVisualSimilarity * 100)
+          .filter((item) => Math.max(Number(item.visual_score) || 0, Number(item.semantic_score) || 0) >= minVisualSimilarity * 100)
           .sort((a, b) => Number(b.hybrid_score || 0) - Number(a.hybrid_score || 0));
       } else {
         results.sort((a, b) => Number(b.hybrid_score || 0) - Number(a.hybrid_score || 0));
@@ -127,8 +164,8 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         if (!existing) {
           const insert = await run(
             `INSERT INTO listings
-              (radar_id, title, platform, url, image_url, current_price, currency, status, notes, visual_score, hybrid_score, image_features_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, ?)`,
+              (radar_id, title, platform, url, image_url, current_price, currency, status, notes, visual_score, semantic_score, hybrid_score, image_features_json, image_embedding_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, ?, ?, ?)`,
             [
               radar.id,
               item.title,
@@ -139,8 +176,10 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
               currency,
               sourceNote,
               item.visual_score,
+              item.semantic_score,
               item.hybrid_score,
               item.image_features_json,
+              item.image_embedding_json,
             ],
           );
 
@@ -161,7 +200,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
               insert.id,
               `Novo anúncio: ${item.title}`,
               `${item.platform}${nextPrice === null ? '' : ` • ${currency} ${nextPrice}`}`,
-              JSON.stringify({ url: item.url, platform: item.platform, visual_score: item.visual_score, hybrid_score: item.hybrid_score }),
+              JSON.stringify({ url: item.url, platform: item.platform, visual_score: item.visual_score, semantic_score: item.semantic_score, hybrid_score: item.hybrid_score }),
             ],
           );
           added += 1;
@@ -180,8 +219,9 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         await run(
           `UPDATE listings
            SET radar_id = ?, title = ?, platform = ?, image_url = ?,
-               current_price = ?, currency = ?, visual_score = ?, hybrid_score = ?,
-               image_features_json = COALESCE(?, image_features_json), updated_at = CURRENT_TIMESTAMP
+               current_price = ?, currency = ?, visual_score = ?, semantic_score = ?, hybrid_score = ?,
+               image_features_json = COALESCE(?, image_features_json),
+               image_embedding_json = COALESCE(?, image_embedding_json), updated_at = CURRENT_TIMESTAMP
            WHERE id = ?`,
           [
             radar.id,
@@ -191,8 +231,10 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
             nextPrice,
             currency,
             item.visual_score,
+            item.semantic_score,
             item.hybrid_score,
             item.image_features_json,
+            item.image_embedding_json,
             existing.id,
           ],
         );
@@ -257,7 +299,10 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
       const activeSources = sourceSummary.filter((source) => source.ok).length;
       const unavailableSources = sourceSummary.filter((source) => !source.ok);
       let message = `${results.length} anúncios selecionados de ${activeSources} fonte(s). ${added} novos, ${updated} atualizados e ${priceDrops} queda(s) de preço.`;
-      if (visualEnabled) message += ` Radar visual ativo (mínimo ${Math.round(minVisualSimilarity * 100)}%).`;
+      if (visualEnabled || semanticEnabled) {
+        message += ` Radar visual ativo (mínimo ${Math.round(minVisualSimilarity * 100)}%).`;
+        if (semanticEnabled) message += ' IA visual semântica ativa.';
+      }
 
       if (unavailableSources.length) {
         const labels = unavailableSources

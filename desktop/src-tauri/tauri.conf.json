@@ -27,6 +27,9 @@
     ],
     "externalBin": [
       "binaries/radar-backend"
+    ],
+    "resources": [
+      "resources/models/**/*"
     ]
   }
 }

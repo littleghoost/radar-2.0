@@ -40,6 +40,10 @@ db.serialize(() => {
       min_visual_similarity REAL DEFAULT 0.45,
       reference_image_path TEXT,
       reference_features_json TEXT,
+      semantic_enabled INTEGER DEFAULT 1,
+      semantic_weight INTEGER DEFAULT 70,
+      reference_embedding_json TEXT,
+      semantic_model TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -86,6 +90,18 @@ db.serialize(() => {
       if (!names.has("reference_features_json")) {
         db.run("ALTER TABLE radars ADD COLUMN reference_features_json TEXT");
       }
+      if (!names.has("semantic_enabled")) {
+        db.run("ALTER TABLE radars ADD COLUMN semantic_enabled INTEGER DEFAULT 1");
+      }
+      if (!names.has("semantic_weight")) {
+        db.run("ALTER TABLE radars ADD COLUMN semantic_weight INTEGER DEFAULT 70");
+      }
+      if (!names.has("reference_embedding_json")) {
+        db.run("ALTER TABLE radars ADD COLUMN reference_embedding_json TEXT");
+      }
+      if (!names.has("semantic_model")) {
+        db.run("ALTER TABLE radars ADD COLUMN semantic_model TEXT");
+      }
     },
   );
 
@@ -130,6 +146,8 @@ db.serialize(() => {
       visual_score REAL,
       hybrid_score REAL,
       image_features_json TEXT,
+      semantic_score REAL,
+      image_embedding_json TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -155,6 +173,12 @@ db.serialize(() => {
       }
       if (!columns.some((column) => column.name === "image_features_json")) {
         db.run("ALTER TABLE listings ADD COLUMN image_features_json TEXT");
+      }
+      if (!columns.some((column) => column.name === "semantic_score")) {
+        db.run("ALTER TABLE listings ADD COLUMN semantic_score REAL");
+      }
+      if (!columns.some((column) => column.name === "image_embedding_json")) {
+        db.run("ALTER TABLE listings ADD COLUMN image_embedding_json TEXT");
       }
     },
   );

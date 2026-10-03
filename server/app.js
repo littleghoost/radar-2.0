@@ -7,6 +7,7 @@ const db = require("./database");
 const { getEbayStatus, getOlxStatus, getDepopStatus } = require("./services/sources");
 const { createRadarRunner } = require("./services/radarRunner");
 const { extractVisualFeatures, downloadImage, visualSimilarity, hybridScore } = require("./services/visualSimilarity");
+const { embedImage, cosineSimilarity: semanticSimilarity, status: semanticStatus, MODEL_ID } = require("./services/semanticVision");
 
 const app = express();
 
@@ -169,39 +170,72 @@ const radarRunner = createRadarRunner({
 
 async function scoreListingForRadar({ radarId, title, imageUrl, currentPrice, currency = "BRL" }) {
   if (!radarId) {
-    return { visual_score: null, hybrid_score: null, image_features_json: null };
+    return { visual_score: null, semantic_score: null, hybrid_score: null, image_features_json: null, image_embedding_json: null };
   }
 
   const radar = await get("SELECT * FROM radars WHERE id = ?", [radarId]);
   if (!radar) {
-    return { visual_score: null, hybrid_score: null, image_features_json: null };
+    return { visual_score: null, semantic_score: null, hybrid_score: null, image_features_json: null, image_embedding_json: null };
   }
 
   let visual = null;
+  let semantic = null;
   let features = null;
-  if (radar.visual_enabled && radar.reference_features_json && imageUrl) {
+  let embedding = null;
+  let imageBuffer = null;
+
+  if (imageUrl && (radar.visual_enabled || radar.semantic_enabled)) {
     try {
-      features = await extractVisualFeatures(await downloadImage(imageUrl));
-      visual = visualSimilarity(JSON.parse(radar.reference_features_json), features);
+      imageBuffer = await downloadImage(imageUrl);
     } catch {
+      imageBuffer = null;
+    }
+  }
+
+  if (radar.visual_enabled && radar.reference_features_json) {
+    if (imageBuffer) {
+      try {
+        features = await extractVisualFeatures(imageBuffer);
+        visual = visualSimilarity(JSON.parse(radar.reference_features_json), features);
+      } catch {
+        visual = 0;
+      }
+    } else {
       visual = 0;
+    }
+  }
+
+  if (radar.semantic_enabled && radar.reference_embedding_json) {
+    if (imageBuffer) {
+      try {
+        embedding = await embedImage(imageBuffer);
+        semantic = semanticSimilarity(JSON.parse(radar.reference_embedding_json), embedding);
+      } catch {
+        semantic = 0;
+      }
+    } else {
+      semantic = 0;
     }
   }
 
   const hybrid = hybridScore({
     visual: radar.visual_enabled && radar.reference_features_json ? visual : null,
+    semantic: radar.semantic_enabled && radar.reference_embedding_json ? semantic : null,
     query: radar.query,
     title,
     price: currentPrice === "" ? null : currentPrice,
     maxPrice: radar.max_price,
     currency,
     visualWeight: radar.visual_weight || 70,
+    semanticWeight: radar.semantic_weight || 70,
   });
 
   return {
     visual_score: visual === null ? null : Math.round(visual * 100),
+    semantic_score: semantic === null ? null : Math.round(semantic * 100),
     hybrid_score: hybrid,
     image_features_json: features ? JSON.stringify(features) : null,
+    image_embedding_json: embedding ? JSON.stringify(embedding) : null,
   };
 }
 
@@ -216,6 +250,7 @@ app.get("/api/health", async (_req, res) => {
       ok: true,
       service: "radar-2.0",
       database: "ok",
+      semantic: semanticStatus(),
       uptime_seconds: Math.round(process.uptime()),
     });
   } catch (err) {
@@ -285,7 +320,7 @@ app.post(
 
   async (req, res) => {
     try {
-      const { name, query, max_price, category, visual_enabled, visual_weight, min_visual_similarity } = req.body;
+      const { name, query, max_price, category, visual_enabled, visual_weight, min_visual_similarity, semantic_enabled, semantic_weight } = req.body;
 
       if (!name || !query) {
         return res.status(400).json({
@@ -303,10 +338,12 @@ app.post(
           category,
           visual_enabled,
           visual_weight,
-          min_visual_similarity
+          min_visual_similarity,
+          semantic_enabled,
+          semantic_weight
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
 
         [
@@ -319,6 +356,8 @@ app.post(
           visual_enabled ? 1 : 0,
           Math.min(100, Math.max(0, Number(visual_weight) || 70)),
           Math.min(1, Math.max(0, Number(min_visual_similarity) || 0.45)),
+          semantic_enabled === undefined ? 1 : (semantic_enabled ? 1 : 0),
+          Math.min(100, Math.max(0, Number(semantic_weight) || 70)),
         ],
       );
 
@@ -357,12 +396,22 @@ app.put(
       const filePath = path.join(IMAGE_DIR, `radar-${radar.id}${ext}`);
       await fsp.writeFile(filePath, req.body);
       const features = await extractVisualFeatures(req.body);
+      let embedding = null;
+      let semanticError = null;
+      if (radar.semantic_enabled) {
+        try {
+          embedding = await embedImage(req.body);
+        } catch (error) {
+          semanticError = error?.message || String(error);
+        }
+      }
 
       await run(
         `UPDATE radars
-         SET reference_image_path = ?, reference_features_json = ?, visual_enabled = 1
+         SET reference_image_path = ?, reference_features_json = ?, visual_enabled = 1,
+             reference_embedding_json = ?, semantic_model = ?
          WHERE id = ?`,
-        [filePath, JSON.stringify(features), radar.id],
+        [filePath, JSON.stringify(features), embedding ? JSON.stringify(embedding) : null, embedding ? MODEL_ID : null, radar.id],
       );
 
       res.json({
@@ -374,6 +423,12 @@ app.put(
           width: features.width,
           height: features.height,
           average_rgb: features.average_rgb,
+        },
+        semantic: {
+          enabled: Boolean(radar.semantic_enabled),
+          ready: Boolean(embedding),
+          model: embedding ? MODEL_ID : null,
+          error: semanticError,
         },
       });
     } catch (err) {
@@ -405,11 +460,12 @@ app.post("/api/radars/:id/reindex-visual", async (req, res) => {
         });
         await run(
           `UPDATE listings
-           SET visual_score = ?, hybrid_score = ?,
+           SET visual_score = ?, semantic_score = ?, hybrid_score = ?,
                image_features_json = COALESCE(?, image_features_json),
+               image_embedding_json = COALESCE(?, image_embedding_json),
                updated_at = CURRENT_TIMESTAMP
            WHERE id = ?`,
-          [score.visual_score, score.hybrid_score, score.image_features_json, listing.id],
+          [score.visual_score, score.semantic_score, score.hybrid_score, score.image_features_json, score.image_embedding_json, listing.id],
         );
         analyzed += 1;
       } catch {
@@ -440,7 +496,7 @@ app.delete("/api/radars/:id/reference-image", async (req, res) => {
       await fsp.unlink(radar.reference_image_path).catch(() => {});
     }
     await run(
-      "UPDATE radars SET reference_image_path = NULL, reference_features_json = NULL, visual_enabled = 0 WHERE id = ?",
+      "UPDATE radars SET reference_image_path = NULL, reference_features_json = NULL, reference_embedding_json = NULL, semantic_model = NULL, visual_enabled = 0 WHERE id = ?",
       [req.params.id],
     );
     res.json({ ok: true });
@@ -488,6 +544,10 @@ app.patch(
           req.body.visual_weight !== undefined ? Math.min(100, Math.max(0, Number(req.body.visual_weight) || 70)) : Number(radar.visual_weight || 70),
         min_visual_similarity:
           req.body.min_visual_similarity !== undefined ? Math.min(1, Math.max(0, Number(req.body.min_visual_similarity) || 0.45)) : Number(radar.min_visual_similarity || 0.45),
+        semantic_enabled:
+          req.body.semantic_enabled !== undefined ? Boolean(req.body.semantic_enabled) : Boolean(radar.semantic_enabled),
+        semantic_weight:
+          req.body.semantic_weight !== undefined ? Math.min(100, Math.max(0, Number(req.body.semantic_weight) || 70)) : Number(radar.semantic_weight || 70),
       };
 
       if (!next.name || !next.query) {
@@ -507,7 +567,9 @@ app.patch(
           category = ?,
           visual_enabled = ?,
           visual_weight = ?,
-          min_visual_similarity = ?
+          min_visual_similarity = ?,
+          semantic_enabled = ?,
+          semantic_weight = ?
 
         WHERE id = ?
         `,
@@ -522,6 +584,8 @@ app.patch(
           next.visual_enabled ? 1 : 0,
           next.visual_weight,
           next.min_visual_similarity,
+          next.semantic_enabled ? 1 : 0,
+          next.semantic_weight,
 
           req.params.id,
         ],
@@ -826,6 +890,10 @@ app.get("/api/runs", async (req, res) => {
   }
 });
 
+app.get("/api/semantic/status", (_req, res) => {
+  res.json(semanticStatus());
+});
+
 app.get("/api/sources/status", (_req, res) => {
   res.json({
     ebay: getEbayStatus(),
@@ -1021,12 +1089,14 @@ app.post(
             status,
             notes,
             visual_score,
+            semantic_score,
             hybrid_score,
-            image_features_json
+            image_features_json,
+            image_embedding_json
           )
 
           VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
 
           `,
@@ -1048,8 +1118,10 @@ app.post(
 
           notes?.trim() || null,
           intelligence.visual_score,
+          intelligence.semantic_score,
           intelligence.hybrid_score,
           intelligence.image_features_json,
+          intelligence.image_embedding_json,
         ],
       );
 

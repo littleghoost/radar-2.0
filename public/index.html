@@ -320,13 +320,31 @@
             <span id="radarReferenceLabel">Escolher imagem</span>
           </label>
 
-          <div class="two-cols">
+          <label class="setting-row semantic-toggle">
+            <span>
+              <strong>IA visual semântica</strong>
+              <small>Entende estilo e tipo da peça mesmo com outro ângulo, fundo ou iluminação. O primeiro uso pode baixar o modelo local.</small>
+            </span>
+            <input type="checkbox" name="semantic_enabled" checked />
+          </label>
+          <small id="semanticAvailability" class="semantic-availability">Verificando IA local...</small>
+
+          <div class="three-cols">
             <label>
               Peso da imagem
               <select name="visual_weight">
                 <option value="50">50% — equilibrado</option>
                 <option value="70" selected>70% — visual forte</option>
                 <option value="85">85% — quase só imagem</option>
+              </select>
+            </label>
+
+            <label>
+              Peso da IA semântica
+              <select name="semantic_weight">
+                <option value="50">50% — equilibrado</option>
+                <option value="70" selected>70% — recomendado</option>
+                <option value="85">85% — semântico forte</option>
               </select>
             </label>
 

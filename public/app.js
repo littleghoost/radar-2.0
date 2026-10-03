@@ -133,7 +133,7 @@ async function loadRadars() {
                 <span class="eyebrow">
 
                   ${escapeHtml(radar.category || "GERAL")}
-                  ${radar.visual_enabled ? " • VISUAL" : ""}
+                  ${radar.visual_enabled ? " • VISUAL" : ""}${radar.reference_embedding_json ? " • IA" : ""}
 
                 </span>
 
@@ -238,7 +238,7 @@ async function loadRadars() {
 
                   ${
                     radar.visual_enabled
-                      ? `<button class="secondary" onclick="event.stopPropagation(); reindexVisualRadar(${radar.id}, this);">Reanalisar visual</button>`
+                      ? `<button class="secondary" onclick="event.stopPropagation(); reindexVisualRadar(${radar.id}, this);">Reanalisar IA</button>`
                       : ""
                   }
 
@@ -347,7 +347,7 @@ async function loadRadars() {
 ========================= */
 
 async function reindexVisualRadar(id, button) {
-  const original = button?.textContent || "Reanalisar visual";
+  const original = button?.textContent || "Reanalisar IA";
   if (button) {
     button.disabled = true;
     button.textContent = "Analisando...";
@@ -719,6 +719,11 @@ async function loadListings() {
                             ? `<span class="score-chip">Imagem ${Math.round(Number(listing.visual_score))}%</span>`
                             : ""
                         }
+                        ${
+                          listing.semantic_score !== null && listing.semantic_score !== undefined
+                            ? `<span class="score-chip semantic">IA ${Math.round(Number(listing.semantic_score))}%</span>`
+                            : ""
+                        }
                       </div>
                     `
                     : ""
@@ -910,6 +915,8 @@ $("#radarForm").onsubmit = async (event) => {
     category: form.get("category"),
     visual_enabled: Boolean(referenceImage),
     visual_weight: Number(form.get("visual_weight") || 70),
+    semantic_enabled: formElement.elements.semantic_enabled.checked,
+    semantic_weight: Number(form.get("semantic_weight") || 70),
     min_visual_similarity: Number(form.get("min_visual_similarity") || 0.45),
   };
 
@@ -920,6 +927,11 @@ $("#radarForm").onsubmit = async (event) => {
     });
 
     if (referenceImage) {
+      const submitButton = formElement.querySelector('button[type="submit"]');
+      if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = payload.semantic_enabled ? "Preparando IA visual..." : "Analisando imagem...";
+      }
       const response = await fetch(`/api/radars/${radar.id}/reference-image`, {
         method: "PUT",
         headers: {
@@ -929,6 +941,10 @@ $("#radarForm").onsubmit = async (event) => {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Não consegui enviar a imagem de referência.");
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = "Criar radar";
+      }
     }
 
     formElement.reset();
@@ -939,6 +955,11 @@ $("#radarForm").onsubmit = async (event) => {
     await loadRadars();
     await loadListings();
   } catch (err) {
+    const submitButton = formElement.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = "Criar radar";
+    }
     alert(err.message);
   }
 };
@@ -1477,6 +1498,29 @@ $("#importMercadoLivreBtn")?.addEventListener("click", async () => {
 });
 
 
+async function loadSemanticStatus() {
+  const label = $("#semanticAvailability");
+  const checkbox = $("#radarForm")?.elements?.semantic_enabled;
+  if (!label) return;
+  try {
+    const status = await api("/api/semantic/status");
+    if (status.enabled) {
+      label.textContent = status.ready
+        ? "IA local pronta para uso."
+        : "IA local disponível. O primeiro radar pode baixar o modelo e levar alguns segundos.";
+      if (checkbox) checkbox.disabled = false;
+    } else {
+      label.textContent = "IA semântica disponível no app desktop; nesta versão web o radar visual clássico continua ativo.";
+      if (checkbox) {
+        checkbox.checked = false;
+        checkbox.disabled = true;
+      }
+    }
+  } catch {
+    label.textContent = "Não consegui verificar a IA semântica agora.";
+  }
+}
+
 /* =========================
    CONFIGURAÇÕES DESKTOP
 ========================= */
@@ -1570,6 +1614,7 @@ $("#runBackgroundNow")?.addEventListener("click", async () => {
     await loadRadars();
 
     await loadListings();
+    await Promise.all([loadDesktopSettings(), loadSemanticStatus(), loadNotifications().catch(() => {})]);
   } catch (err) {
     alert("Não consegui carregar o Radar: " + err.message);
   }

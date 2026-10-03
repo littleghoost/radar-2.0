@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tauri::{
     menu::{Menu, MenuItem},
+    path::BaseDirectory,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     webview::WebviewWindowBuilder,
     Manager, State, WebviewUrl, WindowEvent,
@@ -245,12 +246,24 @@ pub fn run() {
             let app_data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data)?;
             let db_path = app_data.join("radar-desktop.db");
+            let bundled_semantic_cache = app
+                .path()
+                .resolve("resources/models", BaseDirectory::Resource)?;
+            let fallback_semantic_cache = app_data.join("models");
+            std::fs::create_dir_all(&fallback_semantic_cache)?;
+            let semantic_cache = if bundled_semantic_cache.exists() {
+                bundled_semantic_cache
+            } else {
+                fallback_semantic_cache
+            };
 
             let sidecar = app
                 .shell()
                 .sidecar("radar-backend")?
                 .env("PORT", PORT.to_string())
-                .env("DB_PATH", db_path.to_string_lossy().to_string());
+                .env("DB_PATH", db_path.to_string_lossy().to_string())
+                .env("SEMANTIC_VISION_ENABLED", "1")
+                .env("SEMANTIC_CACHE_DIR", semantic_cache.to_string_lossy().to_string());
 
             let (mut events, child) = sidecar.spawn()?;
             tauri::async_runtime::spawn(async move {

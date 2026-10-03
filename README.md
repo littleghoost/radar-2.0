@@ -70,4 +70,4 @@ O MVP desktop em Tauri 2 fica em `desktop/`. O backend Node.js já é empacotado
 
 ## Radar por imagem
 
-Radares podem receber uma imagem JPEG/PNG de referência. O backend calcula similaridade visual local e combina imagem + palavras-chave + preço em um `hybrid_score` de 0 a 100. Os anúncios são ordenados pelo score dentro da prioridade de status, e radares visuais podem filtrar por similaridade mínima. Veja `docs/visual-radar.md`.
+Radares podem receber uma imagem JPEG/PNG de referência. O motor combina comparação perceptual clássica com **IA visual semântica CLIP local** no app desktop, além de palavras-chave e preço. Cada anúncio pode ter `visual_score`, `semantic_score` e `hybrid_score` de 0 a 100. A versão desktop empacota o modelo semântico para funcionar sem depender de uma API externa de IA. Veja `docs/visual-radar.md`.
