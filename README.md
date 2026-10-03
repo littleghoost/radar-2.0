@@ -63,3 +63,7 @@ A API oficial atualmente retorna 403 para busca geral por palavra-chave neste ap
 - alertas de preço e disponibilidade;
 - score visual para peças/câmeras;
 - integração com outras plataformas via APIs autorizadas.
+
+## Desktop
+
+O MVP desktop em Tauri 2 fica em `desktop/`. No Windows de desenvolvimento ele inicia o backend local pelo WSL na porta 3130 e abre a interface do Radar em uma janela nativa. O banco desktop usa `data/radar-desktop.db`. A fase seguinte é empacotar o backend como sidecar para remover a dependência de WSL na instalação final.
