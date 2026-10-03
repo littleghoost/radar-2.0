@@ -90,7 +90,7 @@
       anchors: anchors.length,
       olxCards: document.querySelectorAll('[data-cy="l-card"], [data-testid="l-card"], article').length,
       images: document.querySelectorAll('img').length,
-      priceTexts: [...document.querySelectorAll('body *')].filter((el) => /R\s*\d/.test(el.textContent || ')).length,
+      priceTexts: [...document.querySelectorAll('body *')].filter((el) => /R\$\s*\d/.test(el.textContent || '')).length,
       listingUrls: anchors.filter((a) => { try { return looksLikeListingUrl(new URL(a.href, location.href).href, platform); } catch { return false; } }).length,
     };
     const seen = new Set();
