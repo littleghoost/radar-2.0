@@ -8,6 +8,7 @@ const { getEbayStatus, getOlxStatus, getDepopStatus } = require("./services/sour
 const { createRadarRunner } = require("./services/radarRunner");
 const { extractVisualFeatures, downloadImage, visualSimilarity, hybridScore } = require("./services/visualSimilarity");
 const { embedImage, cosineSimilarity: semanticSimilarity, status: semanticStatus, MODEL_ID } = require("./services/semanticVision");
+const { buildPreferenceProfile, preferenceScore, grailScore } = require("./services/preferenceLearning");
 
 const app = express();
 
@@ -161,6 +162,53 @@ function run(sql, params = []) {
   });
 }
 
+
+async function getPreferenceProfile(category = "geral") {
+  const rows = await all(
+    `SELECT l.status, l.image_embedding_json
+     FROM listings l
+     LEFT JOIN radars r ON r.id = l.radar_id
+     WHERE COALESCE(r.category, 'geral') = ?
+       AND l.status IN ('interessante', 'descartado')
+       AND l.image_embedding_json IS NOT NULL`,
+    [category || "geral"],
+  );
+  return buildPreferenceProfile(rows, category || "geral");
+}
+
+async function rebuildPreferenceScores(category = null) {
+  const params = [];
+  let filter = "";
+  if (category) {
+    filter = "WHERE COALESCE(r.category, 'geral') = ?";
+    params.push(category);
+  }
+  const listings = await all(
+    `SELECT l.id, l.hybrid_score, l.image_embedding_json, COALESCE(r.category, 'geral') AS category
+     FROM listings l
+     LEFT JOIN radars r ON r.id = l.radar_id
+     ${filter}`,
+    params,
+  );
+  const categories = [...new Set(listings.map((row) => row.category || "geral"))];
+  const profiles = new Map();
+  for (const key of categories) profiles.set(key, await getPreferenceProfile(key));
+
+  let updated = 0;
+  for (const listing of listings) {
+    let embedding = null;
+    try {
+      embedding = listing.image_embedding_json ? JSON.parse(listing.image_embedding_json) : null;
+    } catch {}
+    const profile = profiles.get(listing.category || "geral");
+    const learned = preferenceScore(embedding, profile);
+    const grail = grailScore(listing.hybrid_score, learned, profile?.total_feedback || 0);
+    await run("UPDATE listings SET preference_score = ?, grail_score = ? WHERE id = ?", [learned, grail, listing.id]);
+    updated += 1;
+  }
+  return { updated, profiles: [...profiles.values()].map(({ positive_centroid, negative_centroid, ...rest }) => rest) };
+}
+
 const radarRunner = createRadarRunner({
   get,
   all,
@@ -170,12 +218,12 @@ const radarRunner = createRadarRunner({
 
 async function scoreListingForRadar({ radarId, title, imageUrl, currentPrice, currency = "BRL" }) {
   if (!radarId) {
-    return { visual_score: null, semantic_score: null, hybrid_score: null, image_features_json: null, image_embedding_json: null };
+    return { visual_score: null, semantic_score: null, hybrid_score: null, preference_score: null, grail_score: null, image_features_json: null, image_embedding_json: null };
   }
 
   const radar = await get("SELECT * FROM radars WHERE id = ?", [radarId]);
   if (!radar) {
-    return { visual_score: null, semantic_score: null, hybrid_score: null, image_features_json: null, image_embedding_json: null };
+    return { visual_score: null, semantic_score: null, hybrid_score: null, preference_score: null, grail_score: null, image_features_json: null, image_embedding_json: null };
   }
 
   let visual = null;
@@ -230,10 +278,16 @@ async function scoreListingForRadar({ radarId, title, imageUrl, currentPrice, cu
     semanticWeight: radar.semantic_weight || 70,
   });
 
+  const profile = await getPreferenceProfile(radar.category || "geral");
+  const learned = preferenceScore(embedding, profile);
+  const grail = grailScore(hybrid, learned, profile.total_feedback);
+
   return {
     visual_score: visual === null ? null : Math.round(visual * 100),
     semantic_score: semantic === null ? null : Math.round(semantic * 100),
     hybrid_score: hybrid,
+    preference_score: learned,
+    grail_score: grail,
     image_features_json: features ? JSON.stringify(features) : null,
     image_embedding_json: embedding ? JSON.stringify(embedding) : null,
   };
@@ -890,6 +944,35 @@ app.get("/api/runs", async (req, res) => {
   }
 });
 
+app.get("/api/preferences/status", async (_req, res) => {
+  try {
+    const rows = await all("SELECT DISTINCT COALESCE(category, 'geral') AS category FROM radars ORDER BY category");
+    const categories = rows.length ? rows.map((row) => row.category) : ["geral"];
+    const profiles = [];
+    for (const category of categories) {
+      const profile = await getPreferenceProfile(category);
+      profiles.push({
+        category,
+        positive_count: profile.positive_count,
+        negative_count: profile.negative_count,
+        total_feedback: profile.total_feedback,
+        active: profile.total_feedback > 0,
+      });
+    }
+    res.json({ profiles });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/preferences/rebuild", async (req, res) => {
+  try {
+    res.json(await rebuildPreferenceScores(req.body?.category || null));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/semantic/status", (_req, res) => {
   res.json(semanticStatus());
 });
@@ -1006,6 +1089,7 @@ app.get(
 
           END,
 
+          COALESCE(l.grail_score, l.hybrid_score, 0) DESC,
           COALESCE(l.hybrid_score, 0) DESC,
           l.updated_at DESC
 
@@ -1092,11 +1176,13 @@ app.post(
             semantic_score,
             hybrid_score,
             image_features_json,
-            image_embedding_json
+            image_embedding_json,
+            preference_score,
+            grail_score
           )
 
           VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
 
           `,
@@ -1122,6 +1208,8 @@ app.post(
           intelligence.hybrid_score,
           intelligence.image_features_json,
           intelligence.image_embedding_json,
+          intelligence.preference_score,
+          intelligence.grail_score,
         ],
       );
 
@@ -1264,6 +1352,15 @@ app.patch(
           req.params.id,
         ],
       );
+
+      if (
+        next.status !== listing.status &&
+        (["interessante", "descartado"].includes(next.status) ||
+          ["interessante", "descartado"].includes(listing.status))
+      ) {
+        const radar = next.radar_id ? await get("SELECT category FROM radars WHERE id = ?", [next.radar_id]) : null;
+        await rebuildPreferenceScores(radar?.category || "geral");
+      }
 
       if (
         priceChanged &&

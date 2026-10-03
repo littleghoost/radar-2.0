@@ -1,6 +1,7 @@
 const { searchAllSources } = require('./sources');
 const { downloadImage, extractVisualFeatures, visualSimilarity, hybridScore } = require('./visualSimilarity');
 const { embedImage, cosineSimilarity: semanticSimilarity } = require('./semanticVision');
+const { buildPreferenceProfile, preferenceScore, grailScore } = require('./preferenceLearning');
 
 
 async function mapWithConcurrency(items, limit, mapper) {
@@ -77,6 +78,16 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         ? JSON.parse(radar.reference_embedding_json)
         : null;
       const semanticWeight = Number(radar.semantic_weight ?? 70);
+      const feedbackRows = await all(
+        `SELECT l.status, l.image_embedding_json
+         FROM listings l
+         LEFT JOIN radars r ON r.id = l.radar_id
+         WHERE COALESCE(r.category, 'geral') = ?
+           AND l.status IN ('interessante', 'descartado')
+           AND l.image_embedding_json IS NOT NULL`,
+        [radar.category || 'geral'],
+      );
+      const preferenceProfile = buildPreferenceProfile(feedbackRows, radar.category || 'geral');
 
       results = await mapWithConcurrency(results, semanticEnabled ? 2 : 4, async (item) => {
         let candidateFeatures = null;
@@ -131,11 +142,16 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
           semanticWeight,
         });
 
+        const learnedScore = preferenceScore(candidateEmbedding, preferenceProfile);
+        const finalGrailScore = grailScore(combinedScore, learnedScore, preferenceProfile.total_feedback);
+
         return {
           ...item,
           visual_score: visualScore === null ? null : Math.round(visualScore * 100),
           semantic_score: semanticScore === null ? null : Math.round(semanticScore * 100),
           hybrid_score: combinedScore,
+          preference_score: learnedScore,
+          grail_score: finalGrailScore,
           image_features_json: candidateFeatures ? JSON.stringify(candidateFeatures) : null,
           image_embedding_json: candidateEmbedding ? JSON.stringify(candidateEmbedding) : null,
         };
@@ -144,9 +160,9 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
       if (visualEnabled || semanticEnabled) {
         results = results
           .filter((item) => Math.max(Number(item.visual_score) || 0, Number(item.semantic_score) || 0) >= minVisualSimilarity * 100)
-          .sort((a, b) => Number(b.hybrid_score || 0) - Number(a.hybrid_score || 0));
+          .sort((a, b) => Number(b.grail_score ?? b.hybrid_score ?? 0) - Number(a.grail_score ?? a.hybrid_score ?? 0));
       } else {
-        results.sort((a, b) => Number(b.hybrid_score || 0) - Number(a.hybrid_score || 0));
+        results.sort((a, b) => Number(b.grail_score ?? b.hybrid_score ?? 0) - Number(a.grail_score ?? a.hybrid_score ?? 0));
       }
 
       let added = 0;
@@ -164,8 +180,8 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         if (!existing) {
           const insert = await run(
             `INSERT INTO listings
-              (radar_id, title, platform, url, image_url, current_price, currency, status, notes, visual_score, semantic_score, hybrid_score, image_features_json, image_embedding_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, ?, ?, ?)`,
+              (radar_id, title, platform, url, image_url, current_price, currency, status, notes, visual_score, semantic_score, hybrid_score, preference_score, grail_score, image_features_json, image_embedding_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               radar.id,
               item.title,
@@ -178,6 +194,8 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
               item.visual_score,
               item.semantic_score,
               item.hybrid_score,
+              item.preference_score,
+              item.grail_score,
               item.image_features_json,
               item.image_embedding_json,
             ],
@@ -200,7 +218,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
               insert.id,
               `Novo anúncio: ${item.title}`,
               `${item.platform}${nextPrice === null ? '' : ` • ${currency} ${nextPrice}`}`,
-              JSON.stringify({ url: item.url, platform: item.platform, visual_score: item.visual_score, semantic_score: item.semantic_score, hybrid_score: item.hybrid_score }),
+              JSON.stringify({ url: item.url, platform: item.platform, visual_score: item.visual_score, semantic_score: item.semantic_score, hybrid_score: item.hybrid_score, preference_score: item.preference_score, grail_score: item.grail_score }),
             ],
           );
           added += 1;
@@ -220,6 +238,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
           `UPDATE listings
            SET radar_id = ?, title = ?, platform = ?, image_url = ?,
                current_price = ?, currency = ?, visual_score = ?, semantic_score = ?, hybrid_score = ?,
+               preference_score = ?, grail_score = ?,
                image_features_json = COALESCE(?, image_features_json),
                image_embedding_json = COALESCE(?, image_embedding_json), updated_at = CURRENT_TIMESTAMP
            WHERE id = ?`,
@@ -233,6 +252,8 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
             item.visual_score,
             item.semantic_score,
             item.hybrid_score,
+            item.preference_score,
+            item.grail_score,
             item.image_features_json,
             item.image_embedding_json,
             existing.id,
@@ -302,6 +323,9 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
       if (visualEnabled || semanticEnabled) {
         message += ` Radar visual ativo (mínimo ${Math.round(minVisualSimilarity * 100)}%).`;
         if (semanticEnabled) message += ' IA visual semântica ativa.';
+      }
+      if (preferenceProfile.total_feedback > 0) {
+        message += ` Perfil de gosto ativo com ${preferenceProfile.total_feedback} feedback(s).`;
       }
 
       if (unavailableSources.length) {

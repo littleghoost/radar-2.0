@@ -148,6 +148,8 @@ db.serialize(() => {
       image_features_json TEXT,
       semantic_score REAL,
       image_embedding_json TEXT,
+      preference_score REAL,
+      grail_score REAL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -179,6 +181,12 @@ db.serialize(() => {
       }
       if (!columns.some((column) => column.name === "image_embedding_json")) {
         db.run("ALTER TABLE listings ADD COLUMN image_embedding_json TEXT");
+      }
+      if (!columns.some((column) => column.name === "preference_score")) {
+        db.run("ALTER TABLE listings ADD COLUMN preference_score REAL");
+      }
+      if (!columns.some((column) => column.name === "grail_score")) {
+        db.run("ALTER TABLE listings ADD COLUMN grail_score REAL");
       }
     },
   );

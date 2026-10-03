@@ -802,3 +802,32 @@ label textarea {
   opacity: .7;
   line-height: 1.4;
 }
+
+.taste-profile-stats {
+  display: grid;
+  gap: 10px;
+}
+
+.taste-stat {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.4fr) repeat(3, minmax(90px, 1fr));
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--border, rgba(255,255,255,.1));
+  border-radius: 14px;
+}
+
+.score-chip.grail {
+  font-weight: 800;
+}
+
+.score-chip.taste {
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .taste-stat {
+    grid-template-columns: 1fr;
+  }
+}

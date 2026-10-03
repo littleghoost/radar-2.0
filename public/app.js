@@ -715,6 +715,16 @@ async function loadListings() {
                       <div class="score-row">
                         <span class="score-chip">Score ${Math.round(Number(listing.hybrid_score))}/100</span>
                         ${
+                          listing.grail_score !== null && listing.grail_score !== undefined
+                            ? `<span class="score-chip grail">Grail ${Math.round(Number(listing.grail_score))}/100</span>`
+                            : ""
+                        }
+                        ${
+                          listing.preference_score !== null && listing.preference_score !== undefined
+                            ? `<span class="score-chip taste">Seu gosto ${Math.round(Number(listing.preference_score))}%</span>`
+                            : ""
+                        }
+                        ${
                           listing.visual_score !== null && listing.visual_score !== undefined
                             ? `<span class="score-chip">Imagem ${Math.round(Number(listing.visual_score))}%</span>`
                             : ""
@@ -995,6 +1005,10 @@ $("#listingForm").onsubmit = async (event) => {
     await loadListings();
 
     await loadRadars();
+
+    if (["interessante", "descartado"].includes(status)) {
+      await loadPreferenceStatus();
+    }
   } catch (err) {
     alert(err.message);
   }
@@ -1498,6 +1512,52 @@ $("#importMercadoLivreBtn")?.addEventListener("click", async () => {
 });
 
 
+async function loadPreferenceStatus() {
+  const container = $("#tasteProfileStats");
+  if (!container) return;
+  try {
+    const data = await api("/api/preferences/status");
+    const profiles = data.profiles || [];
+    if (!profiles.length || profiles.every((profile) => !profile.total_feedback)) {
+      container.innerHTML = `<p class="muted">Ainda não há feedback suficiente. Marque anúncios como <strong>interessante</strong> ou <strong>descartado</strong> e o Radar começa a aprender automaticamente.</p>`;
+      return;
+    }
+    container.innerHTML = profiles
+      .map((profile) => `
+        <div class="taste-stat">
+          <strong>${escapeHtml(profile.category || "geral")}</strong>
+          <span>${profile.positive_count} interessante(s)</span>
+          <span>${profile.negative_count} descartado(s)</span>
+          <span>${profile.total_feedback >= 8 ? "perfil forte" : "aprendendo"}</span>
+        </div>
+      `)
+      .join("");
+  } catch (err) {
+    container.textContent = "Não consegui carregar o perfil de gosto.";
+  }
+}
+
+$("#rebuildTasteProfile")?.addEventListener("click", async () => {
+  const button = $("#rebuildTasteProfile");
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Recalculando...";
+  try {
+    const result = await api("/api/preferences/rebuild", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    button.textContent = `${result.updated || 0} atualizado(s)`;
+    await Promise.all([loadPreferenceStatus(), loadListings()]);
+    setTimeout(() => { button.textContent = original; }, 1800);
+  } catch (err) {
+    alert(err.message);
+    button.textContent = original;
+  } finally {
+    button.disabled = false;
+  }
+});
+
 async function loadSemanticStatus() {
   const label = $("#semanticAvailability");
   const checkbox = $("#radarForm")?.elements?.semantic_enabled;
@@ -1614,7 +1674,7 @@ $("#runBackgroundNow")?.addEventListener("click", async () => {
     await loadRadars();
 
     await loadListings();
-    await Promise.all([loadDesktopSettings(), loadSemanticStatus(), loadNotifications().catch(() => {})]);
+    await Promise.all([loadDesktopSettings(), loadSemanticStatus(), loadPreferenceStatus(), loadNotifications().catch(() => {})]);
   } catch (err) {
     alert("Não consegui carregar o Radar: " + err.message);
   }
