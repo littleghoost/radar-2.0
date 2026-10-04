@@ -314,6 +314,21 @@ db.serialize(() => {
       if (!columns.some((column) => column.name === "unavailable_since")) {
         db.run("ALTER TABLE listings ADD COLUMN unavailable_since DATETIME");
       }
+
+      db.run(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_listings_source_external
+         ON listings(source_key, external_id)
+         WHERE source_key IS NOT NULL
+           AND external_id IS NOT NULL`,
+        (indexErr) => {
+          if (indexErr) {
+            console.error(
+              "Falha ao criar índice único de anúncios:",
+              indexErr.message,
+            );
+          }
+        },
+      );
     },
   );
 

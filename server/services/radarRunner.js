@@ -544,7 +544,24 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
       let restored = 0;
 
       for (const item of results) {
-        const existing = await get('SELECT * FROM listings WHERE url = ?', [item.url]);
+        let existing = null;
+
+        if (item.source && item.external_id) {
+          existing = await get(
+            `SELECT * FROM listings
+             WHERE source_key = ? AND external_id = ?
+             LIMIT 1`,
+            [item.source, item.external_id],
+          );
+        }
+
+        if (!existing && item.url) {
+          existing = await get(
+            'SELECT * FROM listings WHERE url = ? LIMIT 1',
+            [item.url],
+          );
+        }
+
         const nextPrice = item.price === null ? null : Number(item.price);
         const currency = item.currency || 'BRL';
         const sourceNote = item.external_id
@@ -616,7 +633,8 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
 
         await run(
           `UPDATE listings
-           SET radar_id = ?, title = ?, platform = ?, image_url = ?,
+           SET radar_id = ?, title = ?, platform = ?,
+               url = COALESCE(?, url), image_url = ?,
                current_price = ?, currency = ?, source_key = COALESCE(?, source_key),
                external_id = COALESCE(?, external_id),
                availability_status = 'available', availability_detail = 'found_in_search',
@@ -631,6 +649,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
             radar.id,
             item.title,
             item.platform,
+            item.url || null,
             item.image_url,
             nextPrice,
             currency,

@@ -91,7 +91,9 @@ function normalizeItems(data, searchQuery = null) {
     external_id: item.itemId || null,
     title: item.title || "",
     platform: "eBay",
-    url: item.itemWebUrl || null,
+    url: item.itemWebUrl
+      ? String(item.itemWebUrl).split("?")[0].split("#")[0]
+      : null,
     image_url:
       item.image?.imageUrl ||
       item.thumbnailImages?.[0]?.imageUrl ||
