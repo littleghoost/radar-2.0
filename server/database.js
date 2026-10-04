@@ -121,6 +121,9 @@ db.serialize(() => {
       expires_at DATETIME,
       bridge_client_id TEXT,
       bridge_client_key TEXT,
+      developer_client_id TEXT,
+      developer_client_secret TEXT,
+      marketplace_id TEXT,
       status TEXT DEFAULT 'disconnected',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -174,6 +177,15 @@ db.serialize(() => {
       if (!columns.some((column) => column.name === "bridge_client_key")) {
         db.run("ALTER TABLE connections ADD COLUMN bridge_client_key TEXT");
       }
+      if (!columns.some((column) => column.name === "developer_client_id")) {
+        db.run("ALTER TABLE connections ADD COLUMN developer_client_id TEXT");
+      }
+      if (!columns.some((column) => column.name === "developer_client_secret")) {
+        db.run("ALTER TABLE connections ADD COLUMN developer_client_secret TEXT");
+      }
+      if (!columns.some((column) => column.name === "marketplace_id")) {
+        db.run("ALTER TABLE connections ADD COLUMN marketplace_id TEXT");
+      }
     },
   );
 
@@ -193,6 +205,24 @@ db.serialize(() => {
       }
     },
   );
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS catalog_discoveries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      radar_id INTEGER NOT NULL,
+      source_key TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT,
+      image_url TEXT,
+      product_status TEXT,
+      domain_id TEXT,
+      metadata_json TEXT,
+      first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(radar_id, source_key, external_id)
+    )
+  `);
 
   /* =========================
      ANÚNCIOS

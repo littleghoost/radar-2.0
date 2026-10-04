@@ -33,6 +33,122 @@ function buildQueryVariants(query, maxVariants = 6) {
   return [...new Set(variants.filter(Boolean))].slice(0, maxVariants);
 }
 
+async function searchCatalogProducts({
+  queries,
+  accessToken,
+  limit = 24,
+}) {
+  const perQueryLimit = Math.min(
+    20,
+    Math.max(5, Math.ceil(Number(limit || 24) / Math.max(queries.length, 1))),
+  );
+
+  const settled = await Promise.all(
+    queries.map(async (searchQuery) => {
+      const url = new URL(
+        "https://api.mercadolibre.com/products/search",
+      );
+      url.searchParams.set("status", "active");
+      url.searchParams.set("site_id", "MLB");
+      url.searchParams.set("q", searchQuery);
+      url.searchParams.set("limit", String(perQueryLimit));
+
+      let response;
+
+      try {
+        response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            accept: "application/json",
+          },
+        });
+      } catch (err) {
+        return {
+          query: searchQuery,
+          ok: false,
+          status: null,
+          reason:
+            err.cause?.code ||
+            err.message ||
+            "catalog_network_failed",
+          products: [],
+        };
+      }
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        return {
+          query: searchQuery,
+          ok: false,
+          status: response.status,
+          reason:
+            data.error ||
+            data.message ||
+            data.cause?.[0]?.message ||
+            "catalog_request_failed",
+          products: [],
+        };
+      }
+
+      const products = (
+        Array.isArray(data.results) ? data.results : []
+      ).map((product) => ({
+        source: "mercadolivre_catalog",
+        external_id: product.id || null,
+        title: product.name || "",
+        url: product.id
+          ? `https://www.mercadolivre.com.br/p/${encodeURIComponent(product.id)}`
+          : null,
+        image_url:
+          product.pictures?.[0]?.url ||
+          product.pictures?.[0]?.secure_url ||
+          product.thumbnail ||
+          null,
+        product_status: product.status || "active",
+        domain_id: product.domain_id || null,
+        search_query: searchQuery,
+        metadata: {
+          listing_strategy:
+            product.settings?.listing_strategy || null,
+          main_features: Array.isArray(product.main_features)
+            ? product.main_features.slice(0, 8)
+            : [],
+        },
+      }));
+
+      return {
+        query: searchQuery,
+        ok: true,
+        products,
+      };
+    }),
+  );
+
+  const deduped = new Map();
+
+  for (const result of settled) {
+    if (!result.ok) continue;
+
+    for (const product of result.products) {
+      const key = product.external_id || product.url;
+      if (!key || deduped.has(key)) continue;
+      deduped.set(key, product);
+    }
+  }
+
+  return {
+    products: [...deduped.values()].slice(0, Number(limit || 24)),
+    errors: settled
+      .filter((result) => !result.ok)
+      .map((result) => ({
+        query: result.query,
+        status: result.status || null,
+        reason: result.reason || "catalog_request_failed",
+      })),
+  };
+}
+
 async function searchMercadoLivre({ query, accessToken, limit = 50 }) {
   if (!accessToken) {
     return {
@@ -69,12 +185,27 @@ async function searchMercadoLivre({ query, accessToken, limit = 50 }) {
       url.searchParams.set("q", searchQuery);
       url.searchParams.set("limit", String(perQueryLimit));
 
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          accept: "application/json",
-        },
-      });
+      let response;
+
+      try {
+        response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            accept: "application/json",
+          },
+        });
+      } catch (err) {
+        return {
+          query: searchQuery,
+          ok: false,
+          status: null,
+          reason:
+            err.cause?.code ||
+            err.message ||
+            "marketplace_network_failed",
+          items: [],
+        };
+      }
 
       const data = await response.json().catch(() => ({}));
 
@@ -139,6 +270,19 @@ async function searchMercadoLivre({ query, accessToken, limit = 50 }) {
       reason: result.reason || "request_failed",
     }));
 
+  let catalog = {
+    products: [],
+    errors: [],
+  };
+
+  if (!successful.length || items.length === 0) {
+    catalog = await searchCatalogProducts({
+      queries,
+      accessToken,
+      limit: Math.min(24, Number(limit || 50)),
+    });
+  }
+
   if (!successful.length) {
     const first = errors[0] || {};
 
@@ -150,6 +294,9 @@ async function searchMercadoLivre({ query, accessToken, limit = 50 }) {
       queries,
       errors,
       items: [],
+      catalog_items: catalog.products,
+      catalog_errors: catalog.errors,
+      catalog_fallback: true,
     };
   }
 
@@ -159,6 +306,9 @@ async function searchMercadoLivre({ query, accessToken, limit = 50 }) {
     queries,
     errors,
     items,
+    catalog_items: catalog.products,
+    catalog_errors: catalog.errors,
+    catalog_fallback: catalog.products.length > 0,
   };
 }
 

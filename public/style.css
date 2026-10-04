@@ -1111,3 +1111,72 @@ label textarea {
   border-color: rgba(255, 95, 95, 0.45);
   color: #ff8f8f;
 }
+
+.catalog-panel {
+  margin: 0 0 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.catalog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 12px;
+}
+
+.catalog-head h3 {
+  margin: 4px 0 4px;
+}
+
+.catalog-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.catalog-count {
+  min-width: 38px;
+  padding: 7px 10px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #111116;
+}
+
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 9px;
+}
+
+.catalog-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  background: #111116;
+}
+
+.catalog-card strong {
+  line-height: 1.35;
+}
+
+.catalog-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted);
+  font-size: .72rem;
+}
+
+.catalog-card a {
+  width: fit-content;
+  font-size: .78rem;
+}

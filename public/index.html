@@ -160,6 +160,18 @@
 
           <div id="inboxSummary" class="inbox-summary"></div>
 
+          <section id="catalogPanel" class="catalog-panel" hidden>
+            <div class="catalog-head">
+              <div>
+                <span class="eyebrow"> MERCADO LIVRE </span>
+                <h3>Pistas de catálogo</h3>
+                <p>Modelos/produtos encontrados no catálogo oficial. Não são anúncios nem preços de vendedores.</p>
+              </div>
+              <strong id="catalogCount" class="catalog-count">0</strong>
+            </div>
+            <div id="catalogDiscoveries" class="catalog-grid"></div>
+          </section>
+
           <div class="bulk-actions" id="bulkActions">
             <label class="bulk-select-all">
               <input id="selectAllListings" type="checkbox" />
@@ -536,6 +548,69 @@
           <button type="button" class="secondary" id="previewImport">Analisar captura</button>
           <button type="submit" class="primary">Importar anúncios</button>
         </div>
+      </form>
+    </dialog>
+
+    <!-- =========================
+       MODAL EBAY DEVELOPER
+  ========================== -->
+
+    <dialog id="ebayModal">
+      <form id="ebayForm">
+        <div class="modal-head">
+          <div>
+            <span class="eyebrow"> EBAY DEVELOPER </span>
+            <h3>Configurar busca automática</h3>
+          </div>
+          <button type="button" class="icon-btn close-modal">×</button>
+        </div>
+
+        <p class="muted">
+          Use as credenciais de produção do eBay Developer. O Radar usa Client Credentials apenas para busca/leitura do Browse API; nenhuma senha da sua conta eBay é necessária.
+        </p>
+
+        <label>
+          Client ID / App ID
+          <input
+            name="client_id"
+            autocomplete="off"
+            required
+            placeholder="Seu App ID do eBay Developer"
+          />
+        </label>
+
+        <label>
+          Client Secret / Cert ID
+          <input
+            name="client_secret"
+            type="password"
+            autocomplete="off"
+            required
+            placeholder="Seu Cert ID / Client Secret"
+          />
+        </label>
+
+        <label>
+          Marketplace
+          <select name="marketplace_id">
+            <option value="EBAY_US" selected>eBay US</option>
+            <option value="EBAY_GB">eBay UK</option>
+            <option value="EBAY_DE">eBay Alemanha</option>
+            <option value="EBAY_AU">eBay Austrália</option>
+            <option value="EBAY_CA">eBay Canadá</option>
+            <option value="EBAY_FR">eBay França</option>
+            <option value="EBAY_IT">eBay Itália</option>
+            <option value="EBAY_ES">eBay Espanha</option>
+          </select>
+        </label>
+
+        <small class="muted">
+          As credenciais ficam somente no banco local do Radar Desktop e não são enviadas para o deploy do Radar.
+        </small>
+
+        <button class="primary wide" type="submit">
+          Testar e conectar eBay
+        </button>
       </form>
     </dialog>
 

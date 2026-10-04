@@ -15,6 +15,7 @@ const radarModal = $("#radarModal");
 const listingModal = $("#listingModal");
 
 const importModal = $("#importModal");
+const ebayModal = $("#ebayModal");
 
 const INBOX_LABELS = {
   grail: "Grail",
@@ -989,6 +990,55 @@ async function removeRadar(id) {
 }
 
 /* =========================
+   PISTAS DE CATÁLOGO
+========================= */
+
+async function loadCatalogDiscoveries(radarId = "") {
+  const panel = $("#catalogPanel");
+  const grid = $("#catalogDiscoveries");
+  const count = $("#catalogCount");
+
+  if (!panel || !grid || !count) return;
+
+  const params = new URLSearchParams();
+  if (radarId) params.set("radar_id", radarId);
+
+  const items = await api(
+    `/api/catalog-discoveries?${params.toString()}`,
+  );
+
+  count.textContent = String(items.length);
+  panel.hidden = items.length === 0;
+
+  if (!items.length) {
+    grid.innerHTML = "";
+    return;
+  }
+
+  grid.innerHTML = items
+    .slice(0, 12)
+    .map((item) => {
+      const query = item.metadata?.search_query
+        ? `Busca: ${escapeHtml(item.metadata.search_query)}`
+        : "";
+
+      return `
+        <article class="catalog-card">
+          <strong>${escapeHtml(item.title)}</strong>
+          <div class="catalog-meta">
+            ${item.external_id ? `<span>${escapeHtml(item.external_id)}</span>` : ""}
+            ${item.domain_id ? `<span>${escapeHtml(item.domain_id)}</span>` : ""}
+            ${item.radar_name ? `<span>${escapeHtml(item.radar_name)}</span>` : ""}
+          </div>
+          ${query ? `<small class="muted">${query}</small>` : ""}
+          ${item.url ? `<a href="${escapeAttr(item.url)}" target="_blank" rel="noopener">Abrir produto de catálogo</a>` : ""}
+        </article>
+      `;
+    })
+    .join("");
+}
+
+/* =========================
    CARREGAR ANÚNCIOS
 ========================= */
 
@@ -1014,6 +1064,8 @@ async function loadListings() {
   }
 
   const fetchedListings = await api(`/api/listings?${params.toString()}`);
+
+  await loadCatalogDiscoveries(radar).catch(() => {});
 
   renderInboxSummary(fetchedListings);
 
@@ -1812,6 +1864,7 @@ function activityIcon(type) {
     listing_available: "↺",
     auto_capture: "↧",
     assisted_import: "↧",
+    catalog_discovery: "◇",
     source_error: "!",
     run_failed: "×",
     run_completed: "✓",
@@ -1912,7 +1965,8 @@ async function loadConnections() {
       mercadolivre:
         "Busca automática oficial, atualização de preço e verificação de disponibilidade.",
 
-      ebay: "Conecte sua conta do eBay.",
+      ebay:
+        "Busca automática oficial via Browse API usando suas credenciais do eBay Developer.",
       depop: "API oficial de parceiros da Depop; não possui busca geral do marketplace.",
     };
 
@@ -1926,9 +1980,11 @@ async function loadConnections() {
         const pendingHomologation = connection.status === "pending_homologation";
         const partnerAccessRequired = connection.status === "partner_access_required";
         const accountLabel =
-          connected && connection.provider_username
-            ? `Conta conectada: @${escapeHtml(connection.provider_username)}`
-            : pendingCredentials
+          connected && connection.provider === "ebay"
+            ? `eBay Developer conectado • ${escapeHtml(connection.provider_username || "marketplace configurado")}`
+            : connected && connection.provider_username
+              ? `Conta conectada: @${escapeHtml(connection.provider_username)}`
+              : pendingCredentials
               ? "Cadastro do eBay Developer aguardando aprovação/credenciais."
               : pendingHomologation
                 ? "Integração oficial da OLX aguardando homologação."
@@ -2197,9 +2253,77 @@ async function connectMercadoLivre() {
   }
 }
 
+async function openEbayConfig() {
+  const form = $("#ebayForm");
+  if (!form || !ebayModal) return;
+
+  form.reset();
+
+  try {
+    const config = await api("/api/ebay/config");
+
+    if (config.client_id) {
+      form.elements.client_id.value = config.client_id;
+    }
+
+    if (config.marketplace_id) {
+      form.elements.marketplace_id.value =
+        config.marketplace_id;
+    }
+  } catch {}
+
+  ebayModal.showModal();
+}
+
+$("#ebayForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const original = button?.textContent || "Conectar";
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Testando credenciais...";
+  }
+
+  try {
+    const result = await api("/api/ebay/configure", {
+      method: "POST",
+      body: JSON.stringify({
+        client_id: form.elements.client_id.value.trim(),
+        client_secret:
+          form.elements.client_secret.value.trim(),
+        marketplace_id:
+          form.elements.marketplace_id.value,
+      }),
+    });
+
+    ebayModal.close();
+    await loadConnections();
+    await runScheduledRadarsAfterConnection();
+
+    alert(
+      `eBay conectado para ${result.marketplace_id || "o marketplace selecionado"}. Primeira rodada automática concluída.`,
+    );
+  } catch (err) {
+    alert(errorMessage(err));
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
+});
+
 function connectProvider(provider) {
   if (provider === "mercadolivre") {
     connectMercadoLivre();
+    return;
+  }
+
+  if (provider === "ebay") {
+    openEbayConfig();
     return;
   }
 

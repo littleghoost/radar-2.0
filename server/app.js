@@ -5,7 +5,12 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const { spawn } = require("child_process");
 const db = require("./database");
-const { getEbayStatus, getOlxStatus, getDepopStatus } = require("./services/sources");
+const {
+  getEbayStatus,
+  validateEbayCredentials,
+  getOlxStatus,
+  getDepopStatus,
+} = require("./services/sources");
 const { createRadarRunner } = require("./services/radarRunner");
 const { extractVisualFeatures, downloadImage, visualSimilarity, hybridScore } = require("./services/visualSimilarity");
 const { embedImage, cosineSimilarity: semanticSimilarity, status: semanticStatus, MODEL_ID } = require("./services/semanticVision");
@@ -1415,12 +1420,191 @@ app.get("/api/semantic/status", (_req, res) => {
   res.json(semanticStatus());
 });
 
-app.get("/api/sources/status", (_req, res) => {
-  res.json({
-    ebay: getEbayStatus(),
-    olx: getOlxStatus(),
-    depop: getDepopStatus(),
-  });
+app.get("/api/catalog-discoveries", async (req, res) => {
+  try {
+    const params = [];
+    const filters = [];
+
+    if (req.query.radar_id) {
+      filters.push("c.radar_id = ?");
+      params.push(req.query.radar_id);
+    }
+
+    const where = filters.length
+      ? `WHERE ${filters.join(" AND ")}`
+      : "";
+
+    const rows = await all(
+      `
+      SELECT
+        c.*,
+        r.name AS radar_name
+      FROM catalog_discoveries c
+      LEFT JOIN radars r ON r.id = c.radar_id
+      ${where}
+      ORDER BY c.last_seen_at DESC, c.id DESC
+      LIMIT 80
+      `,
+      params,
+    );
+
+    res.json(
+      rows.map((row) => ({
+        ...row,
+        metadata: (() => {
+          try {
+            return row.metadata_json
+              ? JSON.parse(row.metadata_json)
+              : {};
+          } catch {
+            return {};
+          }
+        })(),
+      })),
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/ebay/config", async (_req, res) => {
+  try {
+    const user = await get("SELECT * FROM users LIMIT 1");
+    if (!user) return res.json({ configured: false });
+
+    const row = await get(
+      `SELECT developer_client_id, marketplace_id, status
+       FROM connections
+       WHERE user_id = ? AND provider = 'ebay'
+       LIMIT 1`,
+      [user.id],
+    );
+
+    res.json({
+      configured: Boolean(
+        row?.developer_client_id && row?.status === "connected",
+      ),
+      client_id: row?.developer_client_id || null,
+      marketplace_id: row?.marketplace_id || "EBAY_US",
+      status: row?.status || "disconnected",
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/ebay/configure", async (req, res) => {
+  try {
+    if (process.env.RADAR_DESKTOP !== "1") {
+      return res.status(403).json({
+        error: "As credenciais do eBay só podem ser salvas no Radar Desktop.",
+      });
+    }
+
+    const clientId = String(req.body?.client_id || "").trim();
+    const clientSecret = String(req.body?.client_secret || "").trim();
+    const marketplaceId = String(
+      req.body?.marketplace_id || "EBAY_US",
+    ).trim();
+
+    if (clientId.length < 10 || clientSecret.length < 10) {
+      return res.status(400).json({
+        error: "Informe o Client ID/App ID e o Client Secret/Cert ID do eBay Developer.",
+      });
+    }
+
+    const allowedMarketplaces = new Set([
+      "EBAY_US", "EBAY_GB", "EBAY_DE", "EBAY_AU",
+      "EBAY_CA", "EBAY_FR", "EBAY_IT", "EBAY_ES",
+    ]);
+
+    if (!allowedMarketplaces.has(marketplaceId)) {
+      return res.status(400).json({
+        error: "Marketplace do eBay não suportado nesta versão.",
+      });
+    }
+
+    const validation = await validateEbayCredentials({
+      clientId,
+      clientSecret,
+      marketplaceId,
+    });
+
+    if (!validation.ok) {
+      return res.status(validation.status || 400).json({
+        error: validation.reason || "O eBay rejeitou as credenciais.",
+      });
+    }
+
+    const user = await get("SELECT * FROM users LIMIT 1");
+    if (!user) {
+      return res.status(500).json({ error: "Usuário local não encontrado." });
+    }
+
+    await run(
+      `INSERT INTO connections (
+        user_id, provider, provider_username,
+        developer_client_id, developer_client_secret, marketplace_id,
+        status, updated_at
+      ) VALUES (?, 'ebay', ?, ?, ?, ?, 'connected', CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, provider) DO UPDATE SET
+        provider_username = excluded.provider_username,
+        developer_client_id = excluded.developer_client_id,
+        developer_client_secret = excluded.developer_client_secret,
+        marketplace_id = excluded.marketplace_id,
+        status = 'connected',
+        updated_at = CURRENT_TIMESTAMP`,
+      [
+        user.id,
+        marketplaceId,
+        clientId,
+        clientSecret,
+        marketplaceId,
+      ],
+    );
+
+    res.json({
+      ok: true,
+      provider: "ebay",
+      marketplace_id: marketplaceId,
+      client_id: clientId,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/sources/status", async (_req, res) => {
+  try {
+    const user = await get("SELECT * FROM users LIMIT 1");
+    const ebayConnection = user
+      ? await get(
+          `SELECT developer_client_id, developer_client_secret, marketplace_id, status
+           FROM connections
+           WHERE user_id = ? AND provider = 'ebay'
+           LIMIT 1`,
+          [user.id],
+        )
+      : null;
+
+    const ebayCredentials =
+      ebayConnection?.status === "connected"
+        ? {
+            clientId: ebayConnection.developer_client_id,
+            clientSecret: ebayConnection.developer_client_secret,
+            marketplaceId:
+              ebayConnection.marketplace_id || "EBAY_US",
+          }
+        : null;
+
+    res.json({
+      ebay: getEbayStatus(ebayCredentials),
+      olx: getOlxStatus(),
+      depop: getDepopStatus(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* =========================
@@ -3678,7 +3862,13 @@ app.get(
         if (existing) return existing;
 
         let status = "disconnected";
-        if (provider === "ebay" && !ebayStatus.configured) status = "pending_credentials";
+        if (
+          provider === "ebay" &&
+          !ebayStatus.configured &&
+          process.env.RADAR_DESKTOP !== "1"
+        ) {
+          status = "pending_credentials";
+        }
         if (provider === "olx" && !olxStatus.configured) status = "pending_homologation";
         if (provider === "depop" && !depopStatus.configured) status = "partner_access_required";
 

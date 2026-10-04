@@ -28,6 +28,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
     radar,
     runId,
     mercadoLivreAccessToken,
+    ebayCredentials,
     seenKeys,
   }) {
     const candidates = await all(
@@ -91,6 +92,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         sourceKey: listing.source_key,
         externalId: listing.external_id,
         mercadoLivreAccessToken,
+        ebayCredentials,
       });
 
       if (!verification?.verifiable || !verification.ok) {
@@ -268,6 +270,26 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
       if (!user) throw new Error('Usuário local não encontrado.');
 
       const mlConnection = await getValidMercadoLivreConnection(user.id);
+      const ebayConnection = await get(
+        `SELECT developer_client_id, developer_client_secret, marketplace_id, status
+         FROM connections
+         WHERE user_id = ? AND provider = 'ebay'
+         LIMIT 1`,
+        [user.id],
+      );
+
+      const ebayCredentials =
+        ebayConnection?.status === "connected" &&
+        ebayConnection.developer_client_id &&
+        ebayConnection.developer_client_secret
+          ? {
+              clientId: ebayConnection.developer_client_id,
+              clientSecret: ebayConnection.developer_client_secret,
+              marketplaceId:
+                ebayConnection.marketplace_id || "EBAY_US",
+            }
+          : null;
+
       let referenceImageBuffer = null;
       if (radar.reference_image_path) {
         try {
@@ -281,6 +303,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         referenceImageBuffer,
         mercadoLivreAccessToken:
           mlConnection?.status === 'connected' ? mlConnection.access_token : null,
+        ebayCredentials,
         limit: 50,
       });
 
@@ -288,6 +311,117 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
       const successfulItems = sourceRuns.flatMap((source) =>
         source.ok ? source.items : [],
       );
+
+      const catalogItems = sourceRuns.flatMap((source) =>
+        Array.isArray(source.catalog_items)
+          ? source.catalog_items
+          : [],
+      );
+
+      let catalogAdded = 0;
+      let catalogUpdated = 0;
+
+      for (const product of catalogItems) {
+        if (!product.external_id || !product.title) continue;
+
+        const catalogDomain = String(product.domain_id || "").toUpperCase();
+        const catalogTitle = String(product.title || "").toLowerCase();
+        const accessoryCatalog =
+          /BATTER|CHARGER|CABLE|ADAPTER|ACCESSOR/.test(catalogDomain) ||
+          /\b(bateria|carregador|cabo|adaptador|fonte)\b/i.test(catalogTitle);
+
+        if (
+          radar.category === "cameras" &&
+          accessoryCatalog
+        ) {
+          continue;
+        }
+
+        const existingCatalog = await get(
+          `SELECT id
+           FROM catalog_discoveries
+           WHERE radar_id = ?
+             AND source_key = ?
+             AND external_id = ?`,
+          [
+            radar.id,
+            product.source || "mercadolivre_catalog",
+            product.external_id,
+          ],
+        );
+
+        if (existingCatalog) {
+          await run(
+            `UPDATE catalog_discoveries
+             SET title = ?,
+                 url = ?,
+                 image_url = ?,
+                 product_status = ?,
+                 domain_id = ?,
+                 metadata_json = ?,
+                 last_seen_at = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [
+              product.title,
+              product.url || null,
+              product.image_url || null,
+              product.product_status || null,
+              product.domain_id || null,
+              JSON.stringify({
+                search_query: product.search_query || null,
+                ...(product.metadata || {}),
+              }),
+              existingCatalog.id,
+            ],
+          );
+
+          catalogUpdated += 1;
+          continue;
+        }
+
+        const insertedCatalog = await run(
+          `INSERT INTO catalog_discoveries (
+            radar_id, source_key, external_id, title, url,
+            image_url, product_status, domain_id, metadata_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            radar.id,
+            product.source || "mercadolivre_catalog",
+            product.external_id,
+            product.title,
+            product.url || null,
+            product.image_url || null,
+            product.product_status || null,
+            product.domain_id || null,
+            JSON.stringify({
+              search_query: product.search_query || null,
+              ...(product.metadata || {}),
+            }),
+          ],
+        );
+
+        await run(
+          `INSERT INTO activity_events
+            (radar_id, run_id, type, title, detail, metadata_json)
+           VALUES (?, ?, 'catalog_discovery', ?, ?, ?)`,
+          [
+            radar.id,
+            runRecord.id,
+            `Pista de catálogo: ${product.title}`,
+            product.domain_id
+              ? `Mercado Livre Catálogo • ${product.domain_id}`
+              : "Mercado Livre Catálogo",
+            JSON.stringify({
+              catalog_discovery_id: insertedCatalog.id,
+              external_id: product.external_id,
+              url: product.url || null,
+              search_query: product.search_query || null,
+            }),
+          ],
+        );
+
+        catalogAdded += 1;
+      }
 
       const seenKeys = new Set(
         successfulItems
@@ -571,6 +705,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         runId: runRecord.id,
         mercadoLivreAccessToken:
           mlConnection?.status === 'connected' ? mlConnection.access_token : null,
+        ebayCredentials,
         seenKeys,
       });
 
@@ -579,16 +714,30 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
       restored = availability.restored;
       priceDrops += availability.price_drops;
 
-      const sourceSummary = sourceRuns.map((source) => ({
-        source: source.source,
-        ok: source.ok,
-        skipped: Boolean(source.skipped),
-        status: source.status || null,
-        reason: source.reason || null,
-        found: source.items?.length || 0,
-      }));
+      const sourceSummary = sourceRuns.map((source) => {
+        const catalogFound = Array.isArray(source.catalog_items)
+          ? source.catalog_items.length
+          : 0;
 
-      for (const source of sourceSummary.filter((entry) => !entry.ok && !entry.skipped)) {
+        return {
+          source: source.source,
+          ok: Boolean(source.ok || catalogFound > 0),
+          marketplace_ok: Boolean(source.ok),
+          catalog_only: !source.ok && catalogFound > 0,
+          skipped: Boolean(source.skipped),
+          status: source.status || null,
+          reason: source.reason || null,
+          found: source.items?.length || 0,
+          catalog_found: catalogFound,
+        };
+      });
+
+      for (const source of sourceSummary.filter(
+        (entry) =>
+          !entry.ok &&
+          !entry.skipped &&
+          !entry.catalog_only,
+      )) {
         await run(
           `INSERT INTO activity_events
             (radar_id, run_id, type, title, detail, metadata_json)
@@ -606,6 +755,10 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
       const activeSources = sourceSummary.filter((source) => source.ok).length;
       const unavailableSources = sourceSummary.filter((source) => !source.ok);
       let message = `${results.length} anúncios selecionados de ${activeSources} fonte(s). ${added} novos, ${updated} atualizados, ${priceDrops} queda(s) de preço, ${unavailable} indisponível(is) e ${restored} restaurado(s).`;
+
+      if (catalogItems.length) {
+        message += ` Mercado Livre Catálogo: ${catalogAdded} pista(s) nova(s) e ${catalogUpdated} atualizada(s).`;
+      }
       if (visualEnabled || semanticEnabled) {
         message += ` Radar visual ativo (mínimo ${Math.round(minVisualSimilarity * 100)}%).`;
         if (semanticEnabled) message += ' IA visual semântica ativa.';
@@ -647,7 +800,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
           runRecord.id,
           `Radar executado: ${radar.name}`,
           message,
-          JSON.stringify({ sources: sourceSummary, added, updated, priceDrops, availabilityChecks, unavailable, restored, trigger }),
+          JSON.stringify({ sources: sourceSummary, added, updated, priceDrops, availabilityChecks, unavailable, restored, catalogAdded, catalogUpdated, trigger }),
         ],
       );
 
@@ -672,6 +825,8 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         availability_checks: availabilityChecks,
         unavailable,
         restored,
+        catalog_added: catalogAdded,
+        catalog_updated: catalogUpdated,
         sources: sourceSummary,
         message,
       };
