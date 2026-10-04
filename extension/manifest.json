@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Radar 2.0 Bridge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Sincroniza anúncios visíveis com a Inbox inteligente do Radar 2.0.",
   "permissions": ["activeTab", "scripting", "storage", "notifications"],
   "host_permissions": [

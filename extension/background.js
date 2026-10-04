@@ -81,6 +81,7 @@ async function importAutoCapture(capture, sender) {
         radar_id: null,
         auto_assign: true,
         capture_mode: 'auto',
+        capture_version: 4,
         source_url: capture.source_url,
         items: capture.items,
       }),

@@ -73,17 +73,130 @@
     return { price: Number.isFinite(number) ? number : null, currency };
   }
 
-  function cardFor(anchor, platform) {
-    if (platform === 'OLX') {
-      let node = anchor;
-      let firstWithImage = null;
-      for (let depth = 0; node && depth < 14; depth += 1, node = node.parentElement) {
-        const hasImage = Boolean(node.querySelector?.('img'));
-        if (hasImage && !firstWithImage) firstWithImage = node;
-        const text = String(node.innerText || '').replace(/\s+/g, ' ').trim();
-        if (hasImage && /R\$\s*\d/.test(text) && text.length <= 2200) return node;
+  function listingIdentity(url, platform) {
+    try {
+      const u = new URL(url);
+      const path = u.pathname;
+
+      if (platform === 'OLX') {
+        const match = path.match(/-(\d{8,})(?:\/)?$/);
+        return match ? `olx:${match[1]}` : cleanUrl(u.href);
       }
-      if (firstWithImage) return firstWithImage;
+
+      if (platform === 'Mercado Livre' || platform === 'Mercado Libre') {
+        const match = u.href.toUpperCase().match(/MLB-?(\d{6,})/);
+        return match ? `mlb:${match[1]}` : cleanUrl(u.href);
+      }
+
+      if (platform === 'eBay') {
+        const match = path.match(/\/itm\/(?:[^/]+\/)?(\d{8,})/i);
+        return match ? `ebay:${match[1]}` : cleanUrl(u.href);
+      }
+
+      if (platform === 'Depop') {
+        const match = path.match(/\/products\/([^/?#]+)/i);
+        return match ? `depop:${match[1].toLowerCase()}` : cleanUrl(u.href);
+      }
+
+      return cleanUrl(u.href);
+    } catch {
+      return String(url || '');
+    }
+  }
+
+  function olxCardFor(anchor, anchorUrl) {
+    const anchorIdentity = listingIdentity(anchorUrl, 'OLX');
+
+    for (
+      let node = anchor;
+      node && node !== document.body && node !== document.documentElement;
+      node = node.parentElement
+    ) {
+      const text = String(node.innerText || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (text.length > 1200) {
+        break;
+      }
+
+      const imageCount = node.querySelectorAll?.('img')?.length || 0;
+      if (!imageCount || imageCount > 6 || !/R\$\s*\d/.test(text)) {
+        continue;
+      }
+
+      const listingIdentities = new Set(
+        [...(node.querySelectorAll?.('a[href]') || [])]
+          .map((link) => absoluteUrl(link.getAttribute('href')))
+          .filter(Boolean)
+          .filter((href) => looksLikeListingUrl(href, 'OLX'))
+          .map((href) => listingIdentity(href, 'OLX')),
+      );
+
+      if (
+        listingIdentities.size === 1 &&
+        listingIdentities.has(anchorIdentity)
+      ) {
+        return node;
+      }
+    }
+
+    return null;
+  }
+
+  function olxTitleMatchesUrl(title, url) {
+    try {
+      const path = new URL(url).pathname;
+      const match = path.match(/\/([^/]+)-(\d{8,})(?:\/)?$/);
+
+      if (!match) return true;
+
+      const ignored = new Set([
+        'sony',
+        'handycam',
+        'filmadora',
+        'camera',
+        'cameras',
+        'modelo',
+        'original',
+        'usada',
+        'usado',
+      ]);
+
+      const words = (value) =>
+        new Set(
+          String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim()
+            .split(/\s+/)
+            .filter((word) => word.length >= 3 && !ignored.has(word)),
+        );
+
+      const titleWords = words(title);
+      const slugWords = words(match[1]);
+
+      if (!titleWords.size || !slugWords.size) {
+        return true;
+      }
+
+      let shared = 0;
+
+      for (const word of titleWords) {
+        if (slugWords.has(word)) shared += 1;
+      }
+
+      return shared >= 1;
+    } catch {
+      return true;
+    }
+  }
+
+  function cardFor(anchor, platform, anchorUrl) {
+    if (platform === 'OLX') {
+      return olxCardFor(anchor, anchorUrl);
     }
 
     const direct = anchor.closest(
@@ -128,11 +241,15 @@
 
       const rawUrl = absoluteUrl(anchor.getAttribute('href'));
       const url = rawUrl ? cleanUrl(rawUrl) : null;
-      if (!url || !/^https?:/i.test(url) || seen.has(url)) continue;
+      if (!url || !/^https?:/i.test(url)) continue;
       if (!looksLikeListingUrl(url, platform)) continue;
+
+      const identity = listingIdentity(url, platform);
+      if (!identity || seen.has(identity)) continue;
       diagnostics.passedUrl += 1;
 
-      const card = cardFor(anchor, platform);
+      const card = cardFor(anchor, platform, url);
+      if (!card) continue;
       const rect = card.getBoundingClientRect?.();
       if (rect && rect.width === 0 && rect.height === 0) continue;
       diagnostics.passedVisible += 1;
@@ -151,6 +268,14 @@
       ).replace(/\s+/g, ' ').trim();
       if (title.length > 180) title = title.slice(0, 180);
       if (title.length < 3) continue;
+
+      if (
+        platform === 'OLX' &&
+        !olxTitleMatchesUrl(title, url)
+      ) {
+        continue;
+      }
+
       diagnostics.passedTitle += 1;
 
       const { price, currency } = parsePrice(text);
@@ -158,7 +283,7 @@
         image.currentSrc || image.src || image.getAttribute('data-src') || image.getAttribute('data-lazy-src'),
       );
 
-      seen.add(url);
+      seen.add(identity);
       items.push({
         title,
         platform,
@@ -170,7 +295,7 @@
     }
 
     return {
-      version: 3,
+      version: 4,
       source_url: location.href,
       platform,
       captured_at: new Date().toISOString(),

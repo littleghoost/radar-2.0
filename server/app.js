@@ -1565,6 +1565,8 @@ function inferBrowserSourceIdentity(platform, url) {
 
   if (platformText.includes("olx") || lowerUrl.includes("olx.com")) {
     sourceKey = "olx";
+    const match = new URL(urlText).pathname.match(/-(\d{8,})(?:\/)?$/);
+    if (match) externalId = match[1];
   } else if (
     platformText.includes("mercado livre") ||
     platformText.includes("mercado libre") ||
@@ -1586,6 +1588,73 @@ function inferBrowserSourceIdentity(platform, url) {
   return { sourceKey, externalId };
 }
 
+function titleSimilarity(left, right) {
+  const a = new Set(normalizeSearchWords(left));
+  const b = new Set(normalizeSearchWords(right));
+
+  if (!a.size || !b.size) {
+    return String(left || "").trim().toLowerCase() ===
+      String(right || "").trim().toLowerCase()
+      ? 1
+      : 0;
+  }
+
+  let intersection = 0;
+  for (const word of a) {
+    if (b.has(word)) intersection += 1;
+  }
+
+  return intersection / Math.max(a.size, b.size);
+}
+
+function validateAutoCaptureBatch(items) {
+  if (!Array.isArray(items) || items.length < 8) {
+    return { ok: true };
+  }
+
+  const titleCounts = new Map();
+  const priceCounts = new Map();
+
+  for (const item of items) {
+    const titleKey = normalizeSearchWords(item?.title).join(" ");
+    if (titleKey) {
+      titleCounts.set(titleKey, (titleCounts.get(titleKey) || 0) + 1);
+    }
+
+    const price = Number(item?.current_price ?? item?.price);
+    if (Number.isFinite(price)) {
+      const key = String(price);
+      priceCounts.set(key, (priceCounts.get(key) || 0) + 1);
+    }
+  }
+
+  const maxTitleCount = Math.max(0, ...titleCounts.values());
+  const maxPriceCount = Math.max(0, ...priceCounts.values());
+  const titleDominance = maxTitleCount / items.length;
+  const priceDominance = maxPriceCount / items.length;
+  const titleDiversity = titleCounts.size / items.length;
+
+  if (titleDominance >= 0.45 || titleDiversity <= 0.3) {
+    return {
+      ok: false,
+      reason: "capture_title_collision",
+      title_dominance: titleDominance,
+      title_diversity: titleDiversity,
+    };
+  }
+
+  if (priceDominance >= 0.9 && titleDiversity <= 0.55) {
+    return {
+      ok: false,
+      reason: "capture_price_collision",
+      price_dominance: priceDominance,
+      title_diversity: titleDiversity,
+    };
+  }
+
+  return { ok: true };
+}
+
 /* =========================
    IMPORTAÇÃO ASSISTIDA
 ========================= */
@@ -1601,6 +1670,27 @@ app.post("/api/import/assisted", async (req, res) => {
     const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 100) : [];
     if (!items.length) {
       return res.status(400).json({ error: "Nenhum anúncio válido foi recebido." });
+    }
+
+    if (
+      isAutoCapture &&
+      Number(req.body?.capture_version || 0) < 4
+    ) {
+      return res.status(409).json({
+        error: "Bridge desatualizada. Recarregue a extensão e atualize a página.",
+        code: "bridge_reload_required",
+      });
+    }
+
+    if (isAutoCapture) {
+      const guard = validateAutoCaptureBatch(items);
+      if (!guard.ok) {
+        return res.status(422).json({
+          error: "Captura automática rejeitada por inconsistência entre os cards.",
+          code: guard.reason,
+          guard,
+        });
+      }
     }
 
     if (radarId) {
@@ -1641,11 +1731,32 @@ app.post("/api/import/assisted", async (req, res) => {
           url,
         );
 
-        const existing = await get(
-          "SELECT * FROM listings WHERE url = ?",
-          [url],
-        );
+        let existing = null;
+
+        if (sourceKey && externalId) {
+          existing = await get(
+            "SELECT * FROM listings WHERE source_key = ? AND external_id = ?",
+            [sourceKey, externalId],
+          );
+        }
+
+        if (!existing) {
+          existing = await get(
+            "SELECT * FROM listings WHERE url = ?",
+            [url],
+          );
+        }
+
         if (existing) {
+          if (
+            isAutoCapture &&
+            existing.title &&
+            titleSimilarity(existing.title, title) < 0.35
+          ) {
+            summary.invalid += 1;
+            continue;
+          }
+
           const nextPrice = Number.isFinite(currentPrice) ? currentPrice : null;
           const previousPrice =
             existing.current_price === null || existing.current_price === undefined
