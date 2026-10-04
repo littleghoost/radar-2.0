@@ -16,6 +16,58 @@ const listingModal = $("#listingModal");
 
 const importModal = $("#importModal");
 
+const INBOX_LABELS = {
+  grail: "Grail",
+  provavel: "Provável",
+  talvez: "Talvez",
+  triagem: "Triagem",
+  ruido: "Ruído",
+};
+
+function inboxTierLabel(tier) {
+  return INBOX_LABELS[tier] || "Triagem";
+}
+
+function setInboxFilter(tier) {
+  const filter = $("#inboxFilter");
+
+  if (!filter) return;
+
+  filter.value = filter.value === tier ? "" : tier;
+  loadListings();
+}
+
+function renderInboxSummary(listings) {
+  const summary = $("#inboxSummary");
+  if (!summary) return;
+
+  const counts = {
+    grail: 0,
+    provavel: 0,
+    talvez: 0,
+    triagem: 0,
+    ruido: 0,
+  };
+
+  listings.forEach((listing) => {
+    const tier = listing.inbox_tier || "triagem";
+    if (counts[tier] !== undefined) counts[tier] += 1;
+  });
+
+  summary.innerHTML = Object.entries(counts)
+    .map(([tier, count]) => `
+      <button
+        type="button"
+        class="inbox-summary-chip ${tier}"
+        onclick="setInboxFilter('${tier}')"
+      >
+        <span>${inboxTierLabel(tier)}</span>
+        <strong>${count}</strong>
+      </button>
+    `)
+    .join("");
+}
+
 function listingImageUrl(url) {
   if (!url) return "";
 
@@ -939,7 +991,15 @@ async function loadListings() {
     params.set("search", search);
   }
 
-  state.listings = await api(`/api/listings?${params.toString()}`);
+  const fetchedListings = await api(`/api/listings?${params.toString()}`);
+
+  renderInboxSummary(fetchedListings);
+
+  const inbox = $("#inboxFilter")?.value || "";
+
+  state.listings = inbox
+    ? fetchedListings.filter((listing) => listing.inbox_tier === inbox)
+    : fetchedListings;
 
   const sort = $("#sortFilter")?.value || "default";
 
@@ -954,6 +1014,10 @@ async function loadListings() {
     };
 
     state.listings.sort((a, b) => {
+      if (sort === "inbox_desc") {
+        return numeric(b.inbox_score) - numeric(a.inbox_score);
+      }
+
       if (sort === "recent") {
         return new Date(b.updated_at || b.created_at || 0) -
           new Date(a.updated_at || a.created_at || 0);
@@ -1110,6 +1174,12 @@ async function loadListings() {
 
                 </div>
 
+                <div class="inbox-row">
+                  <span class="inbox-tier ${escapeAttr(listing.inbox_tier || "triagem")}">
+                    ${escapeHtml(inboxTierLabel(listing.inbox_tier))}
+                    ${listing.inbox_score !== null && listing.inbox_score !== undefined ? ` · ${Math.round(Number(listing.inbox_score))}` : ""}
+                  </span>
+                </div>
 
                 <h3>
 
@@ -1128,6 +1198,31 @@ async function loadListings() {
 
 
                 ${drop}
+
+                ${
+                  Array.isArray(listing.tags) && listing.tags.length
+                    ? `
+                      <div class="tag-row">
+                        ${listing.tags
+                          .map(
+                            (tag) =>
+                              `<span class="auto-tag">${escapeHtml(tag)}</span>`,
+                          )
+                          .join("")}
+                      </div>
+                    `
+                    : ""
+                }
+
+                ${
+                  listing.score_reason
+                    ? `
+                      <p class="score-explanation">
+                        ${escapeHtml(listing.score_reason)}
+                      </p>
+                    `
+                    : ""
+                }
 
                 ${
                   listing.hybrid_score !== null && listing.hybrid_score !== undefined
@@ -1576,6 +1671,8 @@ $("#radarFilter").onchange = (event) => {
 };
 
 $("#statusFilter").onchange = loadListings;
+
+$("#inboxFilter").onchange = loadListings;
 
 $("#sortFilter").onchange = loadListings;
 

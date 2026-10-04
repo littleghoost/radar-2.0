@@ -478,6 +478,156 @@ async function applyRadarToListing(listing, radarId) {
   return intelligence;
 }
 
+function deriveListingInsights(listing) {
+  const rawTitle = String(listing.title || "");
+  const title = rawTitle
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const tags = [];
+  const reasons = [];
+
+  const addTag = (tag) => {
+    if (tag && !tags.includes(tag)) tags.push(tag);
+  };
+
+  if (/nightshot|visao noturna|visao nocturna/.test(title)) {
+    addTag("NightShot");
+  }
+
+  if (/\bhdd\b|hard\s*disk|disco\s*rigido/.test(title)) {
+    addTag("HDD");
+  }
+
+  const srModel = rawTitle.match(/\b(?:DCR[\s-]*)?(SR\d+)\b/i);
+  if (srModel) {
+    addTag(srModel[1].toUpperCase());
+  }
+
+  const dcrModel = rawTitle.match(/\bDCR[\s-]*([A-Z]{1,5}\d+[A-Z0-9]*)\b/i);
+  if (dcrModel && !srModel) {
+    addTag(`DCR-${dcrModel[1].toUpperCase()}`);
+  }
+
+  if (/\bmini\s*dv\b/.test(title)) addTag("MiniDV");
+  if (/\bhi8\b/.test(title)) addTag("Hi8");
+  if (/\bvideo\s*8\b|\bvideo8\b/.test(title)) addTag("Video8");
+  if (/\bdigital\s*8\b|\bdigital8\b/.test(title)) addTag("Digital8");
+  if (/\bdvd\b/.test(title)) addTag("DVD");
+  if (/\b4k\b/.test(title)) addTag("4K");
+  if (/projetor/.test(title)) addTag("Projetor");
+  if (/\blote\b/.test(title)) addTag("Lote");
+  if (/rara|raro|vintage|retro|colecionador/.test(title)) addTag("Vintage/Rara");
+  if (/nova|novo|nunca usada|nunca usado/.test(title)) addTag("Nova");
+  if (/completa|completo|acessorios|acessorio/.test(title)) addTag("Completa");
+  if (/nao funciona|nao sei se funciona|defeito|retirada de pecas|para pecas|reparo|sucata/.test(title)) {
+    addTag("Reparo");
+  }
+
+  const currentPrice =
+    listing.current_price === null || listing.current_price === undefined
+      ? null
+      : Number(listing.current_price);
+
+  const maxPrice =
+    listing.radar_max_price === null || listing.radar_max_price === undefined
+      ? null
+      : Number(listing.radar_max_price);
+
+  if (Number.isFinite(currentPrice) && Number.isFinite(maxPrice)) {
+    if (currentPrice <= maxPrice) {
+      addTag("Dentro do teto");
+      reasons.push("preço dentro do teto do radar");
+    } else {
+      addTag("Acima do teto");
+      reasons.push("preço acima do teto do radar");
+    }
+  }
+
+  const firstPrice =
+    listing.first_price === null || listing.first_price === undefined
+      ? null
+      : Number(listing.first_price);
+
+  if (
+    Number.isFinite(firstPrice) &&
+    Number.isFinite(currentPrice) &&
+    currentPrice < firstPrice
+  ) {
+    const dropPercent = Math.round(((firstPrice - currentPrice) / firstPrice) * 100);
+    addTag("Preço caiu");
+    reasons.push(`preço caiu ${dropPercent}%`);
+  }
+
+  let matchMetrics = null;
+
+  if (listing.radar_query) {
+    matchMetrics = radarMatchMetrics(
+      {
+        query: listing.radar_query,
+        max_price: listing.radar_max_price,
+      },
+      listing,
+    );
+
+    if (matchMetrics.strongHits > 0) {
+      reasons.push(
+        matchMetrics.strongHits === 1
+          ? "1 sinal forte compatível"
+          : `${matchMetrics.strongHits} sinais fortes compatíveis`,
+      );
+    }
+  }
+
+  const baseScore = Number(
+    listing.grail_score ?? listing.hybrid_score ?? 0,
+  );
+
+  let inboxScore = Number.isFinite(baseScore) ? baseScore : 0;
+
+  if (matchMetrics?.strongHits) {
+    inboxScore += Math.min(24, matchMetrics.strongHits * 12);
+  }
+
+  if (tags.includes("Dentro do teto")) inboxScore += 10;
+  if (tags.includes("Acima do teto")) inboxScore -= 10;
+  if (tags.includes("Preço caiu")) inboxScore += 8;
+  if (listing.status === "interessante") inboxScore += 15;
+  if (listing.status === "descartado" || listing.status === "vendido") inboxScore -= 30;
+
+  inboxScore = Math.max(0, Math.min(100, Math.round(inboxScore)));
+
+  let inboxTier = "triagem";
+
+  if (listing.radar_id) {
+    if (inboxScore >= 80) inboxTier = "grail";
+    else if (inboxScore >= 55) inboxTier = "provavel";
+    else if (inboxScore >= 25) inboxTier = "talvez";
+    else inboxTier = "ruido";
+  }
+
+  if (listing.radar_name) {
+    reasons.unshift(`radar: ${listing.radar_name}`);
+  } else {
+    reasons.push("ainda sem radar definido");
+  }
+
+  if (Number.isFinite(baseScore) && baseScore > 0) {
+    reasons.push(`score base ${Math.round(baseScore)}/100`);
+  }
+
+  if (tags.includes("NightShot")) reasons.push("NightShot detectado no título");
+  if (srModel) reasons.push(`modelo ${srModel[1].toUpperCase()} detectado`);
+
+  return {
+    tags: tags.slice(0, 8),
+    inbox_score: inboxScore,
+    inbox_tier: inboxTier,
+    score_reason: reasons.slice(0, 4).join(" • "),
+  };
+}
+
 async function autoAssignListing(listing, radars) {
   const candidates = radars
     .map((radar) => ({
@@ -1302,6 +1452,12 @@ app.get(
           r.name
             AS radar_name,
 
+          r.query
+            AS radar_query,
+
+          r.max_price
+            AS radar_max_price,
+
           (
 
             SELECT
@@ -1357,7 +1513,12 @@ app.get(
         params,
       );
 
-      res.json(rows);
+      res.json(
+        rows.map((row) => ({
+          ...row,
+          ...deriveListingInsights(row),
+        })),
+      );
     } catch (err) {
       res.status(500).json({
         error: err.message,

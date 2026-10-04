@@ -174,7 +174,7 @@ main {
 
 .filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(150px, 1fr));
+  grid-template-columns: minmax(220px, 1.5fr) repeat(4, minmax(140px, 1fr));
   gap: 10px;
   margin-bottom: 16px;
 }
@@ -985,5 +985,108 @@ label textarea {
   .bulk-controls select {
     width: 100%;
     min-width: 0;
+  }
+}
+
+.inbox-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(100px, 1fr));
+  gap: 8px;
+  margin: -4px 0 14px;
+}
+
+.inbox-summary-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #111116;
+  color: var(--muted);
+}
+
+.inbox-summary-chip strong {
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.inbox-row {
+  margin: 10px 0 2px;
+}
+
+.inbox-tier {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.inbox-tier.grail,
+.inbox-summary-chip.grail {
+  border-color: rgba(255, 215, 90, 0.45);
+}
+
+.inbox-tier.provavel,
+.inbox-summary-chip.provavel {
+  border-color: rgba(104, 220, 153, 0.42);
+}
+
+.inbox-tier.talvez,
+.inbox-summary-chip.talvez {
+  border-color: rgba(116, 167, 255, 0.38);
+}
+
+.inbox-tier.triagem,
+.inbox-summary-chip.triagem {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.inbox-tier.ruido,
+.inbox-summary-chip.ruido {
+  opacity: 0.72;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.auto-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.score-explanation {
+  margin: 10px 0 2px;
+  color: var(--muted);
+  font-size: 0.79rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 980px) {
+  .inbox-summary {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .inbox-summary {
+    grid-template-columns: repeat(2, 1fr);
   }
 }

@@ -138,8 +138,18 @@
               <option value="vendido">Vendido</option>
             </select>
 
+            <select id="inboxFilter">
+              <option value="">Inbox: todos</option>
+              <option value="grail">Grail</option>
+              <option value="provavel">Provável</option>
+              <option value="talvez">Talvez</option>
+              <option value="triagem">Triagem</option>
+              <option value="ruido">Ruído</option>
+            </select>
+
             <select id="sortFilter">
               <option value="default">Melhores primeiro</option>
+              <option value="inbox_desc">Inbox inteligente</option>
               <option value="recent">Mais recentes</option>
               <option value="price_asc">Menor preço</option>
               <option value="price_desc">Maior preço</option>
@@ -147,6 +157,8 @@
               <option value="score_desc">Maior score</option>
             </select>
           </div>
+
+          <div id="inboxSummary" class="inbox-summary"></div>
 
           <div class="bulk-actions" id="bulkActions">
             <label class="bulk-select-all">
