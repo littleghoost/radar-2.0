@@ -364,6 +364,31 @@
 
   globalThis.__radarCollectVisibleListings = collectVisibleListings;
 
+  chrome.runtime.onMessage.addListener(
+    (message, _sender, sendResponse) => {
+      if (message?.type !== 'radar-collect-now') {
+        return false;
+      }
+
+      try {
+        sendResponse({
+          ok: true,
+          capture: collectVisibleListings(
+            Number(message.limit || 100),
+          ),
+        });
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error:
+            error?.message || String(error),
+        });
+      }
+
+      return false;
+    },
+  );
+
   const autoPlatforms = new Set([
     'OLX',
     'Enjoei',

@@ -22,6 +22,15 @@ No Chrome/Chromium, o processo é equivalente em `chrome://extensions`.
 
 A extensão lembra o último radar escolhido.
 
+### Auto-Browse (beta)
+
+Desligado por padrão. Quando ativado, o Bridge consulta o Search Planner dos radares agendados e processa uma busca por vez em aba inativa. A aba é fechada logo após a captura.
+
+- Câmeras: OLX, Enjoei e Mercado Livre.
+- Roupas/geral: OLX, Enjoei, Mercado Livre e Depop.
+- Facebook Marketplace continua com Auto-Capture enquanto você navega, porque páginas em segundo plano podem depender da sessão/visibilidade.
+- O Auto-Browse não tenta contornar login, CAPTCHA ou bloqueios do marketplace.
+
 ## Privacidade e limites
 
 - Não lê cookies, senhas, sessões ou armazenamento do marketplace.

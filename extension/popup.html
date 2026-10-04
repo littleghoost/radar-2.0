@@ -35,6 +35,22 @@
           Aguardando atividade automática.
         </div>
 
+        <label class="auto-capture-row">
+          <span>
+            <strong>Auto-Browse (beta)</strong>
+            <small>Usa o Search Planner para abrir buscas agendadas em abas inativas, capturar e fechar automaticamente.</small>
+          </span>
+          <input id="autoBrowseEnabled" type="checkbox" />
+        </label>
+
+        <div id="autoBrowseStatus" class="auto-status muted">
+          Desligado por padrão.
+        </div>
+
+        <button id="runAutoBrowseNow" class="secondary" disabled>
+          Rodar próxima busca agora
+        </button>
+
         <label>
           Radar de destino (envio manual)
           <select id="radarSelect">

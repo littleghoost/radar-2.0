@@ -21,6 +21,7 @@ async function loadRadarStatus() {
     $('#mainCard').hidden = false;
     await loadRadars();
     await loadAutoCaptureState();
+    await loadAutoBrowseState();
   } catch {
     $('#statusDot').className = 'dot offline';
     $('#offlineCard').hidden = false;
@@ -100,6 +101,76 @@ async function loadAutoCaptureState() {
 
   status.textContent =
     'Ligado • Inbox + auto-organização • aguardando página compatível.';
+}
+
+async function loadAutoBrowseState() {
+  const stored = await chrome.storage.local.get({
+    autoBrowseEnabled: false,
+    autoBrowseQueue: [],
+    lastAutoBrowseAt: null,
+    lastAutoBrowseSource: null,
+    lastAutoBrowseQuery: null,
+    lastAutoBrowseCount: 0,
+    lastAutoBrowseImported: 0,
+    lastAutoBrowseUpdated: 0,
+    lastAutoBrowseRemaining: 0,
+    lastAutoBrowseError: null,
+    lastAutoBrowseStatus: null,
+  });
+
+  const checkbox = $('#autoBrowseEnabled');
+  const status = $('#autoBrowseStatus');
+  const runButton = $('#runAutoBrowseNow');
+
+  if (checkbox) {
+    checkbox.checked =
+      Boolean(stored.autoBrowseEnabled);
+  }
+
+  if (runButton) {
+    runButton.disabled =
+      !stored.autoBrowseEnabled;
+  }
+
+  if (!status) return;
+
+  if (!stored.autoBrowseEnabled) {
+    status.textContent =
+      'Desligado • nenhuma aba será aberta automaticamente.';
+    return;
+  }
+
+  const queueCount = Array.isArray(
+    stored.autoBrowseQueue,
+  )
+    ? stored.autoBrowseQueue.length
+    : Number(stored.lastAutoBrowseRemaining || 0);
+
+  if (stored.lastAutoBrowseError) {
+    status.textContent =
+      `Ligado • última busca falhou: ${stored.lastAutoBrowseError} • fila ${queueCount}`;
+    return;
+  }
+
+  if (stored.lastAutoBrowseAt) {
+    const time = new Date(
+      stored.lastAutoBrowseAt,
+    ).toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    status.textContent =
+      `Ligado • ${stored.lastAutoBrowseStatus || 'aguardando'} • ` +
+      `${stored.lastAutoBrowseCount || 0} lidos • ` +
+      `${stored.lastAutoBrowseImported || 0} novos • ` +
+      `${stored.lastAutoBrowseUpdated || 0} atualizados • ` +
+      `fila ${queueCount} • ${time}`;
+    return;
+  }
+
+  status.textContent =
+    'Ligado • aguardando a próxima verificação do Search Planner.';
 }
 
 async function activeTab() {
@@ -193,6 +264,61 @@ $('#autoCaptureEnabled').addEventListener('change', async () => {
 
   await loadAutoCaptureState();
 });
+
+$('#autoBrowseEnabled')?.addEventListener(
+  'change',
+  async () => {
+    const enabled =
+      $('#autoBrowseEnabled').checked;
+
+    await chrome.storage.local.set({
+      autoBrowseEnabled: enabled,
+      ...(enabled
+        ? {}
+        : {
+            autoBrowseQueue: [],
+            lastAutoBrowseRemaining: 0,
+          }),
+    });
+
+    await loadAutoBrowseState();
+  },
+);
+
+$('#runAutoBrowseNow')?.addEventListener(
+  'click',
+  async () => {
+    const button = $('#runAutoBrowseNow');
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Rodando...';
+
+    try {
+      const result =
+        await chrome.runtime.sendMessage({
+          type: 'radar-auto-browse-now',
+        });
+
+      if (!result?.ok && !result?.skipped) {
+        throw new Error(
+          result?.error ||
+            result?.result?.error ||
+            'A busca automática falhou.',
+        );
+      }
+    } catch (error) {
+      await chrome.storage.local.set({
+        lastAutoBrowseAt:
+          new Date().toISOString(),
+        lastAutoBrowseError:
+          error?.message || String(error),
+      });
+    } finally {
+      button.textContent = original;
+      await loadAutoBrowseState();
+    }
+  },
+);
 
 $('#radarSelect').addEventListener('change', async () => {
   const radarId = $('#radarSelect').value || null;

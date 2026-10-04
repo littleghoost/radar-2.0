@@ -21,6 +21,9 @@ async function radarApi(path, options = {}) {
 async function ensureDefaults() {
   const stored = await chrome.storage.local.get([
     'autoCaptureEnabled',
+    'autoBrowseEnabled',
+    'autoBrowseQueue',
+    'autoBrowseLastEnqueuedByRadar',
   ]);
 
   const next = {};
@@ -29,8 +32,33 @@ async function ensureDefaults() {
     next.autoCaptureEnabled = true;
   }
 
+  if (stored.autoBrowseEnabled === undefined) {
+    next.autoBrowseEnabled = false;
+  }
+
+  if (!Array.isArray(stored.autoBrowseQueue)) {
+    next.autoBrowseQueue = [];
+  }
+
+  if (
+    !stored.autoBrowseLastEnqueuedByRadar ||
+    typeof stored.autoBrowseLastEnqueuedByRadar !== 'object'
+  ) {
+    next.autoBrowseLastEnqueuedByRadar = {};
+  }
+
   if (Object.keys(next).length) {
     await chrome.storage.local.set(next);
+  }
+}
+
+async function ensureAutoBrowseAlarm() {
+  const existing = await chrome.alarms.get('radar-auto-browse');
+
+  if (!existing) {
+    chrome.alarms.create('radar-auto-browse', {
+      periodInMinutes: 2,
+    });
   }
 }
 
@@ -61,12 +89,19 @@ async function notifyAutoCapture(result) {
   });
 }
 
-async function importAutoCapture(capture, sender) {
+async function importAutoCapture(
+  capture,
+  sender,
+  { ignoreAutoCaptureToggle = false } = {},
+) {
   const stored = await chrome.storage.local.get({
     autoCaptureEnabled: true,
   });
 
-  if (!stored.autoCaptureEnabled) {
+  if (
+    !ignoreAutoCaptureToggle &&
+    !stored.autoCaptureEnabled
+  ) {
     return { ok: true, skipped: true, reason: 'auto_capture_disabled' };
   }
 
@@ -81,7 +116,7 @@ async function importAutoCapture(capture, sender) {
         radar_id: null,
         auto_assign: true,
         capture_mode: 'auto',
-        capture_version: 4,
+        capture_version: Number(capture.version || 5),
         source_url: capture.source_url,
         items: capture.items,
       }),
@@ -117,26 +152,428 @@ async function importAutoCapture(capture, sender) {
   }
 }
 
+function autoBrowseSearchUrl(source, query) {
+  const clean = String(query || '').trim();
+  const encoded = encodeURIComponent(clean);
+
+  if (!clean) return null;
+
+  if (source === 'olx') {
+    return `https://www.olx.com.br/brasil?q=${encoded}`;
+  }
+
+  if (source === 'enjoei') {
+    return `https://www.enjoei.com.br/@search?q=${encoded}`;
+  }
+
+  if (source === 'mercadolivre') {
+    return `https://lista.mercadolivre.com.br/${encoded.replace(/%20/g, '-')}`;
+  }
+
+  if (source === 'depop') {
+    return `https://www.depop.com/search/?q=${encoded}`;
+  }
+
+  return null;
+}
+
+function autoBrowseSourcesForRadar(radar = {}) {
+  const category = String(
+    radar.category || 'geral',
+  ).toLowerCase();
+
+  if (category === 'cameras') {
+    return ['olx', 'enjoei', 'mercadolivre'];
+  }
+
+  if (
+    category === 'roupas' ||
+    category === 'clothing' ||
+    category === 'fashion'
+  ) {
+    return ['olx', 'enjoei', 'mercadolivre', 'depop'];
+  }
+
+  return ['olx', 'enjoei', 'mercadolivre', 'depop'];
+}
+
+async function buildDueAutoBrowseJobs() {
+  const stored = await chrome.storage.local.get({
+    autoBrowseQueue: [],
+    autoBrowseLastEnqueuedByRadar: {},
+  });
+
+  if (
+    Array.isArray(stored.autoBrowseQueue) &&
+    stored.autoBrowseQueue.length
+  ) {
+    return stored.autoBrowseQueue;
+  }
+
+  const radars = await radarApi('/api/radars');
+  const now = Date.now();
+  const lastMap =
+    stored.autoBrowseLastEnqueuedByRadar || {};
+  const jobs = [];
+
+  for (const radar of radars) {
+    if (!radar.schedule_enabled) continue;
+
+    const intervalMinutes = Math.max(
+      60,
+      Number(
+        radar.schedule_interval_minutes || 240,
+      ) || 240,
+    );
+    const lastAt = Date.parse(
+      lastMap[String(radar.id)] || '',
+    );
+
+    if (
+      Number.isFinite(lastAt) &&
+      now - lastAt < intervalMinutes * 60_000
+    ) {
+      continue;
+    }
+
+    const plan = await radarApi(
+      `/api/radars/${radar.id}/search-plan`,
+    );
+
+    const selected = (
+      Array.isArray(plan?.queries)
+        ? plan.queries
+        : []
+    )
+      .filter(
+        (query) =>
+          query.next_selected &&
+          Boolean(query.enabled),
+      )
+      .slice(0, 2);
+
+    if (!selected.length) continue;
+
+    for (const query of selected) {
+      for (const source of autoBrowseSourcesForRadar(radar)) {
+        const url = autoBrowseSearchUrl(
+          source,
+          query.query_text,
+        );
+
+        if (!url) continue;
+
+        jobs.push({
+          id:
+            `${radar.id}:${source}:${query.id}:${now}`,
+          radar_id: radar.id,
+          radar_name: radar.name,
+          source,
+          query: query.query_text,
+          url,
+          attempts: 0,
+          created_at: new Date(now).toISOString(),
+        });
+
+        if (jobs.length >= 24) break;
+      }
+
+      if (jobs.length >= 24) break;
+    }
+
+    lastMap[String(radar.id)] =
+      new Date(now).toISOString();
+
+    if (jobs.length >= 24) break;
+  }
+
+  await chrome.storage.local.set({
+    autoBrowseQueue: jobs,
+    autoBrowseLastEnqueuedByRadar: lastMap,
+  });
+
+  return jobs;
+}
+
+function waitForTabComplete(tab, timeoutMs = 30_000) {
+  if (tab?.status === 'complete') {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      reject(new Error('Tempo limite ao carregar a busca.'));
+    }, timeoutMs);
+
+    function listener(tabId, changeInfo) {
+      if (
+        tabId === tab.id &&
+        changeInfo.status === 'complete'
+      ) {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+function delay(ms) {
+  return new Promise((resolve) =>
+    setTimeout(resolve, ms),
+  );
+}
+
+async function collectFromAutoBrowseTab(tabId) {
+  await delay(2200);
+
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await chrome.tabs.sendMessage(
+        tabId,
+        {
+          type: 'radar-collect-now',
+          limit: 100,
+        },
+      );
+
+      if (response?.capture) {
+        return response.capture;
+      }
+
+      lastError = new Error(
+        response?.error ||
+          'Collector não respondeu.',
+      );
+    } catch (error) {
+      lastError = error;
+    }
+
+    await delay(1400);
+  }
+
+  throw lastError ||
+    new Error('Não consegui coletar a busca.');
+}
+
+async function runAutoBrowseJob(job) {
+  const tab = await chrome.tabs.create({
+    url: job.url,
+    active: false,
+  });
+
+  try {
+    await waitForTabComplete(tab);
+    const capture =
+      await collectFromAutoBrowseTab(tab.id);
+
+    const result = await importAutoCapture(
+      capture,
+      { tab },
+      { ignoreAutoCaptureToggle: true },
+    );
+
+    return {
+      ok: Boolean(result?.ok),
+      capture_count:
+        capture?.items?.length || 0,
+      imported:
+        result?.result?.imported || 0,
+      updated:
+        result?.result?.updated || 0,
+      auto_assigned:
+        result?.result?.auto_assigned || 0,
+      price_drops:
+        result?.result?.price_drops || 0,
+      error: result?.error || null,
+    };
+  } finally {
+    if (tab?.id) {
+      await chrome.tabs.remove(tab.id).catch(() => {});
+    }
+  }
+}
+
+let autoBrowseRunning = false;
+
+async function processAutoBrowseTick() {
+  if (autoBrowseRunning) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: 'already_running',
+    };
+  }
+
+  autoBrowseRunning = true;
+
+  try {
+    await ensureDefaults();
+
+    const stored = await chrome.storage.local.get({
+      autoBrowseEnabled: false,
+      autoBrowseQueue: [],
+    });
+
+    if (!stored.autoBrowseEnabled) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: 'auto_browse_disabled',
+      };
+    }
+
+    let queue = Array.isArray(
+      stored.autoBrowseQueue,
+    )
+      ? stored.autoBrowseQueue
+      : [];
+
+    if (!queue.length) {
+      queue = await buildDueAutoBrowseJobs();
+    }
+
+    if (!queue.length) {
+      await chrome.storage.local.set({
+        lastAutoBrowseAt:
+          new Date().toISOString(),
+        lastAutoBrowseStatus:
+          'Nenhuma busca agendada está vencida.',
+        lastAutoBrowseError: null,
+      });
+
+      return {
+        ok: true,
+        skipped: true,
+        reason: 'no_due_jobs',
+      };
+    }
+
+    const job = queue[0];
+    let result;
+
+    try {
+      result = await runAutoBrowseJob(job);
+      queue = queue.slice(1);
+    } catch (error) {
+      const attempts =
+        Number(job.attempts || 0) + 1;
+
+      if (attempts <= 1) {
+        queue = [
+          ...queue.slice(1),
+          {
+            ...job,
+            attempts,
+          },
+        ];
+      } else {
+        queue = queue.slice(1);
+      }
+
+      result = {
+        ok: false,
+        error:
+          error?.message || String(error),
+        capture_count: 0,
+        imported: 0,
+        updated: 0,
+      };
+    }
+
+    await chrome.storage.local.set({
+      autoBrowseQueue: queue,
+      lastAutoBrowseAt:
+        new Date().toISOString(),
+      lastAutoBrowseSource: job.source,
+      lastAutoBrowseQuery: job.query,
+      lastAutoBrowseCount:
+        result.capture_count || 0,
+      lastAutoBrowseImported:
+        result.imported || 0,
+      lastAutoBrowseUpdated:
+        result.updated || 0,
+      lastAutoBrowseRemaining:
+        queue.length,
+      lastAutoBrowseError:
+        result.error || null,
+      lastAutoBrowseStatus:
+        result.ok
+          ? `${job.source} • ${job.query}`
+          : null,
+    });
+
+    return {
+      ok: result.ok,
+      job,
+      result,
+      remaining: queue.length,
+    };
+  } finally {
+    autoBrowseRunning = false;
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   ensureDefaults().catch(() => {});
+  ensureAutoBrowseAlarm().catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
   ensureDefaults().catch(() => {});
+  ensureAutoBrowseAlarm().catch(() => {});
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name !== 'radar-auto-browse') {
+    return;
+  }
+
+  processAutoBrowseTick().catch(async (error) => {
+    await chrome.storage.local.set({
+      lastAutoBrowseAt: new Date().toISOString(),
+      lastAutoBrowseError:
+        error?.message || String(error),
+    });
+  });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type !== 'radar-auto-capture') {
-    return false;
+  if (message?.type === 'radar-auto-capture') {
+    importAutoCapture(message.capture, sender)
+      .then(sendResponse)
+      .catch((error) =>
+        sendResponse({
+          ok: false,
+          error:
+            error.message || String(error),
+        }),
+      );
+
+    return true;
   }
 
-  importAutoCapture(message.capture, sender)
-    .then(sendResponse)
-    .catch((error) =>
-      sendResponse({ ok: false, error: error.message || String(error) }),
-    );
+  if (message?.type === 'radar-auto-browse-now') {
+    processAutoBrowseTick()
+      .then(sendResponse)
+      .catch((error) =>
+        sendResponse({
+          ok: false,
+          error:
+            error.message || String(error),
+        }),
+      );
 
-  return true;
+    return true;
+  }
+
+  return false;
 });
 
 ensureDefaults().catch(() => {});
+ensureAutoBrowseAlarm().catch(() => {});

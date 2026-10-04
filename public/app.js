@@ -2599,8 +2599,8 @@ async function loadConnections() {
           <span class="connection-name">Radar 2.0 Bridge</span>
           <span class="connection-status connected">Desktop</span>
         </div>
-        <p>Extensão local para enviar anúncios visíveis de OLX, Enjoei, Depop, Vinted, Marketplace e outros sites direto para o Radar.</p>
-        <button class="primary" type="button" onclick="showExtensionInstall()">Como instalar</button>
+        <p><strong>Bridge v0.3.1</strong> • Auto-Capture seguro em OLX, Enjoei, Facebook Marketplace, Mercado Livre, eBay e Depop. Auto-Browse beta pode usar o Search Planner em OLX, Enjoei, Mercado Livre e Depop.</p>
+        <button class="primary" type="button" onclick="showExtensionInstall()">Instalar / recarregar</button>
       </article>
     `;
   } catch (err) {
@@ -2614,8 +2614,9 @@ function showExtensionInstall() {
       "1. Abra opera://extensions no Opera GX.\n" +
       "2. Ative o Modo do desenvolvedor.\n" +
       "3. Clique em Carregar sem compactação.\n" +
-      "4. Escolha a pasta 'Radar 2.0 Bridge' na sua Área de Trabalho.\n\n" +
-      "Depois é só abrir um marketplace, clicar na extensão, escolher o radar e enviar os anúncios."
+      "4. Escolha a pasta 'Radar 2.0 Bridge' na sua Área de Trabalho.\n" +
+      "5. Se ela já estiver instalada, clique em Recarregar no card da extensão para ativar a versão nova.\n\n" +
+      "Bridge v0.3.1: Auto-Capture em OLX, Enjoei, Facebook Marketplace, Mercado Livre, eBay e Depop. Auto-Browse beta: OLX, Enjoei, Mercado Livre e Depop."
   );
 }
 
