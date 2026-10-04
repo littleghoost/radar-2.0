@@ -162,6 +162,55 @@ async function searchEbay({ query, limit = 50, referenceImageBuffer = null }) {
   }
 }
 
+async function checkEbayListing({ externalId }) {
+  if (!externalId) {
+    return { ok: false, verifiable: false, reason: "missing_external_id" };
+  }
+
+  const { clientId, clientSecret, marketplaceId } = getConfig();
+
+  if (!clientId || !clientSecret) {
+    return { ok: false, verifiable: false, reason: "credentials_pending" };
+  }
+
+  try {
+    const accessToken = await getApplicationToken();
+    const url =
+      `https://api.ebay.com/buy/browse/v1/item/${encodeURIComponent(externalId)}`;
+    const data = await requestBrowse(url, accessToken, marketplaceId);
+
+    const endTime = data.itemEndDate ? Date.parse(data.itemEndDate) : null;
+    const ended = Number.isFinite(endTime) && endTime <= Date.now();
+
+    return {
+      ok: true,
+      verifiable: true,
+      available: !ended,
+      detail: ended ? "ended" : "active",
+      price: data.price?.value == null ? null : Number(data.price.value),
+      currency: data.price?.currency || null,
+      item_end_date: data.itemEndDate || null,
+    };
+  } catch (err) {
+    if (err.status === 404 || err.status === 410) {
+      return {
+        ok: true,
+        verifiable: true,
+        available: false,
+        detail: "item_not_found",
+        status: err.status,
+      };
+    }
+
+    return {
+      ok: false,
+      verifiable: true,
+      reason: err.message,
+      status: err.status || 500,
+    };
+  }
+}
+
 function getEbayStatus() {
   const { clientId, clientSecret, marketplaceId } = getConfig();
   return {
@@ -173,4 +222,4 @@ function getEbayStatus() {
   };
 }
 
-module.exports = { searchEbay, getEbayStatus };
+module.exports = { searchEbay, checkEbayListing, getEbayStatus };

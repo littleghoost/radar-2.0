@@ -188,6 +188,27 @@ db.serialize(() => {
       if (!columns.some((column) => column.name === "grail_score")) {
         db.run("ALTER TABLE listings ADD COLUMN grail_score REAL");
       }
+      if (!columns.some((column) => column.name === "source_key")) {
+        db.run("ALTER TABLE listings ADD COLUMN source_key TEXT");
+      }
+      if (!columns.some((column) => column.name === "external_id")) {
+        db.run("ALTER TABLE listings ADD COLUMN external_id TEXT");
+      }
+      if (!columns.some((column) => column.name === "availability_status")) {
+        db.run("ALTER TABLE listings ADD COLUMN availability_status TEXT DEFAULT 'unknown'");
+      }
+      if (!columns.some((column) => column.name === "availability_detail")) {
+        db.run("ALTER TABLE listings ADD COLUMN availability_detail TEXT");
+      }
+      if (!columns.some((column) => column.name === "last_seen_at")) {
+        db.run("ALTER TABLE listings ADD COLUMN last_seen_at DATETIME");
+      }
+      if (!columns.some((column) => column.name === "last_checked_at")) {
+        db.run("ALTER TABLE listings ADD COLUMN last_checked_at DATETIME");
+      }
+      if (!columns.some((column) => column.name === "unavailable_since")) {
+        db.run("ALTER TABLE listings ADD COLUMN unavailable_since DATETIME");
+      }
     },
   );
 
@@ -279,6 +300,7 @@ db.serialize(() => {
       poll_interval_minutes INTEGER DEFAULT 5,
       notify_new_listings INTEGER DEFAULT 1,
       notify_price_drops INTEGER DEFAULT 1,
+      notify_unavailable INTEGER DEFAULT 1,
       notify_errors INTEGER DEFAULT 1,
       start_minimized INTEGER DEFAULT 0,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -289,6 +311,22 @@ db.serialize(() => {
     INSERT OR IGNORE INTO desktop_settings (id)
     VALUES (1)
   `);
+
+  db.all(
+    "PRAGMA table_info(desktop_settings)",
+    (err, columns) => {
+      if (err) {
+        console.error(err);
+        return;
+      }
+
+      if (!columns.some((column) => column.name === "notify_unavailable")) {
+        db.run(
+          "ALTER TABLE desktop_settings ADD COLUMN notify_unavailable INTEGER DEFAULT 1",
+        );
+      }
+    },
+  );
 
   /* =========================
      USUÁRIO LOCAL

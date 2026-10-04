@@ -525,6 +525,17 @@ function deriveListingInsights(listing) {
     addTag("Reparo");
   }
 
+  if (listing.availability_status === "unavailable") {
+    addTag("Indisponível");
+    reasons.push(
+      listing.availability_detail
+        ? `fonte marcou como ${listing.availability_detail}`
+        : "fonte marcou como indisponível",
+    );
+  } else if (listing.availability_status === "available") {
+    addTag("Disponível");
+  }
+
   const currentPrice =
     listing.current_price === null || listing.current_price === undefined
       ? null
@@ -593,6 +604,7 @@ function deriveListingInsights(listing) {
   if (tags.includes("Dentro do teto")) inboxScore += 10;
   if (tags.includes("Acima do teto")) inboxScore -= 10;
   if (tags.includes("Preço caiu")) inboxScore += 8;
+  if (listing.availability_status === "unavailable") inboxScore -= 50;
   if (listing.status === "interessante") inboxScore += 15;
   if (listing.status === "descartado" || listing.status === "vendido") inboxScore -= 30;
 
@@ -1179,6 +1191,7 @@ app.get("/api/desktop/settings", async (_req, res) => {
       poll_interval_minutes: Number(row?.poll_interval_minutes || 5),
       notify_new_listings: row ? Boolean(row.notify_new_listings) : true,
       notify_price_drops: row ? Boolean(row.notify_price_drops) : true,
+      notify_unavailable: row ? Boolean(row.notify_unavailable) : true,
       notify_errors: row ? Boolean(row.notify_errors) : true,
       start_minimized: Boolean(row?.start_minimized),
     });
@@ -1205,6 +1218,7 @@ app.patch("/api/desktop/settings", async (req, res) => {
       poll_interval_minutes: interval,
       notify_new_listings: asBool(req.body.notify_new_listings, current ? Boolean(current.notify_new_listings) : true),
       notify_price_drops: asBool(req.body.notify_price_drops, current ? Boolean(current.notify_price_drops) : true),
+      notify_unavailable: asBool(req.body.notify_unavailable, current ? Boolean(current.notify_unavailable) : true),
       notify_errors: asBool(req.body.notify_errors, current ? Boolean(current.notify_errors) : true),
       start_minimized: asBool(req.body.start_minimized, Boolean(current?.start_minimized)),
     };
@@ -1216,6 +1230,7 @@ app.patch("/api/desktop/settings", async (req, res) => {
            poll_interval_minutes = ?,
            notify_new_listings = ?,
            notify_price_drops = ?,
+           notify_unavailable = ?,
            notify_errors = ?,
            start_minimized = ?,
            updated_at = CURRENT_TIMESTAMP
@@ -1226,6 +1241,7 @@ app.patch("/api/desktop/settings", async (req, res) => {
         next.poll_interval_minutes,
         next.notify_new_listings ? 1 : 0,
         next.notify_price_drops ? 1 : 0,
+        next.notify_unavailable ? 1 : 0,
         next.notify_errors ? 1 : 0,
         next.start_minimized ? 1 : 0,
       ],
@@ -1249,12 +1265,16 @@ app.get("/api/scheduler/status", async (_req, res) => {
       "SELECT COUNT(*) AS count FROM radars WHERE schedule_enabled = 1",
     );
 
+    const desktopManaged = process.env.RADAR_DESKTOP === "1";
+
     res.json({
-      autonomous_worker: false,
-      mode: "prepared",
+      autonomous_worker: desktopManaged,
+      mode: desktopManaged ? "desktop_managed" : "prepared",
       enabled_radars: enabled.count,
       due_radars: due.count,
-      note: "Execução automática contínua está desligada no Fly. O motor pode ser chamado pelo futuro app desktop, cron ou servidor.",
+      note: desktopManaged
+        ? "O Radar Desktop verifica os agendamentos em segundo plano pelo system tray."
+        : "No servidor web, a execução contínua depende de um worker externo ou cron.",
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1294,7 +1314,13 @@ app.get("/api/activity", async (req, res) => {
 
 app.get("/api/notifications/summary", async (_req, res) => {
   try {
-    const importantTypes = ["new_listing", "price_drop", "source_error", "run_failed"];
+    const importantTypes = [
+      "new_listing",
+      "price_drop",
+      "listing_unavailable",
+      "source_error",
+      "run_failed",
+    ];
     const placeholders = importantTypes.map(() => "?").join(", ");
 
     const summary = await get(
@@ -1302,6 +1328,7 @@ app.get("/api/notifications/summary", async (_req, res) => {
          COUNT(*) AS unseen_total,
          SUM(CASE WHEN type = 'new_listing' THEN 1 ELSE 0 END) AS new_listings,
          SUM(CASE WHEN type = 'price_drop' THEN 1 ELSE 0 END) AS price_drops,
+         SUM(CASE WHEN type = 'listing_unavailable' THEN 1 ELSE 0 END) AS unavailable,
          SUM(CASE WHEN type IN ('source_error', 'run_failed') THEN 1 ELSE 0 END) AS errors
        FROM activity_events
        WHERE seen = 0 AND type IN (${placeholders})`,
@@ -1312,6 +1339,7 @@ app.get("/api/notifications/summary", async (_req, res) => {
       unseen_total: Number(summary?.unseen_total || 0),
       new_listings: Number(summary?.new_listings || 0),
       price_drops: Number(summary?.price_drops || 0),
+      unavailable: Number(summary?.unavailable || 0),
       errors: Number(summary?.errors || 0),
     });
   } catch (err) {
@@ -1325,7 +1353,7 @@ app.post("/api/notifications/mark-seen", async (_req, res) => {
       `UPDATE activity_events
        SET seen = 1
        WHERE seen = 0
-         AND type IN ('new_listing', 'price_drop', 'source_error', 'run_failed')`,
+         AND type IN ('new_listing', 'price_drop', 'listing_unavailable', 'source_error', 'run_failed')`,
     );
 
     res.json({ ok: true, marked: result.changes });
@@ -1527,6 +1555,37 @@ app.get(
   },
 );
 
+function inferBrowserSourceIdentity(platform, url) {
+  const platformText = String(platform || "").toLowerCase();
+  const urlText = String(url || "");
+  const lowerUrl = urlText.toLowerCase();
+
+  let sourceKey = null;
+  let externalId = null;
+
+  if (platformText.includes("olx") || lowerUrl.includes("olx.com")) {
+    sourceKey = "olx";
+  } else if (
+    platformText.includes("mercado livre") ||
+    platformText.includes("mercado libre") ||
+    lowerUrl.includes("mercadolivre.") ||
+    lowerUrl.includes("mercadolibre.")
+  ) {
+    sourceKey = "mercadolivre";
+
+    const match = urlText.toUpperCase().match(/MLB-?(\d{6,})/);
+    if (match) externalId = `MLB${match[1]}`;
+  } else if (platformText.includes("ebay") || lowerUrl.includes("ebay.")) {
+    sourceKey = "ebay";
+  } else if (platformText.includes("depop") || lowerUrl.includes("depop.com")) {
+    sourceKey = "depop";
+  } else if (platformText.includes("vinted") || lowerUrl.includes("vinted.")) {
+    sourceKey = "vinted";
+  }
+
+  return { sourceKey, externalId };
+}
+
 /* =========================
    IMPORTAÇÃO ASSISTIDA
 ========================= */
@@ -1534,6 +1593,11 @@ app.get(
 app.post("/api/import/assisted", async (req, res) => {
   try {
     const radarId = req.body?.radar_id || null;
+    const isAutoCapture = req.body?.capture_mode === "auto";
+    const autoAssignRequested = Boolean(req.body?.auto_assign) && !radarId;
+    const autoAssignRadars = autoAssignRequested
+      ? await all("SELECT * FROM radars ORDER BY id ASC")
+      : [];
     const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 100) : [];
     if (!items.length) {
       return res.status(400).json({ error: "Nenhum anúncio válido foi recebido." });
@@ -1544,7 +1608,16 @@ app.post("/api/import/assisted", async (req, res) => {
       if (!radar) return res.status(404).json({ error: "Radar não encontrado." });
     }
 
-    const summary = { imported: 0, updated: 0, duplicates: 0, invalid: 0, failed: 0, listings: [] };
+    const summary = {
+      imported: 0,
+      updated: 0,
+      auto_assigned: 0,
+      price_drops: 0,
+      duplicates: 0,
+      invalid: 0,
+      failed: 0,
+      listings: [],
+    };
 
     for (const raw of items) {
       try {
@@ -1563,31 +1636,148 @@ app.post("/api/import/assisted", async (req, res) => {
           continue;
         }
 
-        const existing = await get("SELECT id, current_price, title, image_url FROM listings WHERE url = ?", [url]);
+        const { sourceKey, externalId } = inferBrowserSourceIdentity(
+          platform,
+          url,
+        );
+
+        const existing = await get(
+          "SELECT * FROM listings WHERE url = ?",
+          [url],
+        );
         if (existing) {
           const nextPrice = Number.isFinite(currentPrice) ? currentPrice : null;
-          const priceChanged = nextPrice !== null && Number(existing.current_price) !== nextPrice;
-          const metadataChanged = existing.title !== title || (imageUrl && existing.image_url !== imageUrl);
+          const previousPrice =
+            existing.current_price === null || existing.current_price === undefined
+              ? null
+              : Number(existing.current_price);
+          const priceChanged =
+            nextPrice !== null &&
+            (previousPrice === null || previousPrice !== nextPrice);
+          const priceDropped =
+            priceChanged &&
+            previousPrice !== null &&
+            nextPrice < previousPrice &&
+            (existing.currency || "BRL") === currency;
+          const metadataChanged =
+            existing.title !== title ||
+            Boolean(imageUrl && existing.image_url !== imageUrl);
+          const identityChanged =
+            Boolean(sourceKey && existing.source_key !== sourceKey) ||
+            Boolean(externalId && existing.external_id !== externalId);
+          const wasUnavailable =
+            existing.availability_status === "unavailable";
 
           await run(
             `UPDATE listings
              SET title = ?, platform = ?, image_url = COALESCE(?, image_url),
-                 current_price = COALESCE(?, current_price), currency = ?, updated_at = CURRENT_TIMESTAMP
+                 current_price = COALESCE(?, current_price), currency = ?,
+                 source_key = COALESCE(?, source_key),
+                 external_id = COALESCE(?, external_id),
+                 availability_status = 'available',
+                 availability_detail = 'seen_in_browser',
+                 last_seen_at = CURRENT_TIMESTAMP,
+                 last_checked_at = CURRENT_TIMESTAMP,
+                 unavailable_since = NULL,
+                 updated_at = CURRENT_TIMESTAMP
              WHERE id = ?`,
-            [title, platform, imageUrl, nextPrice, currency, existing.id],
+            [
+              title,
+              platform,
+              imageUrl,
+              nextPrice,
+              currency,
+              sourceKey,
+              externalId,
+              existing.id,
+            ],
           );
 
           if (priceChanged) {
-            await run("INSERT INTO price_history (listing_id, price) VALUES (?, ?)", [existing.id, nextPrice]);
+            await run(
+              "INSERT INTO price_history (listing_id, price) VALUES (?, ?)",
+              [existing.id, nextPrice],
+            );
           }
 
-          if (priceChanged || metadataChanged) {
+          let refreshed = await get(
+            "SELECT * FROM listings WHERE id = ?",
+            [existing.id],
+          );
+
+          let assignment = null;
+
+          if (
+            autoAssignRequested &&
+            !refreshed.radar_id &&
+            autoAssignRadars.length
+          ) {
+            assignment = await autoAssignListing(
+              refreshed,
+              autoAssignRadars,
+            );
+
+            if (assignment) {
+              summary.auto_assigned += 1;
+              refreshed = await get(
+                "SELECT * FROM listings WHERE id = ?",
+                [existing.id],
+              );
+            }
+          }
+
+          if (wasUnavailable) {
+            await run(
+              `INSERT INTO activity_events
+                (radar_id, listing_id, type, title, detail, metadata_json)
+               VALUES (?, ?, 'listing_available', ?, ?, ?)`,
+              [
+                refreshed.radar_id || null,
+                existing.id,
+                `Anúncio voltou: ${title}`,
+                `${platform} voltou a aparecer no navegador.`,
+                JSON.stringify({ url, platform, source: sourceKey }),
+              ],
+            );
+          }
+
+          if (priceDropped) {
+            await run(
+              `INSERT INTO activity_events
+                (radar_id, listing_id, type, title, detail, metadata_json)
+               VALUES (?, ?, 'price_drop', ?, ?, ?)`,
+              [
+                refreshed.radar_id || null,
+                existing.id,
+                `Preço caiu: ${title}`,
+                `${currency} ${previousPrice} → ${currency} ${nextPrice}`,
+                JSON.stringify({
+                  url,
+                  platform,
+                  previous_price: previousPrice,
+                  current_price: nextPrice,
+                  currency,
+                  source: sourceKey,
+                  captured_by_bridge: true,
+                }),
+              ],
+            );
+            summary.price_drops += 1;
+          }
+
+          if (
+            priceChanged ||
+            metadataChanged ||
+            identityChanged ||
+            wasUnavailable ||
+            assignment
+          ) {
             summary.updated += 1;
-            const refreshed = await get("SELECT * FROM listings WHERE id = ?", [existing.id]);
             summary.listings.push(refreshed);
           } else {
             summary.duplicates += 1;
           }
+
           continue;
         }
 
@@ -1607,12 +1797,16 @@ app.post("/api/import/assisted", async (req, res) => {
         const result = await run(
           `INSERT INTO listings (
             radar_id, title, platform, url, image_url, current_price, currency, status, notes,
+            source_key, external_id, availability_status, availability_detail,
+            last_seen_at, last_checked_at,
             visual_score, semantic_score, hybrid_score, image_features_json, image_embedding_json,
             preference_score, grail_score
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, 'available', 'seen_in_browser',
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)`,
           [
             radarId, title, platform, url, imageUrl,
             Number.isFinite(currentPrice) ? currentPrice : null, currency, notes,
+            sourceKey, externalId,
             intelligence.visual_score, intelligence.semantic_score, intelligence.hybrid_score,
             intelligence.image_features_json, intelligence.image_embedding_json,
             intelligence.preference_score, intelligence.grail_score,
@@ -1620,10 +1814,61 @@ app.post("/api/import/assisted", async (req, res) => {
         );
 
         if (Number.isFinite(currentPrice)) {
-          await run("INSERT INTO price_history (listing_id, price) VALUES (?, ?)", [result.id, currentPrice]);
+          await run(
+            "INSERT INTO price_history (listing_id, price) VALUES (?, ?)",
+            [result.id, currentPrice],
+          );
         }
 
-        const listing = await get("SELECT * FROM listings WHERE id = ?", [result.id]);
+        let listing = await get(
+          "SELECT * FROM listings WHERE id = ?",
+          [result.id],
+        );
+
+        if (
+          autoAssignRequested &&
+          !listing.radar_id &&
+          autoAssignRadars.length
+        ) {
+          const assignment = await autoAssignListing(
+            listing,
+            autoAssignRadars,
+          );
+
+          if (assignment) {
+            summary.auto_assigned += 1;
+            listing = await get(
+              "SELECT * FROM listings WHERE id = ?",
+              [result.id],
+            );
+          }
+        }
+
+        if (isAutoCapture) {
+          await run(
+            `INSERT INTO activity_events
+              (radar_id, listing_id, type, title, detail, metadata_json)
+             VALUES (?, ?, 'new_listing', ?, ?, ?)`,
+            [
+              listing.radar_id || null,
+              result.id,
+              `Novo anúncio: ${title}`,
+              `${platform}${
+                Number.isFinite(currentPrice)
+                  ? ` • ${currency} ${currentPrice}`
+                  : ""
+              }`,
+              JSON.stringify({
+                url,
+                platform,
+                source: sourceKey,
+                captured_by_bridge: true,
+                auto_assigned: Boolean(listing.radar_id),
+              }),
+            ],
+          );
+        }
+
         summary.imported += 1;
         summary.listings.push(listing);
       } catch {
@@ -1632,10 +1877,23 @@ app.post("/api/import/assisted", async (req, res) => {
     }
 
     if (summary.imported > 0 || summary.updated > 0) {
+      const activityType = isAutoCapture
+        ? "auto_capture"
+        : "assisted_import";
+      const activityTitle = isAutoCapture
+        ? "Auto-Capture sincronizado"
+        : "Importação assistida concluída";
+
       await run(
         `INSERT INTO activity_events (radar_id, type, title, detail, metadata_json)
-         VALUES (?, 'assisted_import', 'Importação assistida concluída', ?, ?)`,
-        [radarId, `${summary.imported} importado(s), ${summary.updated} atualizado(s) pelo navegador.`, JSON.stringify(summary)],
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          radarId,
+          activityType,
+          activityTitle,
+          `${summary.imported} novo(s), ${summary.updated} atualizado(s), ${summary.auto_assigned} auto-organizado(s).`,
+          JSON.stringify(summary),
+        ],
       );
     }
 

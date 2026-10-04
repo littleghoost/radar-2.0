@@ -27,3 +27,40 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .muted { opacity: .65; }
 p { margin: 0; opacity: .7; font-size: 12px; line-height: 1.45; }
 footer { display: flex; justify-content: space-between; gap: 10px; font-size: 10px; opacity: .48; }
+
+.auto-capture-row {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 11px;
+  background: rgba(255,255,255,.025);
+}
+
+.auto-capture-row span {
+  display: grid;
+  gap: 3px;
+}
+
+.auto-capture-row strong {
+  font-size: 12px;
+}
+
+.auto-capture-row small {
+  font-size: 10px;
+  line-height: 1.35;
+  opacity: .62;
+}
+
+.auto-capture-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: #70e29b;
+}
+
+.auto-status {
+  margin-top: -5px;
+  font-size: 10px;
+  line-height: 1.4;
+}

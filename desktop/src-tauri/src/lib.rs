@@ -33,6 +33,7 @@ struct DesktopSettings {
     poll_interval_minutes: u64,
     notify_new_listings: bool,
     notify_price_drops: bool,
+    notify_unavailable: bool,
     notify_errors: bool,
     start_minimized: bool,
 }
@@ -45,6 +46,7 @@ impl Default for DesktopSettings {
             poll_interval_minutes: 5,
             notify_new_listings: true,
             notify_price_drops: true,
+            notify_unavailable: true,
             notify_errors: true,
             start_minimized: false,
         }
@@ -172,6 +174,7 @@ fn run_due_once(app: &tauri::AppHandle, notify: bool, settings: &DesktopSettings
     let data = after.unwrap_or(Value::Null);
     let new_listings = data.get("new_listings").and_then(Value::as_i64).unwrap_or(0);
     let price_drops = data.get("price_drops").and_then(Value::as_i64).unwrap_or(0);
+    let unavailable = data.get("unavailable").and_then(Value::as_i64).unwrap_or(0);
     let errors = data.get("errors").and_then(Value::as_i64).unwrap_or(0);
 
     let mut parts = Vec::new();
@@ -180,6 +183,9 @@ fn run_due_once(app: &tauri::AppHandle, notify: bool, settings: &DesktopSettings
     }
     if settings.notify_price_drops && price_drops > 0 {
         parts.push(format!("{price_drops} queda(s) de preço"));
+    }
+    if settings.notify_unavailable && unavailable > 0 {
+        parts.push(format!("{unavailable} anúncio(s) indisponível(is)"));
     }
     if settings.notify_errors && errors > 0 {
         parts.push(format!("{errors} alerta(s) de fonte"));
@@ -262,6 +268,7 @@ pub fn run() {
                 .sidecar("radar-backend")?
                 .env("PORT", PORT.to_string())
                 .env("DB_PATH", db_path.to_string_lossy().to_string())
+                .env("RADAR_DESKTOP", "1")
                 .env("SEMANTIC_VISION_ENABLED", "1")
                 .env("SEMANTIC_CACHE_DIR", semantic_cache.to_string_lossy().to_string());
 

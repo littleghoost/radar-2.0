@@ -23,8 +23,20 @@
       </section>
 
       <section id="mainCard" class="card">
+        <label class="auto-capture-row">
+          <span>
+            <strong>Auto-Capture</strong>
+            <small>Envia novos cards automaticamente enquanto você navega.</small>
+          </span>
+          <input id="autoCaptureEnabled" type="checkbox" />
+        </label>
+
+        <div id="autoCaptureStatus" class="auto-status muted">
+          Aguardando atividade automática.
+        </div>
+
         <label>
-          Radar de destino
+          Radar de destino (envio manual)
           <select id="radarSelect">
             <option value="">Sem radar</option>
           </select>

@@ -1,5 +1,5 @@
-const { searchMercadoLivre } = require('./mercadolivre');
-const { searchEbay, getEbayStatus } = require('./ebay');
+const { searchMercadoLivre, checkMercadoLivreListing } = require('./mercadolivre');
+const { searchEbay, checkEbayListing, getEbayStatus } = require('./ebay');
 const { searchOlx, getOlxStatus } = require('./olx');
 const { getDepopStatus } = require('./depop');
 
@@ -13,8 +13,28 @@ async function searchAllSources({ query, mercadoLivreAccessToken, referenceImage
   return results;
 }
 
+async function checkListingAvailability({ sourceKey, externalId, mercadoLivreAccessToken }) {
+  if (sourceKey === "mercadolivre") {
+    return checkMercadoLivreListing({
+      externalId,
+      accessToken: mercadoLivreAccessToken,
+    });
+  }
+
+  if (sourceKey === "ebay") {
+    return checkEbayListing({ externalId });
+  }
+
+  return {
+    ok: false,
+    verifiable: false,
+    reason: "source_not_verifiable",
+  };
+}
+
 module.exports = {
   searchAllSources,
+  checkListingAvailability,
   getEbayStatus,
   getOlxStatus,
   getDepopStatus,

@@ -1194,6 +1194,14 @@ async function loadListings() {
 
                   </span>
 
+                  ${
+                    listing.availability_status === "unavailable"
+                      ? `<span class="availability unavailable">INDISPONÍVEL</span>`
+                      : listing.availability_status === "available"
+                        ? `<span class="availability available">ONLINE</span>`
+                        : ""
+                  }
+
                 </div>
 
                 <div class="inbox-row">
@@ -1800,6 +1808,10 @@ function activityIcon(type) {
   return {
     new_listing: "+",
     price_drop: "↓",
+    listing_unavailable: "−",
+    listing_available: "↺",
+    auto_capture: "↧",
+    assisted_import: "↧",
     source_error: "!",
     run_failed: "×",
     run_completed: "✓",
@@ -1817,12 +1829,14 @@ async function loadActivity() {
     const failed = runs.filter((run) => run.status === "failed").length;
     const newListings = events.filter((event) => event.type === "new_listing").length;
     const priceDrops = events.filter((event) => event.type === "price_drop").length;
+    const unavailable = events.filter((event) => event.type === "listing_unavailable").length;
 
     $("#activityStats").innerHTML = `
       <article><span>Execuções</span><strong>${runs.length}</strong></article>
       <article><span>Concluídas</span><strong>${completed}</strong></article>
       <article><span>Novos anúncios</span><strong>${newListings}</strong></article>
       <article><span>Quedas de preço</span><strong>${priceDrops}</strong></article>
+      <article><span>Indisponíveis</span><strong>${unavailable}</strong></article>
       ${failed ? `<article><span>Falhas</span><strong>${failed}</strong></article>` : ""}
     `;
 
@@ -2230,6 +2244,7 @@ $("#desktopSettingsForm")?.addEventListener("submit", async (event) => {
     poll_interval_minutes: Number(form.elements.poll_interval_minutes.value),
     notify_new_listings: form.elements.notify_new_listings.checked,
     notify_price_drops: form.elements.notify_price_drops.checked,
+    notify_unavailable: form.elements.notify_unavailable.checked,
     notify_errors: form.elements.notify_errors.checked,
     start_minimized: form.elements.start_minimized.checked,
   };
@@ -2261,7 +2276,7 @@ $("#runBackgroundNow")?.addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify({ limit: 5 }),
     });
-    button.textContent = `Concluído (${result.ran ?? result.length ?? 0})`;
+    button.textContent = `Concluído (${result.due ?? result.results?.length ?? result.ran ?? result.length ?? 0})`;
     await Promise.all([loadRadars(), loadActivity(), loadNotifications()]);
     setTimeout(() => {
       button.textContent = original;

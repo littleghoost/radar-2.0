@@ -1,4 +1,10 @@
 (() => {
+  if (globalThis.__radarCollectorLoaded) {
+    return;
+  }
+
+  globalThis.__radarCollectorLoaded = true;
+
   function detectPlatform(hostname) {
     const host = String(hostname || '').toLowerCase();
     const providers = [
@@ -164,7 +170,7 @@
     }
 
     return {
-      version: 2,
+      version: 3,
       source_url: location.href,
       platform,
       captured_at: new Date().toISOString(),
@@ -174,4 +180,106 @@
   }
 
   globalThis.__radarCollectVisibleListings = collectVisibleListings;
+
+  const autoPlatforms = new Set([
+    'OLX',
+    'Mercado Livre',
+    'Mercado Libre',
+    'eBay',
+    'Depop',
+  ]);
+
+  let autoTimer = null;
+  let lastAutoFingerprint = '';
+  let lastAutoSentAt = 0;
+
+  function captureFingerprint(capture) {
+    return capture.items
+      .map((item) => `${item.url}:${item.current_price ?? ''}`)
+      .sort()
+      .join('|');
+  }
+
+  async function runAutoCapture() {
+    if (!autoPlatforms.has(detectPlatform(location.hostname))) {
+      return;
+    }
+
+    if (document.visibilityState !== 'visible') {
+      return;
+    }
+
+    const stored = await chrome.storage.local.get({
+      autoCaptureEnabled: true,
+    });
+
+    if (!stored.autoCaptureEnabled) {
+      return;
+    }
+
+    const capture = collectVisibleListings(100);
+
+    if (!capture.items.length) {
+      return;
+    }
+
+    const fingerprint = captureFingerprint(capture);
+    const now = Date.now();
+
+    if (
+      fingerprint === lastAutoFingerprint ||
+      now - lastAutoSentAt < 15_000
+    ) {
+      return;
+    }
+
+    lastAutoFingerprint = fingerprint;
+    lastAutoSentAt = now;
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'radar-auto-capture',
+        capture,
+      });
+
+      if (!response?.ok) {
+        lastAutoFingerprint = '';
+      }
+    } catch {
+      // O Radar pode estar fechado; a próxima alteração da página tenta novamente.
+      lastAutoFingerprint = '';
+    }
+  }
+
+  function scheduleAutoCapture(delay = 3500) {
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => {
+      runAutoCapture().catch(() => {});
+    }, delay);
+  }
+
+  const observer = new MutationObserver(() => {
+    scheduleAutoCapture(4500);
+  });
+
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+
+  addEventListener(
+    'scroll',
+    () => {
+      scheduleAutoCapture(3000);
+    },
+    { passive: true },
+  );
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      scheduleAutoCapture(1200);
+    }
+  });
+
+  scheduleAutoCapture(2500);
 })();

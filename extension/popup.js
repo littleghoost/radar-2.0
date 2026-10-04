@@ -20,6 +20,7 @@ async function loadRadarStatus() {
     $('#offlineCard').hidden = true;
     $('#mainCard').hidden = false;
     await loadRadars();
+    await loadAutoCaptureState();
   } catch {
     $('#statusDot').className = 'dot offline';
     $('#offlineCard').hidden = false;
@@ -46,6 +47,59 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+async function loadAutoCaptureState() {
+  const stored = await chrome.storage.local.get({
+    autoCaptureEnabled: true,
+    lastAutoCaptureAt: null,
+    lastAutoCaptureHost: null,
+    lastAutoCaptureCount: 0,
+    lastAutoCaptureImported: 0,
+    lastAutoCaptureUpdated: 0,
+    lastAutoCaptureAutoAssigned: 0,
+    lastAutoCapturePriceDrops: 0,
+    lastAutoCaptureError: null,
+  });
+
+  const checkbox = $('#autoCaptureEnabled');
+  const status = $('#autoCaptureStatus');
+
+  if (checkbox) {
+    checkbox.checked = Boolean(stored.autoCaptureEnabled);
+  }
+
+  if (!status) return;
+
+  if (!stored.autoCaptureEnabled) {
+    status.textContent = 'Desligado. A captura manual continua disponível.';
+    return;
+  }
+
+  if (stored.lastAutoCaptureError) {
+    status.textContent = `Ligado • última tentativa: ${stored.lastAutoCaptureError}`;
+    return;
+  }
+
+  if (stored.lastAutoCaptureAt) {
+    const time = new Date(stored.lastAutoCaptureAt).toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    status.textContent =
+      `Ligado • Inbox + auto-organização • ${stored.lastAutoCaptureHost || 'marketplace'} • ` +
+      `${stored.lastAutoCaptureCount || 0} lidos • ` +
+      `${stored.lastAutoCaptureImported || 0} novos • ` +
+      `${stored.lastAutoCaptureUpdated || 0} atualizados • ` +
+      `${stored.lastAutoCaptureAutoAssigned || 0} organizados • ` +
+      `${stored.lastAutoCapturePriceDrops || 0} quedas • ${time}`;
+
+    return;
+  }
+
+  status.textContent =
+    'Ligado • Inbox + auto-organização • aguardando página compatível.';
 }
 
 async function activeTab() {
@@ -129,7 +183,21 @@ $('#scanPage').addEventListener('click', async () => {
 
 $('#sendItems').addEventListener('click', sendItems);
 $('#openRadar').addEventListener('click', () => chrome.tabs.create({ url: RADAR_URL }));
-$('#radarSelect').addEventListener('change', () => chrome.storage.local.set({ lastRadarId: $('#radarSelect').value || null }));
+
+$('#autoCaptureEnabled').addEventListener('change', async () => {
+  const enabled = $('#autoCaptureEnabled').checked;
+
+  await chrome.storage.local.set({
+    autoCaptureEnabled: enabled,
+  });
+
+  await loadAutoCaptureState();
+});
+
+$('#radarSelect').addEventListener('change', async () => {
+  const radarId = $('#radarSelect').value || null;
+  await chrome.storage.local.set({ lastRadarId: radarId });
+});
 
 activeTab().then((tab) => {
   try { $('#pageHost').textContent = new URL(tab.url).hostname; } catch { $('#pageHost').textContent = 'aba atual'; }

@@ -50,4 +50,60 @@ async function searchMercadoLivre({ query, accessToken, limit = 50 }) {
   };
 }
 
-module.exports = { searchMercadoLivre };
+async function checkMercadoLivreListing({ externalId, accessToken }) {
+  if (!externalId) {
+    return { ok: false, verifiable: false, reason: "missing_external_id" };
+  }
+
+  const response = await fetch(
+    `https://api.mercadolibre.com/items/${encodeURIComponent(externalId)}`,
+    {
+      headers: {
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        accept: "application/json",
+      },
+    },
+  );
+
+  if (response.status === 404 || response.status === 410) {
+    return {
+      ok: true,
+      verifiable: true,
+      available: false,
+      detail: "item_not_found",
+      status: response.status,
+    };
+  }
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      verifiable: true,
+      reason: data.error || data.message || "request_failed",
+      status: response.status,
+    };
+  }
+
+  const rawStatus = String(data.status || "").toLowerCase();
+  const available = rawStatus === "active";
+  let detail = rawStatus || "unknown";
+
+  if (!available && Number(data.sold_quantity || 0) > 0) {
+    detail = "closed_or_sold";
+  }
+
+  return {
+    ok: true,
+    verifiable: true,
+    available,
+    detail,
+    raw_status: rawStatus || null,
+    sold_quantity: Number(data.sold_quantity || 0),
+    price: data.price == null ? null : Number(data.price),
+    currency: data.currency_id || null,
+  };
+}
+
+module.exports = { searchMercadoLivre, checkMercadoLivreListing };

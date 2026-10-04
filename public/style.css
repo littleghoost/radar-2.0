@@ -1090,3 +1090,24 @@ label textarea {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+.availability {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.availability.available {
+  border-color: rgba(96, 220, 150, 0.35);
+  color: #9ee8bb;
+}
+
+.availability.unavailable {
+  border-color: rgba(255, 95, 95, 0.45);
+  color: #ff8f8f;
+}
