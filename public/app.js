@@ -523,18 +523,96 @@ function internationalCostHtml(listing) {
       ? "Remessa Conforme"
       : "fora do Remessa Conforme";
 
+  const handling =
+    Number(cost.handling_fee_brl || 0) > 0
+      ? `
+        <div class="international-cost-row">
+          <span>Taxa extra</span>
+          <strong>${escapeHtml(
+            money(cost.handling_fee_brl, "BRL"),
+          )}</strong>
+        </div>
+      `
+      : "";
+
+  const fx =
+    cost.fx_rate_to_brl &&
+    listing.currency &&
+    String(listing.currency).toUpperCase() !== "BRL"
+      ? `1 ${escapeHtml(String(listing.currency).toUpperCase())} ≈ ${escapeHtml(
+          money(cost.fx_rate_to_brl, "BRL"),
+        )}`
+      : "";
+
   return `
     <div class="international-cost">
-      <strong>${escapeHtml(headline)}</strong>
-      <small>
-        Produto ${escapeHtml(money(cost.product_brl, "BRL"))}
-        · Frete ${cost.shipping_known ? escapeHtml(money(cost.shipping_brl, "BRL")) : "não confirmado"}
-        · II ${escapeHtml(money(cost.import_tax_brl, "BRL"))}
-        · ICMS ${escapeHtml(money(cost.icms_brl, "BRL"))}
-      </small>
+      <div class="international-cost-head">
+        <span>CUSTO NO BRASIL</span>
+        <strong>${escapeHtml(headline)}</strong>
+      </div>
+
+      <div class="international-cost-breakdown">
+        <div class="international-cost-row">
+          <span>Produto convertido</span>
+          <strong>${escapeHtml(
+            money(cost.product_brl, "BRL"),
+          )}</strong>
+        </div>
+
+        <div class="international-cost-row">
+          <span>Frete</span>
+          <strong>
+            ${
+              cost.shipping_known
+                ? escapeHtml(
+                    money(cost.shipping_brl, "BRL"),
+                  )
+                : "não confirmado"
+            }
+          </strong>
+        </div>
+
+        <div class="international-cost-row">
+          <span>Imposto de Importação</span>
+          <strong>${escapeHtml(
+            money(cost.import_tax_brl, "BRL"),
+          )}</strong>
+        </div>
+
+        <div class="international-cost-row">
+          <span>ICMS (${escapeHtml(
+            String(cost.icms_rate_percent),
+          )}%)</span>
+          <strong>${escapeHtml(
+            money(cost.icms_brl, "BRL"),
+          )}</strong>
+        </div>
+
+        ${handling}
+      </div>
+
       <small class="muted">
-        Estimativa ${escapeHtml(program)} · ICMS ${escapeHtml(String(cost.icms_rate_percent))}%
+        ${escapeHtml(program)}
+        ${
+          cost.origin_country
+            ? ` · origem: ${escapeHtml(
+                String(cost.origin_country).toUpperCase(),
+              )}`
+            : ""
+        }
+        ${fx ? ` · ${fx}` : ""}
+        ${
+          cost.fx_source
+            ? ` · câmbio: ${escapeHtml(cost.fx_source)}`
+            : ""
+        }
       </small>
+
+      ${
+        cost.shipping_known
+          ? `<small class="international-cost-ok">Frete informado pelo eBay para o contexto de entrega configurado.</small>`
+          : `<small class="international-cost-warning">Frete ainda não incluído. Adicione seu CEP em Perfil → Importação para melhorar o cálculo do eBay.</small>`
+      }
     </div>
   `;
 }

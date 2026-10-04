@@ -273,6 +273,7 @@ db.serialize(() => {
       shipping_price REAL,
       shipping_currency TEXT,
       shipping_type TEXT,
+      item_country TEXT,
       status TEXT DEFAULT 'novo',
       notes TEXT,
       visual_score REAL,
@@ -351,6 +352,9 @@ db.serialize(() => {
       }
       if (!columns.some((column) => column.name === "shipping_type")) {
         db.run("ALTER TABLE listings ADD COLUMN shipping_type TEXT");
+      }
+      if (!columns.some((column) => column.name === "item_country")) {
+        db.run("ALTER TABLE listings ADD COLUMN item_country TEXT");
       }
       if (!columns.some((column) => column.name === "source_key")) {
         db.run("ALTER TABLE listings ADD COLUMN source_key TEXT");

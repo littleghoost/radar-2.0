@@ -27,6 +27,18 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results;
 }
 
+function isForeignMarketplaceItem(item = {}) {
+  const itemCountry = String(
+    item.item_country || "",
+  ).toUpperCase();
+
+  if (itemCountry) {
+    return itemCountry !== "BR";
+  }
+
+  return item.source === "ebay";
+}
+
 function createRadarRunner({
   get,
   all,
@@ -459,6 +471,7 @@ function createRadarRunner({
         .filter((item) => {
           if (!item.url || !item.title) return false;
           if (maxPrice === null || Number.isNaN(maxPrice)) return true;
+          if (isForeignMarketplaceItem(item)) return true;
           if (item.currency && item.currency !== 'BRL') return true;
           return item.price === null || Number(item.price) <= maxPrice;
         })
@@ -527,13 +540,16 @@ function createRadarRunner({
           }
         }
 
+        const foreignItem =
+          isForeignMarketplaceItem(item);
+
         const combinedScore = hybridScore({
           visual: visualEnabled ? visualScore : null,
           semantic: semanticEnabled ? semanticScore : null,
           query: radar.query,
           title: item.title,
           price: item.price,
-          maxPrice,
+          maxPrice: foreignItem ? null : maxPrice,
           currency: item.currency || 'BRL',
           visualWeight,
           semanticWeight,
@@ -553,6 +569,8 @@ function createRadarRunner({
             price: item.price,
             currency: item.currency || 'BRL',
             condition: item.condition,
+            source_key: item.source || null,
+            item_country: item.item_country || null,
           },
         );
         const rankingScore = blendCriteriaScore(
@@ -630,12 +648,12 @@ function createRadarRunner({
           const insert = await run(
             `INSERT INTO listings
               (radar_id, title, platform, url, image_url, current_price, currency,
-               shipping_price, shipping_currency, shipping_type, status, notes,
+               shipping_price, shipping_currency, shipping_type, item_country, status, notes,
                source_key, external_id, availability_status, availability_detail, last_seen_at, last_checked_at,
                visual_score, semantic_score, hybrid_score, preference_score, grail_score,
                rule_score, rule_tier, rule_rejected, rule_reason_json,
                image_features_json, image_embedding_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, 'available', 'found_in_search',
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, 'available', 'found_in_search',
                      CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               radar.id,
@@ -648,6 +666,7 @@ function createRadarRunner({
               item.shipping_price ?? null,
               item.shipping_currency || null,
               item.shipping_type || null,
+              item.item_country || null,
               sourceNote,
               item.source || null,
               item.external_id || null,
@@ -704,6 +723,7 @@ function createRadarRunner({
                url = COALESCE(?, url), image_url = ?,
                current_price = ?, currency = ?,
                shipping_price = ?, shipping_currency = ?, shipping_type = ?,
+               item_country = COALESCE(?, item_country),
                source_key = COALESCE(?, source_key),
                external_id = COALESCE(?, external_id),
                availability_status = 'available', availability_detail = 'found_in_search',
@@ -726,6 +746,7 @@ function createRadarRunner({
             item.shipping_price ?? null,
             item.shipping_currency || null,
             item.shipping_type || null,
+            item.item_country || null,
             item.source || null,
             item.external_id || null,
             item.visual_score,
@@ -825,6 +846,10 @@ function createRadarRunner({
           reason: source.reason || null,
           found: source.items?.length || 0,
           catalog_found: catalogFound,
+          shipping_detail_checked:
+            Number(source.shipping_detail_checked || 0),
+          shipping_detail_enriched:
+            Number(source.shipping_detail_enriched || 0),
         };
       });
 
@@ -859,6 +884,15 @@ function createRadarRunner({
       if (catalogItems.length) {
         message += ` Mercado Livre Catálogo: ${catalogAdded} pista(s) nova(s) e ${catalogUpdated} atualizada(s).`;
       }
+
+      const ebaySummary = sourceSummary.find(
+        (source) => source.source === "ebay",
+      );
+
+      if (ebaySummary?.shipping_detail_checked > 0) {
+        message += ` eBay: frete detalhado consultado em ${ebaySummary.shipping_detail_checked} item(ns), ${ebaySummary.shipping_detail_enriched} com valor retornado.`;
+      }
+
       if (visualEnabled || semanticEnabled) {
         message += ` Radar visual ativo (mínimo ${Math.round(minVisualSimilarity * 100)}%).`;
         if (semanticEnabled) message += ' IA visual semântica ativa.';

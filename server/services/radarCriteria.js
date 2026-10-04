@@ -296,8 +296,15 @@ function evaluateRadarCriteria(radar = {}, listing = {}) {
   const currency = String(
     listing.currency || "BRL",
   ).toUpperCase();
+  const itemCountry = String(
+    listing.item_country || "",
+  ).toUpperCase();
+  const foreignMarketplaceItem = itemCountry
+    ? itemCountry !== "BR"
+    : listing.source_key === "ebay";
 
   const priceComparable =
+    !foreignMarketplaceItem &&
     Number.isFinite(price) &&
     Number.isFinite(maxPrice) &&
     currency === config.budgetCurrency;

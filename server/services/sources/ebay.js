@@ -83,15 +83,26 @@ async function getApplicationToken(credentials = null) {
   return data.access_token;
 }
 
+function pickShippingOption(item = {}) {
+  if (!Array.isArray(item.shippingOptions)) {
+    return null;
+  }
+
+  return (
+    item.shippingOptions.find(
+      (option) =>
+        option?.shippingCost?.value !== undefined,
+    ) ||
+    item.shippingOptions[0] ||
+    null
+  );
+}
+
 function normalizeItems(data, searchQuery = null) {
   return (
     Array.isArray(data.itemSummaries) ? data.itemSummaries : []
   ).map((item) => {
-    const shippingOption = Array.isArray(item.shippingOptions)
-      ? item.shippingOptions.find(
-          (option) => option?.shippingCost?.value !== undefined,
-        ) || item.shippingOptions[0]
-      : null;
+    const shippingOption = pickShippingOption(item);
 
     return {
     source: "ebay",
@@ -190,6 +201,106 @@ function buildEndUserContext(destination = null) {
     "contextualLocation=" +
     encodeURIComponent(parts.join(","))
   );
+}
+
+async function enrichShippingDetails({
+  items,
+  accessToken,
+  marketplaceId,
+  browseHeaders,
+  maxItems = 12,
+}) {
+  const candidates = (Array.isArray(items) ? items : [])
+    .filter(
+      (item) =>
+        item?.external_id &&
+        (item.shipping_price === null ||
+          item.shipping_price === undefined),
+    )
+    .slice(0, Math.max(0, Number(maxItems) || 0));
+
+  if (!candidates.length) {
+    return {
+      items,
+      checked: 0,
+      enriched: 0,
+    };
+  }
+
+  const settled = await Promise.allSettled(
+    candidates.map(async (item) => {
+      const url =
+        `https://api.ebay.com/buy/browse/v1/item/${encodeURIComponent(item.external_id)}`;
+
+      const detail = await requestBrowse(
+        url,
+        accessToken,
+        marketplaceId,
+        {
+          headers: browseHeaders || {},
+        },
+      );
+
+      const shippingOption =
+        pickShippingOption(detail);
+
+      return {
+        external_id: item.external_id,
+        shipping_price:
+          shippingOption?.shippingCost?.value == null
+            ? null
+            : Number(
+                shippingOption.shippingCost.value,
+              ),
+        shipping_currency:
+          shippingOption?.shippingCost?.currency ||
+          detail.price?.currency ||
+          item.currency ||
+          null,
+        shipping_type:
+          shippingOption?.type ||
+          shippingOption?.shippingServiceCode ||
+          null,
+        item_country:
+          detail.itemLocation?.country ||
+          item.item_country ||
+          null,
+      };
+    }),
+  );
+
+  const byId = new Map();
+  let enriched = 0;
+
+  for (const result of settled) {
+    if (result.status !== "fulfilled") continue;
+
+    byId.set(
+      result.value.external_id,
+      result.value,
+    );
+
+    if (
+      result.value.shipping_price !== null &&
+      result.value.shipping_price !== undefined
+    ) {
+      enriched += 1;
+    }
+  }
+
+  return {
+    checked: candidates.length,
+    enriched,
+    items: items.map((item) => {
+      const detail = byId.get(item.external_id);
+      return detail
+        ? {
+            ...item,
+            ...detail,
+          }
+        : item;
+    }),
+  };
 }
 
 function buildEbayQueries(query, maxQueries = 6) {
@@ -383,6 +494,25 @@ async function searchEbay({
       };
     }
 
+    const baseItems = [...itemsByKey.values()].slice(
+      0,
+      Math.max(Number(limit || 50), 1),
+    );
+
+    const shippingEnrichment = endUserContext
+      ? await enrichShippingDetails({
+          items: baseItems,
+          accessToken,
+          marketplaceId: config.marketplaceId,
+          browseHeaders,
+          maxItems: 12,
+        })
+      : {
+          items: baseItems,
+          checked: 0,
+          enriched: 0,
+        };
+
     return {
       source: "ebay",
       ok: true,
@@ -391,10 +521,11 @@ async function searchEbay({
       marketplace_id: config.marketplaceId,
       image_search_supported: imageSupported,
       partial_errors: errors,
-      items: [...itemsByKey.values()].slice(
-        0,
-        Math.max(Number(limit || 50), 1),
-      ),
+      shipping_detail_checked:
+        shippingEnrichment.checked,
+      shipping_detail_enriched:
+        shippingEnrichment.enriched,
+      items: shippingEnrichment.items,
     };
   } catch (err) {
     return {

@@ -412,6 +412,25 @@ function normalizeInternationalCostSettings(value = {}) {
   return settings;
 }
 
+function shouldEstimateInternationalCost(listing = {}) {
+  const currency = String(
+    listing.currency || "BRL",
+  ).toUpperCase();
+  const itemCountry = String(
+    listing.item_country || "",
+  ).toUpperCase();
+
+  if (itemCountry === "BR") {
+    return false;
+  }
+
+  if (itemCountry && itemCountry !== "BR") {
+    return true;
+  }
+
+  return currency !== "BRL";
+}
+
 async function getInternationalCostSettings() {
   const row = await get(
     `SELECT value
@@ -471,7 +490,15 @@ const radarRunner = createRadarRunner({
   getInternationalCostSettings,
 });
 
-async function scoreListingForRadar({ radarId, title, imageUrl, currentPrice, currency = "BRL" }) {
+async function scoreListingForRadar({
+  radarId,
+  title,
+  imageUrl,
+  currentPrice,
+  currency = "BRL",
+  sourceKey = null,
+  itemCountry = null,
+}) {
   if (!radarId) {
     return { visual_score: null, semantic_score: null, hybrid_score: null, preference_score: null, grail_score: null, image_features_json: null, image_embedding_json: null };
   }
@@ -521,13 +548,22 @@ async function scoreListingForRadar({ radarId, title, imageUrl, currentPrice, cu
     }
   }
 
+  const normalizedCountry = String(
+    itemCountry || "",
+  ).toUpperCase();
+  const foreignMarketplaceItem = normalizedCountry
+    ? normalizedCountry !== "BR"
+    : sourceKey === "ebay";
+
   const hybrid = hybridScore({
     visual: radar.visual_enabled && radar.reference_features_json ? visual : null,
     semantic: radar.semantic_enabled && radar.reference_embedding_json ? semantic : null,
     query: radar.query,
     title,
     price: currentPrice === "" ? null : currentPrice,
-    maxPrice: radar.max_price,
+    maxPrice: foreignMarketplaceItem
+      ? null
+      : radar.max_price,
     currency,
     visualWeight: radar.visual_weight || 70,
     semanticWeight: radar.semantic_weight || 70,
@@ -638,6 +674,8 @@ async function applyRadarToListing(listing, radarId) {
     imageUrl: listing.image_url,
     currentPrice: listing.current_price,
     currency: listing.currency || "BRL",
+    sourceKey: listing.source_key || null,
+    itemCountry: listing.item_country || null,
   });
 
   const radar = radarId
@@ -752,8 +790,19 @@ function deriveListingInsights(listing) {
   const listingCurrency = String(
     listing.currency || "BRL",
   ).toUpperCase();
+  const itemCountry = String(
+    listing.item_country || "",
+  ).toUpperCase();
+  const foreignMarketplaceItem = itemCountry
+    ? itemCountry !== "BR"
+    : listing.source_key === "ebay";
 
-  if (
+  if (foreignMarketplaceItem) {
+    addTag("Importação");
+    reasons.push(
+      "custo internacional calculado separadamente",
+    );
+  } else if (
     Number.isFinite(currentPrice) &&
     Number.isFinite(maxPrice) &&
     listingCurrency === budgetCurrency
@@ -962,6 +1011,8 @@ async function autoAssignListing(listing, radars) {
       imageUrl: listing.image_url,
       currentPrice: listing.current_price,
       currency: listing.currency || "BRL",
+      sourceKey: listing.source_key || null,
+      itemCountry: listing.item_country || null,
     });
 
     const intelligenceScore = Number(
@@ -1275,6 +1326,8 @@ app.post("/api/radars/:id/reindex-visual", async (req, res) => {
           imageUrl: listing.image_url,
           currentPrice: listing.current_price,
           currency: listing.currency || "BRL",
+          sourceKey: listing.source_key || null,
+          itemCountry: listing.item_country || null,
         });
         await run(
           `UPDATE listings
@@ -2275,10 +2328,8 @@ app.get(
 
       if (
         internationalSettings?.enabled &&
-        rows.some(
-          (row) =>
-            String(row.currency || "BRL").toUpperCase() !==
-            "BRL",
+        rows.some((row) =>
+          shouldEstimateInternationalCost(row),
         )
       ) {
         try {
@@ -2295,8 +2346,7 @@ app.get(
           if (
             internationalSettings?.enabled &&
             fxInfo?.rates &&
-            String(row.currency || "BRL").toUpperCase() !==
-              "BRL"
+            shouldEstimateInternationalCost(row)
           ) {
             internationalCost =
               estimateBrazilImportCost({
@@ -2321,6 +2371,10 @@ app.get(
                     ).toUpperCase()
                   ],
                 ) || null;
+              internationalCost.origin_country =
+                row.item_country || null;
+              internationalCost.shipping_type =
+                row.shipping_type || null;
             }
           }
 

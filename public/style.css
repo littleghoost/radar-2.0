@@ -1241,3 +1241,54 @@ label textarea {
   font-size: .72rem;
   line-height: 1.4;
 }
+
+.international-cost-head {
+  display: grid;
+  gap: 3px;
+}
+
+.international-cost-head > span {
+  color: var(--muted);
+  font-size: .64rem;
+  font-weight: 700;
+  letter-spacing: .13em;
+}
+
+.international-cost-breakdown {
+  display: grid;
+  gap: 5px;
+  margin-top: 5px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255,255,255,.07);
+}
+
+.international-cost-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: .72rem;
+}
+
+.international-cost-row span {
+  color: var(--muted);
+}
+
+.international-cost-row strong {
+  flex: 0 0 auto;
+  font-size: .73rem;
+}
+
+.international-cost-ok,
+.international-cost-warning {
+  display: block;
+  padding-top: 3px;
+}
+
+.international-cost-ok {
+  color: rgba(125, 230, 164, .9) !important;
+}
+
+.international-cost-warning {
+  color: rgba(255, 196, 90, .9) !important;
+}
