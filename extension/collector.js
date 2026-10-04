@@ -65,24 +65,22 @@
   }
 
   function cardFor(anchor, platform) {
-    const direct = anchor.closest(
-      'article,li,[data-cy="l-card"],[data-testid="l-card"],[data-testid*="item"],[data-testid*="card"],[class*="listing"],[class*="product"],[class*="card"]',
-    );
-    if (direct) return direct;
-
     if (platform === 'OLX') {
       let node = anchor;
       let firstWithImage = null;
-      for (let depth = 0; node && depth < 10; depth += 1, node = node.parentElement) {
+      for (let depth = 0; node && depth < 14; depth += 1, node = node.parentElement) {
         const hasImage = Boolean(node.querySelector?.('img'));
         if (hasImage && !firstWithImage) firstWithImage = node;
         const text = String(node.innerText || '').replace(/\s+/g, ' ').trim();
-        if (hasImage && /R\$\s*\d/.test(text) && text.length <= 1800) return node;
+        if (hasImage && /R\$\s*\d/.test(text) && text.length <= 2200) return node;
       }
       if (firstWithImage) return firstWithImage;
     }
 
-    return anchor.parentElement || anchor;
+    const direct = anchor.closest(
+      'article,li,[data-cy="l-card"],[data-testid="l-card"],[data-testid*="item"],[data-testid*="card"],[class*="listing"],[class*="product"],[class*="card"]',
+    );
+    return direct || anchor.parentElement || anchor;
   }
 
   function looksLikeListingUrl(url, platform) {
