@@ -15,7 +15,7 @@ No Chrome/Chromium, o processo é equivalente em `chrome://extensions`.
 ## Uso
 
 1. Deixe o Radar 2.0 Desktop aberto ou no tray.
-2. Abra uma página de resultados em OLX, Enjoei, Depop, Vinted, Facebook Marketplace, eBay, Mercado Livre ou outro marketplace.
+2. Abra uma página de resultados em OLX, Enjoei, Facebook Marketplace, Depop, eBay ou Mercado Livre. OLX, Enjoei e Facebook usam validação de identidade/card antes do Auto-Capture.
 3. Clique no ícone **Radar 2.0 Bridge**.
 4. Escolha o radar de destino e clique em **Analisar página atual**.
 5. Confira a quantidade detectada e clique em **Enviar para o Radar**.

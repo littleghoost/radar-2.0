@@ -2820,10 +2820,40 @@ function inferBrowserSourceIdentity(platform, url) {
     if (match) externalId = `MLB${match[1]}`;
   } else if (platformText.includes("ebay") || lowerUrl.includes("ebay.")) {
     sourceKey = "ebay";
+    const match = new URL(urlText).pathname.match(
+      /\/itm\/(?:[^/]+\/)?(\d{8,})/i,
+    );
+    if (match) externalId = match[1];
+  } else if (
+    platformText.includes("enjoei") ||
+    lowerUrl.includes("enjoei.com.br")
+  ) {
+    sourceKey = "enjoei";
+    const match = new URL(urlText).pathname.match(
+      /\/p\/[^/?#]*-(\d{6,})(?:\/)?$/i,
+    );
+    if (match) externalId = match[1];
+  } else if (
+    platformText.includes("facebook") ||
+    lowerUrl.includes("facebook.com/marketplace/")
+  ) {
+    sourceKey = "facebook";
+    const match = new URL(urlText).pathname.match(
+      /\/marketplace\/item\/(\d+)/i,
+    );
+    if (match) externalId = match[1];
   } else if (platformText.includes("depop") || lowerUrl.includes("depop.com")) {
     sourceKey = "depop";
+    const match = new URL(urlText).pathname.match(
+      /\/products\/([^/?#]+)/i,
+    );
+    if (match) externalId = match[1].toLowerCase();
   } else if (platformText.includes("vinted") || lowerUrl.includes("vinted.")) {
     sourceKey = "vinted";
+    const match = new URL(urlText).pathname.match(
+      /\/items\/(\d+)/i,
+    );
+    if (match) externalId = match[1];
   }
 
   return { sourceKey, externalId };

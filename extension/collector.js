@@ -98,6 +98,16 @@
         return match ? `depop:${match[1].toLowerCase()}` : cleanUrl(u.href);
       }
 
+      if (platform === 'Enjoei') {
+        const match = path.match(/\/p\/[^/?#]*-(\d{6,})(?:\/)?$/i);
+        return match ? `enjoei:${match[1]}` : cleanUrl(u.href);
+      }
+
+      if (platform === 'Facebook Marketplace') {
+        const match = path.match(/\/marketplace\/item\/(\d+)/i);
+        return match ? `facebook:${match[1]}` : cleanUrl(u.href);
+      }
+
       return cleanUrl(u.href);
     } catch {
       return String(url || '');
@@ -194,9 +204,55 @@
     }
   }
 
+  function isolatedCardFor(anchor, platform, anchorUrl) {
+    const anchorIdentity = listingIdentity(anchorUrl, platform);
+
+    for (
+      let node = anchor;
+      node && node !== document.body && node !== document.documentElement;
+      node = node.parentElement
+    ) {
+      const text = String(node.innerText || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (text.length > 1600) {
+        break;
+      }
+
+      const images = node.querySelectorAll?.('img')?.length || 0;
+      if (!images || images > 8) continue;
+      if (!/(?:R\$|US\$|USD|EUR|€|GBP|£|\$)\s*\d/i.test(text)) continue;
+
+      const identities = new Set(
+        [...(node.querySelectorAll?.('a[href]') || [])]
+          .map((link) => absoluteUrl(link.getAttribute('href')))
+          .filter(Boolean)
+          .filter((href) => looksLikeListingUrl(href, platform))
+          .map((href) => listingIdentity(href, platform)),
+      );
+
+      if (
+        identities.size === 1 &&
+        identities.has(anchorIdentity)
+      ) {
+        return node;
+      }
+    }
+
+    return null;
+  }
+
   function cardFor(anchor, platform, anchorUrl) {
     if (platform === 'OLX') {
       return olxCardFor(anchor, anchorUrl);
+    }
+
+    if (
+      platform === 'Enjoei' ||
+      platform === 'Facebook Marketplace'
+    ) {
+      return isolatedCardFor(anchor, platform, anchorUrl);
     }
 
     const direct = anchor.closest(
@@ -213,6 +269,8 @@
       if (platform === 'Mercado Livre') return /\/mlb-?[0-9]+|\/p\/mlb/i.test(path);
       if (platform === 'eBay') return /\/itm\//.test(path);
       if (platform === 'Depop') return /\/products\//.test(path);
+      if (platform === 'Enjoei') return /\/p\/[^/]+-\d{6,}(?:\/|$)/.test(path);
+      if (platform === 'Facebook Marketplace') return /\/marketplace\/item\/\d+/.test(path);
       if (platform === 'Vinted') return /\/items\//.test(path);
       return true;
     } catch { return false; }
@@ -295,7 +353,7 @@
     }
 
     return {
-      version: 4,
+      version: 5,
       source_url: location.href,
       platform,
       captured_at: new Date().toISOString(),
@@ -308,6 +366,8 @@
 
   const autoPlatforms = new Set([
     'OLX',
+    'Enjoei',
+    'Facebook Marketplace',
     'Mercado Livre',
     'Mercado Libre',
     'eBay',

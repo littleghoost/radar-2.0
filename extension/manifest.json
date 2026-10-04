@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Radar 2.0 Bridge",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Sincroniza anúncios visíveis com a Inbox inteligente do Radar 2.0.",
   "permissions": ["activeTab", "scripting", "storage", "notifications"],
   "host_permissions": [
@@ -15,6 +15,9 @@
     {
       "matches": [
         "*://*.olx.com.br/*",
+        "*://*.enjoei.com.br/*",
+        "*://*.facebook.com/marketplace/*",
+        "*://facebook.com/marketplace/*",
         "*://*.mercadolivre.com.br/*",
         "*://*.mercadolibre.com/*",
         "*://*.ebay.com/*",
