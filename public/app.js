@@ -3,6 +3,8 @@ const state = {
 
   listings: [],
 
+  selectedListings: new Set(),
+
   activeRadar: "",
 };
 
@@ -13,6 +15,124 @@ const radarModal = $("#radarModal");
 const listingModal = $("#listingModal");
 
 const importModal = $("#importModal");
+
+function listingImageUrl(url) {
+  if (!url) return "";
+
+  try {
+    const parsed = new URL(url);
+
+    if (
+      parsed.hostname === "img.olx.com.br" ||
+      parsed.hostname.endsWith(".img.olx.com.br")
+    ) {
+      return `/api/image-proxy?url=${encodeURIComponent(url)}`;
+    }
+  } catch {}
+
+  return url;
+}
+
+function updateBulkActions() {
+  const visibleIds = state.listings.map((listing) => Number(listing.id));
+  const selectedVisible = visibleIds.filter((id) =>
+    state.selectedListings.has(id),
+  );
+
+  const button = $("#deleteSelectedListings");
+  const selectAll = $("#selectAllListings");
+
+  if (button) {
+    button.disabled = state.selectedListings.size === 0;
+    button.textContent = state.selectedListings.size
+      ? `Excluir selecionados (${state.selectedListings.size})`
+      : "Excluir selecionados";
+  }
+
+  if (selectAll) {
+    selectAll.checked =
+      visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
+    selectAll.indeterminate =
+      selectedVisible.length > 0 &&
+      selectedVisible.length < visibleIds.length;
+  }
+}
+
+function toggleListingSelection(id, checked) {
+  const numericId = Number(id);
+
+  if (checked) {
+    state.selectedListings.add(numericId);
+  } else {
+    state.selectedListings.delete(numericId);
+  }
+
+  document
+    .querySelector(`[data-listing-id="${numericId}"]`)
+    ?.classList.toggle("selected", checked);
+
+  updateBulkActions();
+}
+
+function toggleSelectAllListings(checked) {
+  state.listings.forEach((listing) => {
+    const id = Number(listing.id);
+
+    if (checked) {
+      state.selectedListings.add(id);
+    } else {
+      state.selectedListings.delete(id);
+    }
+  });
+
+  document.querySelectorAll(".listing-select").forEach((input) => {
+    input.checked = checked;
+    input.closest(".listing-card")?.classList.toggle("selected", checked);
+  });
+
+  updateBulkActions();
+}
+
+async function removeSelectedListings() {
+  const ids = [...state.selectedListings];
+
+  if (!ids.length) {
+    return;
+  }
+
+  const confirmed = confirm(
+    `Excluir ${ids.length} anúncio(s) selecionado(s) do Radar?`,
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  const button = $("#deleteSelectedListings");
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Excluindo...";
+  }
+
+  try {
+    await Promise.all(
+      ids.map((id) =>
+        api(`/api/listings/${id}`, {
+          method: "DELETE",
+        }),
+      ),
+    );
+
+    state.selectedListings.clear();
+
+    await loadListings();
+    await loadRadars();
+  } catch (err) {
+    alert(err.message);
+    updateBulkActions();
+  }
+}
 
 $("#openRadarModal").onclick = () => radarModal.showModal();
 
@@ -687,6 +807,14 @@ async function loadListings() {
 
   state.listings = await api(`/api/listings?${params.toString()}`);
 
+  const visibleIds = new Set(
+    state.listings.map((listing) => Number(listing.id)),
+  );
+
+  state.selectedListings = new Set(
+    [...state.selectedListings].filter((id) => visibleIds.has(id)),
+  );
+
   const allListings = await api("/api/listings");
 
   $("#statListings").textContent = allListings.length;
@@ -735,8 +863,21 @@ async function loadListings() {
       return `
 
             <article
-              class="listing-card"
+              class="listing-card ${state.selectedListings.has(Number(listing.id)) ? "selected" : ""}"
+              data-listing-id="${listing.id}"
             >
+
+              <label
+                class="listing-select-wrap"
+                title="Selecionar anúncio"
+              >
+                <input
+                  class="listing-select"
+                  type="checkbox"
+                  ${state.selectedListings.has(Number(listing.id)) ? "checked" : ""}
+                  onchange="toggleListingSelection(${listing.id}, this.checked)"
+                />
+              </label>
 
               ${
                 listing.image_url
@@ -746,7 +887,7 @@ async function loadListings() {
 
                       class="listing-image"
 
-                      src="${escapeAttr(listing.image_url)}"
+                      src="${escapeAttr(listingImageUrl(listing.image_url))}"
 
                       alt=""
 
@@ -1009,7 +1150,18 @@ async function loadListings() {
           `;
     })
     .join("");
+
+  updateBulkActions();
 }
+
+$("#selectAllListings")?.addEventListener("change", (event) => {
+  toggleSelectAllListings(event.currentTarget.checked);
+});
+
+$("#deleteSelectedListings")?.addEventListener(
+  "click",
+  removeSelectedListings,
+);
 
 /* =========================
    CRIAR RADAR

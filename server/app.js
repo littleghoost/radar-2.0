@@ -102,6 +102,65 @@ app.use((req, res, next) => {
   return res.redirect("/login");
 });
 
+app.get("/api/image-proxy", async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || "");
+    const parsed = new URL(rawUrl);
+
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.hostname !== "img.olx.com.br"
+    ) {
+      return res.status(400).json({ error: "Imagem não permitida." });
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    const response = await fetch(parsed.href, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        Referer: "https://www.olx.com.br/",
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return res.status(response.status).end();
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+
+    if (!contentType.startsWith("image/")) {
+      return res.status(415).end();
+    }
+
+    const declaredLength = Number(
+      response.headers.get("content-length") || 0,
+    );
+
+    if (declaredLength > 12 * 1024 * 1024) {
+      return res.status(413).end();
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    if (buffer.length > 12 * 1024 * 1024) {
+      return res.status(413).end();
+    }
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    return res.send(buffer);
+  } catch {
+    return res.status(502).end();
+  }
+});
+
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 /* =========================

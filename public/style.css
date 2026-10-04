@@ -886,3 +886,56 @@ label textarea {
     flex-direction: column;
   }
 }
+
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #111116;
+}
+
+.bulk-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.bulk-select-all input,
+.listing-select {
+  width: auto;
+  accent-color: #f3f3f5;
+}
+
+.listing-select-wrap {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  left: 12px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(10, 10, 14, 0.82);
+  backdrop-filter: blur(6px);
+}
+
+.listing-card.selected {
+  border-color: #888895;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 640px) {
+  .bulk-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
