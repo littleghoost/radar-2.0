@@ -86,7 +86,14 @@ async function getApplicationToken(credentials = null) {
 function normalizeItems(data, searchQuery = null) {
   return (
     Array.isArray(data.itemSummaries) ? data.itemSummaries : []
-  ).map((item) => ({
+  ).map((item) => {
+    const shippingOption = Array.isArray(item.shippingOptions)
+      ? item.shippingOptions.find(
+          (option) => option?.shippingCost?.value !== undefined,
+        ) || item.shippingOptions[0]
+      : null;
+
+    return {
     source: "ebay",
     external_id: item.itemId || null,
     title: item.title || "",
@@ -103,10 +110,24 @@ function normalizeItems(data, searchQuery = null) {
         ? null
         : Number(item.price.value),
     currency: item.price?.currency || null,
+    shipping_price:
+      shippingOption?.shippingCost?.value == null
+        ? null
+        : Number(shippingOption.shippingCost.value),
+    shipping_currency:
+      shippingOption?.shippingCost?.currency ||
+      item.price?.currency ||
+      null,
+    shipping_type:
+      shippingOption?.type ||
+      shippingOption?.shippingServiceCode ||
+      null,
     search_query: searchQuery,
     item_end_date: item.itemEndDate || null,
     condition: item.condition || null,
-  }));
+    item_country: item.itemLocation?.country || null,
+  };
+  });
 }
 
 async function requestBrowse(
@@ -139,6 +160,36 @@ async function requestBrowse(
   }
 
   return data;
+}
+
+function buildEndUserContext(destination = null) {
+  const country = String(
+    destination?.country || "",
+  )
+    .trim()
+    .toUpperCase();
+
+  if (!/^[A-Z]{2}$/.test(country)) {
+    return null;
+  }
+
+  const postalCode = String(
+    destination?.postalCode || "",
+  )
+    .trim()
+    .replace(/[^0-9A-Za-z-]/g, "")
+    .slice(0, 16);
+
+  const parts = [`country=${country}`];
+
+  if (postalCode) {
+    parts.push(`zip=${postalCode}`);
+  }
+
+  return (
+    "contextualLocation=" +
+    encodeURIComponent(parts.join(","))
+  );
 }
 
 function buildEbayQueries(query, maxQueries = 6) {
@@ -188,6 +239,7 @@ async function searchEbay({
   limit = 50,
   referenceImageBuffer = null,
   credentials = null,
+  destination = null,
 }) {
   const config = normalizeCredentials(credentials);
 
@@ -215,6 +267,13 @@ async function searchEbay({
 
   try {
     const accessToken = await getApplicationToken(config);
+    const endUserContext =
+      buildEndUserContext(destination);
+    const browseHeaders = endUserContext
+      ? {
+          "X-EBAY-C-ENDUSERCTX": endUserContext,
+        }
+      : {};
     const perQueryLimit = Math.min(
       200,
       Math.max(
@@ -234,6 +293,9 @@ async function searchEbay({
         url,
         accessToken,
         config.marketplaceId,
+        {
+          headers: browseHeaders,
+        },
       ).then((data) => ({
         mode: "keyword",
         query: searchQuery,
@@ -266,6 +328,7 @@ async function searchEbay({
             method: "POST",
             headers: {
               "content-type": "application/json",
+              ...browseHeaders,
             },
             body: JSON.stringify({
               image: referenceImageBuffer.toString("base64"),

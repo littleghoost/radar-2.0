@@ -12,6 +12,7 @@ async function searchAllSources({
   query,
   mercadoLivreAccessToken,
   ebayCredentials = null,
+  ebayDestination = null,
   referenceImageBuffer = null,
   limit = 50,
 }) {
@@ -32,6 +33,7 @@ async function searchAllSources({
       limit,
       referenceImageBuffer,
       credentials: ebayCredentials,
+      destination: ebayDestination,
     }),
     searchOlx({ query, limit }),
   ]);

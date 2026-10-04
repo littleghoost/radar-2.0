@@ -3,6 +3,10 @@ const { searchAllSources, checkListingAvailability } = require('./sources');
 const { downloadImage, extractVisualFeatures, visualSimilarity, hybridScore } = require('./visualSimilarity');
 const { embedImage, cosineSimilarity: semanticSimilarity } = require('./semanticVision');
 const { buildPreferenceProfile, preferenceScore, grailScore } = require('./preferenceLearning');
+const {
+  evaluateRadarCriteria,
+  blendCriteriaScore,
+} = require('./radarCriteria');
 
 
 async function mapWithConcurrency(items, limit, mapper) {
@@ -23,7 +27,13 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results;
 }
 
-function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
+function createRadarRunner({
+  get,
+  all,
+  run,
+  getValidMercadoLivreConnection,
+  getInternationalCostSettings,
+}) {
   async function verifyKnownListings({
     radar,
     runId,
@@ -290,6 +300,21 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
             }
           : null;
 
+      const internationalSettings =
+        typeof getInternationalCostSettings === "function"
+          ? await getInternationalCostSettings().catch(() => null)
+          : null;
+
+      const ebayDestination =
+        internationalSettings?.destination_country
+          ? {
+              country:
+                internationalSettings.destination_country,
+              postalCode:
+                internationalSettings.destination_postal_code || "",
+            }
+          : null;
+
       let referenceImageBuffer = null;
       if (radar.reference_image_path) {
         try {
@@ -304,6 +329,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         mercadoLivreAccessToken:
           mlConnection?.status === 'connected' ? mlConnection.access_token : null,
         ebayCredentials,
+        ebayDestination,
         limit: 50,
       });
 
@@ -514,7 +540,26 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         });
 
         const learnedScore = preferenceScore(candidateEmbedding, preferenceProfile);
-        const finalGrailScore = grailScore(combinedScore, learnedScore, preferenceProfile.total_feedback);
+        const finalGrailScore = grailScore(
+          combinedScore,
+          learnedScore,
+          preferenceProfile.total_feedback,
+        );
+        const criteria = evaluateRadarCriteria(
+          radar,
+          {
+            title: item.title,
+            platform: item.platform,
+            price: item.price,
+            currency: item.currency || 'BRL',
+            condition: item.condition,
+          },
+        );
+        const rankingScore = blendCriteriaScore(
+          finalGrailScore,
+          criteria,
+          radar,
+        );
 
         return {
           ...item,
@@ -523,17 +568,30 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
           hybrid_score: combinedScore,
           preference_score: learnedScore,
           grail_score: finalGrailScore,
+          ranking_score: rankingScore,
+          rule_score: criteria.score,
+          rule_tier: criteria.tier,
+          rule_rejected: criteria.rejected ? 1 : 0,
+          rule_reason_json: JSON.stringify(criteria.reasons),
           image_features_json: candidateFeatures ? JSON.stringify(candidateFeatures) : null,
           image_embedding_json: candidateEmbedding ? JSON.stringify(candidateEmbedding) : null,
         };
       });
 
+      const criteriaRejected = results.filter(
+        (item) => Boolean(item.rule_rejected),
+      ).length;
+
+      results = results.filter(
+        (item) => !item.rule_rejected,
+      );
+
       if (visualEnabled || semanticEnabled) {
         results = results
           .filter((item) => Math.max(Number(item.visual_score) || 0, Number(item.semantic_score) || 0) >= minVisualSimilarity * 100)
-          .sort((a, b) => Number(b.grail_score ?? b.hybrid_score ?? 0) - Number(a.grail_score ?? a.hybrid_score ?? 0));
+          .sort((a, b) => Number(b.ranking_score ?? b.grail_score ?? b.hybrid_score ?? 0) - Number(a.ranking_score ?? a.grail_score ?? a.hybrid_score ?? 0));
       } else {
-        results.sort((a, b) => Number(b.grail_score ?? b.hybrid_score ?? 0) - Number(a.grail_score ?? a.hybrid_score ?? 0));
+        results.sort((a, b) => Number(b.ranking_score ?? b.grail_score ?? b.hybrid_score ?? 0) - Number(a.ranking_score ?? a.grail_score ?? a.hybrid_score ?? 0));
       }
 
       let added = 0;
@@ -571,12 +629,14 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         if (!existing) {
           const insert = await run(
             `INSERT INTO listings
-              (radar_id, title, platform, url, image_url, current_price, currency, status, notes,
+              (radar_id, title, platform, url, image_url, current_price, currency,
+               shipping_price, shipping_currency, shipping_type, status, notes,
                source_key, external_id, availability_status, availability_detail, last_seen_at, last_checked_at,
                visual_score, semantic_score, hybrid_score, preference_score, grail_score,
+               rule_score, rule_tier, rule_rejected, rule_reason_json,
                image_features_json, image_embedding_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, 'available', 'found_in_search',
-                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, 'available', 'found_in_search',
+                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               radar.id,
               item.title,
@@ -585,6 +645,9 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
               item.image_url,
               nextPrice,
               currency,
+              item.shipping_price ?? null,
+              item.shipping_currency || null,
+              item.shipping_type || null,
               sourceNote,
               item.source || null,
               item.external_id || null,
@@ -593,6 +656,10 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
               item.hybrid_score,
               item.preference_score,
               item.grail_score,
+              item.rule_score,
+              item.rule_tier,
+              item.rule_rejected,
+              item.rule_reason_json,
               item.image_features_json,
               item.image_embedding_json,
             ],
@@ -635,13 +702,16 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
           `UPDATE listings
            SET radar_id = ?, title = ?, platform = ?,
                url = COALESCE(?, url), image_url = ?,
-               current_price = ?, currency = ?, source_key = COALESCE(?, source_key),
+               current_price = ?, currency = ?,
+               shipping_price = ?, shipping_currency = ?, shipping_type = ?,
+               source_key = COALESCE(?, source_key),
                external_id = COALESCE(?, external_id),
                availability_status = 'available', availability_detail = 'found_in_search',
                last_seen_at = CURRENT_TIMESTAMP, last_checked_at = CURRENT_TIMESTAMP,
                unavailable_since = NULL,
                visual_score = ?, semantic_score = ?, hybrid_score = ?,
                preference_score = ?, grail_score = ?,
+               rule_score = ?, rule_tier = ?, rule_rejected = ?, rule_reason_json = ?,
                image_features_json = COALESCE(?, image_features_json),
                image_embedding_json = COALESCE(?, image_embedding_json), updated_at = CURRENT_TIMESTAMP
            WHERE id = ?`,
@@ -653,6 +723,9 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
             item.image_url,
             nextPrice,
             currency,
+            item.shipping_price ?? null,
+            item.shipping_currency || null,
+            item.shipping_type || null,
             item.source || null,
             item.external_id || null,
             item.visual_score,
@@ -660,6 +733,10 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
             item.hybrid_score,
             item.preference_score,
             item.grail_score,
+            item.rule_score,
+            item.rule_tier,
+            item.rule_rejected,
+            item.rule_reason_json,
             item.image_features_json,
             item.image_embedding_json,
             existing.id,
@@ -775,6 +852,10 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
       const unavailableSources = sourceSummary.filter((source) => !source.ok);
       let message = `${results.length} anúncios selecionados de ${activeSources} fonte(s). ${added} novos, ${updated} atualizados, ${priceDrops} queda(s) de preço, ${unavailable} indisponível(is) e ${restored} restaurado(s).`;
 
+      if (criteriaRejected > 0) {
+        message += `${criteriaRejected} resultado(s) barrado(s) pelos critérios do radar.`;
+      }
+
       if (catalogItems.length) {
         message += ` Mercado Livre Catálogo: ${catalogAdded} pista(s) nova(s) e ${catalogUpdated} atualizada(s).`;
       }
@@ -819,7 +900,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
           runRecord.id,
           `Radar executado: ${radar.name}`,
           message,
-          JSON.stringify({ sources: sourceSummary, added, updated, priceDrops, availabilityChecks, unavailable, restored, catalogAdded, catalogUpdated, trigger }),
+          JSON.stringify({ sources: sourceSummary, added, updated, priceDrops, availabilityChecks, unavailable, restored, catalogAdded, catalogUpdated, criteriaRejected, trigger }),
         ],
       );
 
@@ -846,6 +927,7 @@ function createRadarRunner({ get, all, run, getValidMercadoLivreConnection }) {
         restored,
         catalog_added: catalogAdded,
         catalog_updated: catalogUpdated,
+        criteria_rejected: criteriaRejected,
         sources: sourceSummary,
         message,
       };

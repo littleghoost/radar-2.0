@@ -29,6 +29,24 @@ function inboxTierLabel(tier) {
   return INBOX_LABELS[tier] || "Triagem";
 }
 
+function parseRadarTerms(value) {
+  if (Array.isArray(value)) return value;
+
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter(Boolean)
+      : [];
+  } catch {
+    return String(value)
+      .split(/[\n,;]+/)
+      .map((term) => term.trim())
+      .filter(Boolean);
+  }
+}
+
 function setInboxFilter(tier) {
   const filter = $("#inboxFilter");
 
@@ -332,7 +350,27 @@ function clearListingSelection() {
   updateBulkActions();
 }
 
-$("#openRadarModal").onclick = () => radarModal.showModal();
+function resetRadarFormForCreate() {
+  const form = $("#radarForm");
+  if (!form) return;
+
+  form.reset();
+  delete form.dataset.editingRadarId;
+
+  $("#radarModalEyebrow").textContent = "NOVO";
+  $("#radarModalTitle").textContent = "Criar radar";
+  $("#radarSubmitButton").textContent = "Criar radar";
+
+  const label = $("#radarReferenceLabel");
+  if (label) label.textContent = "Escolher imagem";
+}
+
+function openNewRadarModal() {
+  resetRadarFormForCreate();
+  radarModal.showModal();
+}
+
+$("#openRadarModal").onclick = openNewRadarModal;
 
 $("#openListingModal").onclick = () => listingModal.showModal();
 
@@ -471,6 +509,36 @@ function money(value, currency = "BRL") {
   );
 }
 
+function internationalCostHtml(listing) {
+  const cost = listing?.international_cost;
+
+  if (!cost) return "";
+
+  const headline = cost.shipping_known
+    ? `Estimado entregue: ${money(cost.total_brl, "BRL")}`
+    : `Mínimo estimado: ${money(cost.total_brl, "BRL")} + frete`;
+
+  const program =
+    cost.program === "prc"
+      ? "Remessa Conforme"
+      : "fora do Remessa Conforme";
+
+  return `
+    <div class="international-cost">
+      <strong>${escapeHtml(headline)}</strong>
+      <small>
+        Produto ${escapeHtml(money(cost.product_brl, "BRL"))}
+        · Frete ${cost.shipping_known ? escapeHtml(money(cost.shipping_brl, "BRL")) : "não confirmado"}
+        · II ${escapeHtml(money(cost.import_tax_brl, "BRL"))}
+        · ICMS ${escapeHtml(money(cost.icms_brl, "BRL"))}
+      </small>
+      <small class="muted">
+        Estimativa ${escapeHtml(program)} · ICMS ${escapeHtml(String(cost.icms_rate_percent))}%
+      </small>
+    </div>
+  `;
+}
+
 function dateTime(value) {
   if (!value) return "Nunca executado";
   const normalized = String(value).includes("T") ? value : `${value.replace(" ", "T")}Z`;
@@ -534,6 +602,18 @@ async function loadRadars() {
     radarList.innerHTML = state.radars
       .map((radar) => {
         const active = String(state.activeRadar) === String(radar.id);
+        const priorityTerms = parseRadarTerms(
+          radar.priority_terms_json,
+        );
+        const penalizedTerms = parseRadarTerms(
+          radar.penalized_terms_json,
+        );
+        const requiredTerms = parseRadarTerms(
+          radar.required_terms_json,
+        );
+        const excludeTerms = parseRadarTerms(
+          radar.exclude_terms_json,
+        );
 
         return `
 
@@ -575,6 +655,30 @@ async function loadRadars() {
 
                 </p>
 
+                ${
+                  priorityTerms.length ||
+                  penalizedTerms.length ||
+                  requiredTerms.length ||
+                  excludeTerms.length
+                    ? `
+                      <div class="radar-criteria-preview">
+                        ${priorityTerms.slice(0, 4).map((term) => `
+                          <span class="criteria-chip priority">↑ ${escapeHtml(term)}</span>
+                        `).join("")}
+                        ${penalizedTerms.slice(0, 3).map((term) => `
+                          <span class="criteria-chip penalized">↓ ${escapeHtml(term)}</span>
+                        `).join("")}
+                        ${requiredTerms.slice(0, 3).map((term) => `
+                          <span class="criteria-chip required">✓ ${escapeHtml(term)}</span>
+                        `).join("")}
+                        ${excludeTerms.slice(0, 3).map((term) => `
+                          <span class="criteria-chip exclude">× ${escapeHtml(term)}</span>
+                        `).join("")}
+                      </div>
+                    `
+                    : ""
+                }
+
                 <p class="radar-last-run">
                   Última execução: ${escapeHtml(dateTime(radar.last_run_at))}
                   ${radar.last_run_status ? ` • ${escapeHtml(radar.last_run_status)}` : ""}
@@ -597,7 +701,10 @@ async function loadRadars() {
                       radar.max_price
                         ? `
                           até
-                          ${money(radar.max_price)}
+                          ${money(
+                            radar.max_price,
+                            radar.budget_currency || "BRL",
+                          )}
                         `
                         : "sem teto"
                     }
@@ -879,77 +986,59 @@ async function configureSchedule(id) {
 ========================= */
 
 async function editRadar(id) {
-  const radar = state.radars.find((radar) => Number(radar.id) === Number(id));
-
-  if (!radar) {
-    return;
-  }
-
-  const name = prompt(
-    "Nome do radar:",
-
-    radar.name,
+  const radar = state.radars.find(
+    (item) => Number(item.id) === Number(id),
   );
 
-  if (name === null) {
-    return;
+  if (!radar) return;
+
+  const form = $("#radarForm");
+  if (!form) return;
+
+  form.reset();
+  form.dataset.editingRadarId = String(radar.id);
+
+  form.elements.name.value = radar.name || "";
+  form.elements.query.value = radar.query || "";
+  form.elements.max_price.value =
+    radar.max_price ?? "";
+  form.elements.budget_currency.value =
+    radar.budget_currency || "BRL";
+  form.elements.category.value =
+    radar.category || "geral";
+  form.elements.priority_terms.value =
+    parseRadarTerms(radar.priority_terms_json).join("\n");
+  form.elements.penalized_terms.value =
+    parseRadarTerms(radar.penalized_terms_json).join("\n");
+  form.elements.required_terms.value =
+    parseRadarTerms(radar.required_terms_json).join("\n");
+  form.elements.exclude_terms.value =
+    parseRadarTerms(radar.exclude_terms_json).join("\n");
+  form.elements.criteria_weight.value =
+    String(radar.criteria_weight ?? 65);
+  form.elements.visual_weight.value =
+    String(radar.visual_weight ?? 70);
+  form.elements.semantic_enabled.checked =
+    Boolean(radar.semantic_enabled);
+  form.elements.semantic_weight.value =
+    String(radar.semantic_weight ?? 70);
+  form.elements.min_visual_similarity.value =
+    String(radar.min_visual_similarity ?? 0.45);
+
+  $("#radarModalEyebrow").textContent = "EDITAR";
+  $("#radarModalTitle").textContent =
+    `Editar ${radar.name}`;
+  $("#radarSubmitButton").textContent =
+    "Salvar radar";
+
+  const label = $("#radarReferenceLabel");
+  if (label) {
+    label.textContent = radar.reference_image_path
+      ? "Trocar imagem de referência"
+      : "Escolher imagem";
   }
 
-  const query = prompt(
-    "Busca / palavras-chave:",
-
-    radar.query,
-  );
-
-  if (query === null) {
-    return;
-  }
-
-  const maxPrice = prompt(
-    "Preço máximo:",
-
-    radar.max_price ?? "",
-  );
-
-  if (maxPrice === null) {
-    return;
-  }
-
-  const category = prompt(
-    "Categoria (roupas, cameras ou geral):",
-
-    radar.category || "geral",
-  );
-
-  if (category === null) {
-    return;
-  }
-
-  try {
-    await api(
-      `/api/radars/${id}`,
-
-      {
-        method: "PATCH",
-
-        body: JSON.stringify({
-          name,
-
-          query,
-
-          max_price: maxPrice,
-
-          category,
-        }),
-      },
-    );
-
-    await loadRadars();
-
-    await loadListings();
-  } catch (err) {
-    alert(err.message);
-  }
+  radarModal.showModal();
 }
 
 /* =========================
@@ -1278,6 +1367,7 @@ async function loadListings() {
 
                 </div>
 
+                ${internationalCostHtml(listing)}
 
                 ${drop}
 
@@ -1311,6 +1401,11 @@ async function loadListings() {
                     ? `
                       <div class="score-row">
                         <span class="score-chip">Score ${Math.round(Number(listing.hybrid_score))}/100</span>
+                        ${
+                          listing.rule_score !== null && listing.rule_score !== undefined
+                            ? `<span class="score-chip rule">Regras ${Math.round(Number(listing.rule_score))}/100${listing.rule_tier ? ` · ${escapeHtml(listing.rule_tier)}` : ""}</span>`
+                            : ""
+                        }
                         ${
                           listing.grail_score !== null && listing.grail_score !== undefined
                             ? `<span class="score-chip grail">Grail ${Math.round(Number(listing.grail_score))}/100</span>`
@@ -1559,61 +1654,108 @@ $("#radarForm").onsubmit = async (event) => {
 
   const formElement = event.currentTarget;
   const form = new FormData(formElement);
-  const referenceImage = formElement.elements.reference_image?.files?.[0] || null;
+  const editingRadarId =
+    formElement.dataset.editingRadarId || null;
+  const referenceImage =
+    formElement.elements.reference_image?.files?.[0] || null;
 
   const payload = {
     name: form.get("name"),
     query: form.get("query"),
     max_price: form.get("max_price"),
+    budget_currency:
+      form.get("budget_currency") || "BRL",
     category: form.get("category"),
-    visual_enabled: Boolean(referenceImage),
-    visual_weight: Number(form.get("visual_weight") || 70),
-    semantic_enabled: formElement.elements.semantic_enabled.checked,
-    semantic_weight: Number(form.get("semantic_weight") || 70),
-    min_visual_similarity: Number(form.get("min_visual_similarity") || 0.45),
+    priority_terms: form.get("priority_terms"),
+    penalized_terms: form.get("penalized_terms"),
+    required_terms: form.get("required_terms"),
+    exclude_terms: form.get("exclude_terms"),
+    criteria_weight: Number(
+      form.get("criteria_weight") || 65,
+    ),
+    visual_weight: Number(
+      form.get("visual_weight") || 70,
+    ),
+    semantic_enabled:
+      formElement.elements.semantic_enabled.checked,
+    semantic_weight: Number(
+      form.get("semantic_weight") || 70,
+    ),
+    min_visual_similarity: Number(
+      form.get("min_visual_similarity") || 0.45,
+    ),
   };
 
+  if (!editingRadarId) {
+    payload.visual_enabled = Boolean(referenceImage);
+  }
+
+  const submitButton =
+    formElement.querySelector('button[type="submit"]');
+  const normalLabel = editingRadarId
+    ? "Salvar radar"
+    : "Criar radar";
+
   try {
-    const radar = await api("/api/radars", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = editingRadarId
+        ? "Salvando..."
+        : "Criando...";
+    }
+
+    const radar = await api(
+      editingRadarId
+        ? `/api/radars/${editingRadarId}`
+        : "/api/radars",
+      {
+        method: editingRadarId ? "PATCH" : "POST",
+        body: JSON.stringify(payload),
+      },
+    );
 
     if (referenceImage) {
-      const submitButton = formElement.querySelector('button[type="submit"]');
       if (submitButton) {
-        submitButton.disabled = true;
-        submitButton.textContent = payload.semantic_enabled ? "Preparando IA visual..." : "Analisando imagem...";
+        submitButton.textContent =
+          payload.semantic_enabled
+            ? "Preparando IA visual..."
+            : "Analisando imagem...";
       }
-      const response = await fetch(`/api/radars/${radar.id}/reference-image`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": referenceImage.type || "application/octet-stream",
+
+      const response = await fetch(
+        `/api/radars/${radar.id}/reference-image`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type":
+              referenceImage.type ||
+              "application/octet-stream",
+          },
+          body: referenceImage,
         },
-        body: referenceImage,
-      });
+      );
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || "Não consegui enviar a imagem de referência.");
-      if (submitButton) {
-        submitButton.disabled = false;
-        submitButton.textContent = "Criar radar";
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Não consegui enviar a imagem de referência.",
+        );
       }
     }
 
-    formElement.reset();
-    const label = $("#radarReferenceLabel");
-    if (label) label.textContent = "Escolher imagem";
+    resetRadarFormForCreate();
     radarModal.close();
 
     await loadRadars();
     await loadListings();
   } catch (err) {
-    const submitButton = formElement.querySelector('button[type="submit"]');
     if (submitButton) {
       submitButton.disabled = false;
-      submitButton.textContent = "Criar radar";
+      submitButton.textContent = normalLabel;
     }
-    alert(err.message);
+
+    alert(errorMessage(err));
   }
 };
 
@@ -2472,6 +2614,118 @@ async function loadSemanticStatus() {
 }
 
 /* =========================
+   CUSTO INTERNACIONAL
+========================= */
+
+function renderInternationalFxStatus(settings) {
+  const label = $("#internationalFxStatus");
+  if (!label) return;
+
+  const usd = Number(settings?.fx?.rates?.USD);
+  const source = settings?.fx?.source;
+
+  if (Number.isFinite(usd) && usd > 0) {
+    label.textContent =
+      `Cotação atual: US$ 1 ≈ ${money(usd, "BRL")} · ${source || "fonte cambial"}`;
+    return;
+  }
+
+  if (settings?.fx_error) {
+    label.textContent =
+      "Cotação temporariamente indisponível. A estimativa volta automaticamente quando a fonte responder.";
+    return;
+  }
+
+  label.textContent =
+    settings?.enabled === false
+      ? "Estimativa desativada."
+      : "Cotação: aguardando.";
+}
+
+async function loadInternationalCostSettings() {
+  const form = $("#internationalCostForm");
+  if (!form) return;
+
+  const status = $("#internationalCostStatus");
+
+  try {
+    const settings = await api(
+      "/api/international-cost/settings",
+    );
+
+    form.elements.enabled.checked =
+      Boolean(settings.enabled);
+    form.elements.program.value =
+      settings.program || "outside_prc";
+    form.elements.icms_rate_percent.value =
+      String(settings.icms_rate_percent ?? 20);
+    form.elements.handling_fee_brl.value =
+      String(settings.handling_fee_brl ?? 0);
+    form.elements.destination_postal_code.value =
+      settings.destination_postal_code || "";
+
+    renderInternationalFxStatus(settings);
+
+    if (status) {
+      status.textContent = "Pronto";
+      status.classList.remove("saved");
+    }
+  } catch (err) {
+    if (status) status.textContent = "Indisponível";
+  }
+}
+
+$("#internationalCostForm")?.addEventListener(
+  "submit",
+  async (event) => {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const button =
+      form.querySelector('button[type="submit"]');
+    const status = $("#internationalCostStatus");
+
+    if (button) button.disabled = true;
+    if (status) status.textContent = "Salvando...";
+
+    try {
+      const settings = await api(
+        "/api/international-cost/settings",
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            enabled: form.elements.enabled.checked,
+            program: form.elements.program.value,
+            icms_rate_percent: Number(
+              form.elements.icms_rate_percent.value,
+            ),
+            handling_fee_brl: Number(
+              form.elements.handling_fee_brl.value,
+            ),
+            destination_postal_code:
+              form.elements.destination_postal_code.value.trim(),
+          }),
+        },
+      );
+
+      renderInternationalFxStatus(settings);
+
+      if (status) {
+        status.textContent = "Salvo";
+        status.classList.add("saved");
+      }
+
+      await loadListings();
+    } catch (err) {
+      if (status) status.textContent = "Erro ao salvar";
+      alert(errorMessage(err));
+    } finally {
+      if (button) button.disabled = false;
+    }
+  },
+);
+
+/* =========================
    CONFIGURAÇÕES DESKTOP
 ========================= */
 
@@ -2565,7 +2819,13 @@ $("#runBackgroundNow")?.addEventListener("click", async () => {
     await loadRadars();
 
     await loadListings();
-    await Promise.all([loadDesktopSettings(), loadSemanticStatus(), loadPreferenceStatus(), loadNotifications().catch(() => {})]);
+    await Promise.all([
+      loadDesktopSettings(),
+      loadInternationalCostSettings(),
+      loadSemanticStatus(),
+      loadPreferenceStatus(),
+      loadNotifications().catch(() => {}),
+    ]);
   } catch (err) {
     alert("Não consegui carregar o Radar: " + err.message);
   }

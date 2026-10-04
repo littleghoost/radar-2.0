@@ -1180,3 +1180,64 @@ label textarea {
   width: fit-content;
   font-size: .78rem;
 }
+
+.radar-criteria-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 2px;
+}
+
+.criteria-chip {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 999px;
+  font-size: .72rem;
+  line-height: 1;
+  background: #141419;
+}
+
+.criteria-chip.priority {
+  border-color: rgba(125, 230, 164, .25);
+}
+
+.criteria-chip.penalized {
+  border-color: rgba(255, 196, 90, .25);
+}
+
+.criteria-chip.required {
+  border-color: rgba(120, 170, 255, .25);
+}
+
+.criteria-chip.exclude {
+  border-color: rgba(255, 100, 100, .25);
+}
+
+.criteria-builder textarea {
+  min-height: 104px;
+  resize: vertical;
+}
+
+.international-cost {
+  display: grid;
+  gap: 4px;
+  margin: 9px 0 2px;
+  padding: 10px 11px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+}
+
+.international-cost strong {
+  font-size: .86rem;
+  line-height: 1.3;
+}
+
+.international-cost small {
+  color: var(--muted);
+  font-size: .72rem;
+  line-height: 1.4;
+}

@@ -306,6 +306,79 @@
             <div id="tasteProfileStats" class="taste-profile-stats">Carregando perfil...</div>
           </div>
 
+          <div class="profile-card international-cost-card">
+            <div class="settings-head">
+              <div>
+                <span class="eyebrow"> IMPORTAÇÃO </span>
+                <h3>Custo internacional estimado</h3>
+                <p>Converte para BRL e estima imposto + ICMS. O CEP é opcional e serve apenas para melhorar o frete retornado pelas fontes compatíveis.</p>
+              </div>
+              <span id="internationalCostStatus" class="settings-status">Carregando...</span>
+            </div>
+
+            <form id="internationalCostForm" class="desktop-settings-form">
+              <label class="setting-row">
+                <span>
+                  <strong>Mostrar estimativa nos anúncios</strong>
+                  <small>Não altera o ranking do radar; é só uma camada de custo.</small>
+                </span>
+                <input type="checkbox" name="enabled" checked />
+              </label>
+
+              <div class="three-cols">
+                <label>
+                  Regime da compra
+                  <select name="program">
+                    <option value="outside_prc" selected>Fora do Remessa Conforme — conservador</option>
+                    <option value="prc">Remessa Conforme</option>
+                  </select>
+                </label>
+
+                <label>
+                  ICMS estimado (%)
+                  <input
+                    name="icms_rate_percent"
+                    type="number"
+                    min="0"
+                    max="30"
+                    step="0.01"
+                    value="20"
+                  />
+                </label>
+
+                <label>
+                  Taxa extra estimada (R$)
+                  <input
+                    name="handling_fee_brl"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value="0"
+                  />
+                </label>
+              </div>
+
+              <label>
+                CEP de destino (opcional)
+                <input
+                  name="destination_postal_code"
+                  inputmode="numeric"
+                  autocomplete="postal-code"
+                  placeholder="Somente se quiser melhorar a estimativa de frete"
+                />
+                <small>O Radar envia apenas país + CEP ao eBay para contexto de entrega. Sem CEP, o custo aparece como mínimo estimado quando o frete não estiver disponível.</small>
+              </label>
+
+              <div id="internationalFxStatus" class="muted">
+                Cotação: aguardando.
+              </div>
+
+              <div class="settings-actions">
+                <button type="submit">Salvar custo internacional</button>
+              </div>
+            </form>
+          </div>
+
           <div class="profile-card desktop-settings-card">
             <div class="settings-head">
               <div>
@@ -392,9 +465,9 @@
       <form id="radarForm">
         <div class="modal-head">
           <div>
-            <span class="eyebrow"> NOVO </span>
+            <span class="eyebrow" id="radarModalEyebrow"> NOVO </span>
 
-            <h3>Criar radar</h3>
+            <h3 id="radarModalTitle">Criar radar</h3>
           </div>
 
           <button type="button" class="icon-btn close-modal">×</button>
@@ -415,6 +488,66 @@
             placeholder="Ex.: JNCO baggy kangaroo vintage"
           />
         </label>
+
+        <div class="visual-radar-box criteria-builder">
+          <div>
+            <span class="eyebrow"> CRITÉRIOS DO RADAR </span>
+            <strong>O que sobe e o que some</strong>
+            <small>Um termo por linha ou separado por vírgula. As regras valem para qualquer categoria.</small>
+          </div>
+
+          <div class="three-cols">
+            <label>
+              Priorizar
+              <textarea
+                name="priority_terms"
+                rows="4"
+                placeholder="Ex.:&#10;NightShot&#10;HDD&#10;DCR-SR"
+              ></textarea>
+              <small>Cada termo encontrado aumenta a prioridade.</small>
+            </label>
+
+            <label>
+              Despriorizar
+              <textarea
+                name="penalized_terms"
+                rows="4"
+                placeholder="Ex.:&#10;MiniDV&#10;Hi8&#10;sem bateria"
+              ></textarea>
+              <small>Continua aparecendo, mas perde pontos no ranking.</small>
+            </label>
+
+            <label>
+              Deve conter pelo menos um
+              <textarea
+                name="required_terms"
+                rows="4"
+                placeholder="Opcional. Ex.:&#10;Handycam&#10;Camcorder"
+              ></textarea>
+              <small>Se preenchido, resultados sem nenhum deles são barrados.</small>
+            </label>
+
+            <label>
+              Excluir
+              <textarea
+                name="exclude_terms"
+                rows="4"
+                placeholder="Ex.:&#10;bateria&#10;carregador&#10;manual"
+              ></textarea>
+              <small>Qualquer termo daqui barra o resultado automaticamente.</small>
+            </label>
+          </div>
+
+          <label>
+            Peso dos critérios
+            <select name="criteria_weight">
+              <option value="45">45% — leve</option>
+              <option value="65" selected>65% — recomendado</option>
+              <option value="80">80% — forte</option>
+              <option value="95">95% — quase só regras</option>
+            </select>
+          </label>
+        </div>
 
         <div class="visual-radar-box">
           <div>
@@ -468,7 +601,7 @@
           </div>
         </div>
 
-        <div class="two-cols">
+        <div class="three-cols">
           <label>
             Preço máximo
 
@@ -479,6 +612,17 @@
               step="0.01"
               placeholder="150"
             />
+          </label>
+
+          <label>
+            Moeda do teto
+            <select name="budget_currency">
+              <option value="BRL" selected>BRL — R$</option>
+              <option value="USD">USD — US$</option>
+              <option value="EUR">EUR — €</option>
+              <option value="GBP">GBP — £</option>
+              <option value="JPY">JPY — ¥</option>
+            </select>
           </label>
 
           <label>
@@ -494,7 +638,7 @@
           </label>
         </div>
 
-        <button class="primary wide" type="submit">Criar radar</button>
+        <button class="primary wide" id="radarSubmitButton" type="submit">Criar radar</button>
       </form>
     </dialog>
 

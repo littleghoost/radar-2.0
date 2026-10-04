@@ -44,6 +44,12 @@ db.serialize(() => {
       semantic_weight INTEGER DEFAULT 70,
       reference_embedding_json TEXT,
       semantic_model TEXT,
+      priority_terms_json TEXT DEFAULT '[]',
+      penalized_terms_json TEXT DEFAULT '[]',
+      required_terms_json TEXT DEFAULT '[]',
+      exclude_terms_json TEXT DEFAULT '[]',
+      criteria_weight INTEGER DEFAULT 65,
+      budget_currency TEXT DEFAULT 'BRL',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -101,6 +107,24 @@ db.serialize(() => {
       }
       if (!names.has("semantic_model")) {
         db.run("ALTER TABLE radars ADD COLUMN semantic_model TEXT");
+      }
+      if (!names.has("priority_terms_json")) {
+        db.run("ALTER TABLE radars ADD COLUMN priority_terms_json TEXT DEFAULT '[]'");
+      }
+      if (!names.has("penalized_terms_json")) {
+        db.run("ALTER TABLE radars ADD COLUMN penalized_terms_json TEXT DEFAULT '[]'");
+      }
+      if (!names.has("required_terms_json")) {
+        db.run("ALTER TABLE radars ADD COLUMN required_terms_json TEXT DEFAULT '[]'");
+      }
+      if (!names.has("exclude_terms_json")) {
+        db.run("ALTER TABLE radars ADD COLUMN exclude_terms_json TEXT DEFAULT '[]'");
+      }
+      if (!names.has("criteria_weight")) {
+        db.run("ALTER TABLE radars ADD COLUMN criteria_weight INTEGER DEFAULT 65");
+      }
+      if (!names.has("budget_currency")) {
+        db.run("ALTER TABLE radars ADD COLUMN budget_currency TEXT DEFAULT 'BRL'");
       }
     },
   );
@@ -246,6 +270,9 @@ db.serialize(() => {
       image_url TEXT,
       current_price REAL,
       currency TEXT DEFAULT 'BRL',
+      shipping_price REAL,
+      shipping_currency TEXT,
+      shipping_type TEXT,
       status TEXT DEFAULT 'novo',
       notes TEXT,
       visual_score REAL,
@@ -255,6 +282,17 @@ db.serialize(() => {
       image_embedding_json TEXT,
       preference_score REAL,
       grail_score REAL,
+      rule_score REAL,
+      rule_tier TEXT,
+      rule_rejected INTEGER DEFAULT 0,
+      rule_reason_json TEXT,
+      source_key TEXT,
+      external_id TEXT,
+      availability_status TEXT DEFAULT 'unknown',
+      availability_detail TEXT,
+      last_seen_at DATETIME,
+      last_checked_at DATETIME,
+      unavailable_since DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -292,6 +330,27 @@ db.serialize(() => {
       }
       if (!columns.some((column) => column.name === "grail_score")) {
         db.run("ALTER TABLE listings ADD COLUMN grail_score REAL");
+      }
+      if (!columns.some((column) => column.name === "rule_score")) {
+        db.run("ALTER TABLE listings ADD COLUMN rule_score REAL");
+      }
+      if (!columns.some((column) => column.name === "rule_tier")) {
+        db.run("ALTER TABLE listings ADD COLUMN rule_tier TEXT");
+      }
+      if (!columns.some((column) => column.name === "rule_rejected")) {
+        db.run("ALTER TABLE listings ADD COLUMN rule_rejected INTEGER DEFAULT 0");
+      }
+      if (!columns.some((column) => column.name === "rule_reason_json")) {
+        db.run("ALTER TABLE listings ADD COLUMN rule_reason_json TEXT");
+      }
+      if (!columns.some((column) => column.name === "shipping_price")) {
+        db.run("ALTER TABLE listings ADD COLUMN shipping_price REAL");
+      }
+      if (!columns.some((column) => column.name === "shipping_currency")) {
+        db.run("ALTER TABLE listings ADD COLUMN shipping_currency TEXT");
+      }
+      if (!columns.some((column) => column.name === "shipping_type")) {
+        db.run("ALTER TABLE listings ADD COLUMN shipping_type TEXT");
       }
       if (!columns.some((column) => column.name === "source_key")) {
         db.run("ALTER TABLE listings ADD COLUMN source_key TEXT");

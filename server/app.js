@@ -15,6 +15,16 @@ const { createRadarRunner } = require("./services/radarRunner");
 const { extractVisualFeatures, downloadImage, visualSimilarity, hybridScore } = require("./services/visualSimilarity");
 const { embedImage, cosineSimilarity: semanticSimilarity, status: semanticStatus, MODEL_ID } = require("./services/semanticVision");
 const { buildPreferenceProfile, preferenceScore, grailScore } = require("./services/preferenceLearning");
+const {
+  parseTerms,
+  termsJson,
+  evaluateRadarCriteria,
+  blendCriteriaScore,
+} = require("./services/radarCriteria");
+const {
+  getFxRates,
+  estimateBrazilImportCost,
+} = require("./services/internationalCost");
 
 const app = express();
 
@@ -360,11 +370,105 @@ async function rebuildPreferenceScores(category = null) {
   return { updated, profiles: [...profiles.values()].map(({ positive_centroid, negative_centroid, ...rest }) => rest) };
 }
 
+const DEFAULT_INTERNATIONAL_COST_SETTINGS = {
+  enabled: true,
+  program: "outside_prc",
+  icms_rate_percent: 20,
+  handling_fee_brl: 0,
+  destination_country: "BR",
+  destination_postal_code: "",
+};
+
+function normalizeInternationalCostSettings(value = {}) {
+  const settings = {
+    ...DEFAULT_INTERNATIONAL_COST_SETTINGS,
+    ...(value || {}),
+  };
+
+  settings.enabled = Boolean(settings.enabled);
+  settings.program =
+    settings.program === "prc"
+      ? "prc"
+      : "outside_prc";
+  settings.icms_rate_percent = Math.max(
+    0,
+    Math.min(
+      30,
+      Number(settings.icms_rate_percent ?? 20) || 20,
+    ),
+  );
+  settings.handling_fee_brl = Math.max(
+    0,
+    Number(settings.handling_fee_brl) || 0,
+  );
+  // A estimativa tributária desta versão é específica para importações ao Brasil.
+  settings.destination_country = "BR";
+  settings.destination_postal_code = String(
+    settings.destination_postal_code || "",
+  )
+    .replace(/[^0-9A-Za-z-]/g, "")
+    .slice(0, 16);
+
+  return settings;
+}
+
+async function getInternationalCostSettings() {
+  const row = await get(
+    `SELECT value
+     FROM integration_settings
+     WHERE key = 'international_cost_profile'
+     LIMIT 1`,
+  );
+
+  if (!row?.value) {
+    return {
+      ...DEFAULT_INTERNATIONAL_COST_SETTINGS,
+    };
+  }
+
+  try {
+    return normalizeInternationalCostSettings(
+      JSON.parse(row.value),
+    );
+  } catch {
+    return {
+      ...DEFAULT_INTERNATIONAL_COST_SETTINGS,
+    };
+  }
+}
+
+async function saveInternationalCostSettings(input = {}) {
+  const current =
+    await getInternationalCostSettings();
+  const patch = Object.fromEntries(
+    Object.entries(input).filter(
+      ([, value]) => value !== undefined,
+    ),
+  );
+  const next = normalizeInternationalCostSettings({
+    ...current,
+    ...patch,
+  });
+
+  await run(
+    `INSERT INTO integration_settings
+      (key, value, updated_at)
+     VALUES ('international_cost_profile', ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(key) DO UPDATE SET
+       value = excluded.value,
+       updated_at = CURRENT_TIMESTAMP`,
+    [JSON.stringify(next)],
+  );
+
+  return next;
+}
+
 const radarRunner = createRadarRunner({
   get,
   all,
   run,
   getValidMercadoLivreConnection,
+  getInternationalCostSettings,
 });
 
 async function scoreListingForRadar({ radarId, title, imageUrl, currentPrice, currency = "BRL" }) {
@@ -461,82 +565,70 @@ function normalizeSearchWords(value) {
 }
 
 function radarMatchMetrics(radar, listing) {
-  const queryWords = [...new Set(normalizeSearchWords(radar.query))];
-  if (!queryWords.length) {
-    return { fit: 0, hits: 0, strongHits: 0, weightedHits: 0 };
-  }
-
-  const haystack = new Set(
-    normalizeSearchWords(
-      [listing.title, listing.platform, listing.notes].filter(Boolean).join(" "),
-    ),
-  );
-
-  let hits = 0;
-  let strongHits = 0;
-  let weightedHits = 0;
-
-  for (const word of queryWords) {
-    if (!haystack.has(word)) continue;
-
-    hits += 1;
-
-    const modelToken = /\d/.test(word);
-    const strongKeyword = ["nightshot", "hdd", "noturna", "visao"].includes(word);
-    const genericKeyword = ["sony", "handycam", "dcr"].includes(word);
-
-    if (modelToken || strongKeyword) {
-      strongHits += 1;
-      weightedHits += modelToken ? 3 : 2.5;
-    } else {
-      weightedHits += genericKeyword ? 0.4 : 1;
-    }
-  }
-
-  const queryText = String(radar.query || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-
-  const listingText = String(listing.title || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-
-  if (
-    /dcr[\s-]*sr/.test(queryText) &&
-    /\b(?:dcr[\s-]*)?sr\d+\b/.test(listingText)
-  ) {
-    hits += 1;
-    strongHits += 1;
-    weightedHits += 3;
-  }
-
-  let fit = weightedHits / Math.max(3, Math.min(queryWords.length, 8));
-
-  if (
-    radar.max_price !== null &&
-    radar.max_price !== undefined &&
-    listing.current_price !== null &&
-    listing.current_price !== undefined
-  ) {
-    if (Number(listing.current_price) <= Number(radar.max_price)) {
-      fit += 0.08;
-    } else {
-      fit -= 0.18;
-    }
-  }
+  const criteria = evaluateRadarCriteria(radar, listing);
 
   return {
-    fit: Math.max(0, Math.min(1, fit)),
-    hits,
-    strongHits,
-    weightedHits,
+    fit: criteria.queryFit,
+    hits: criteria.hits,
+    strongHits: criteria.strongHits,
+    weightedHits: criteria.weightedHits,
+    criteria,
   };
 }
 
 function radarTextFit(radar, listing) {
   return radarMatchMetrics(radar, listing).fit;
+}
+
+async function reapplyCriteriaForRadar(radar) {
+  const listings = await all(
+    "SELECT * FROM listings WHERE radar_id = ?",
+    [radar.id],
+  );
+
+  const summary = {
+    total: listings.length,
+    alta: 0,
+    media: 0,
+    triagem: 0,
+    rejected: 0,
+  };
+
+  for (const listing of listings) {
+    const criteria = evaluateRadarCriteria(
+      radar,
+      listing,
+    );
+
+    if (criteria.rejected) {
+      summary.rejected += 1;
+    } else if (criteria.tier === "alta") {
+      summary.alta += 1;
+    } else if (criteria.tier === "media") {
+      summary.media += 1;
+    } else {
+      summary.triagem += 1;
+    }
+
+    await run(
+      `UPDATE listings
+       SET rule_score = ?,
+           rule_tier = ?,
+           rule_rejected = ?,
+           rule_reason_json = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [
+        criteria.score,
+        criteria.tier,
+        criteria.rejected ? 1 : 0,
+        JSON.stringify(criteria.reasons),
+        listing.id,
+      ],
+    );
+  }
+
+  return summary;
 }
 
 async function applyRadarToListing(listing, radarId) {
@@ -548,11 +640,20 @@ async function applyRadarToListing(listing, radarId) {
     currency: listing.currency || "BRL",
   });
 
+  const radar = radarId
+    ? await get("SELECT * FROM radars WHERE id = ?", [radarId])
+    : null;
+  const criteria = radar
+    ? evaluateRadarCriteria(radar, listing)
+    : null;
+
   await run(
     `UPDATE listings
      SET radar_id = ?, visual_score = ?, semantic_score = ?, hybrid_score = ?,
          image_features_json = ?, image_embedding_json = ?,
-         preference_score = ?, grail_score = ?, updated_at = CURRENT_TIMESTAMP
+         preference_score = ?, grail_score = ?,
+         rule_score = ?, rule_tier = ?, rule_rejected = ?,
+         rule_reason_json = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
     [
       radarId || null,
@@ -563,11 +664,18 @@ async function applyRadarToListing(listing, radarId) {
       intelligence.image_embedding_json,
       intelligence.preference_score,
       intelligence.grail_score,
+      criteria?.score ?? null,
+      criteria?.tier ?? null,
+      criteria?.rejected ? 1 : 0,
+      JSON.stringify(criteria?.reasons || []),
       listing.id,
     ],
   );
 
-  return intelligence;
+  return {
+    ...intelligence,
+    criteria,
+  };
 }
 
 function deriveListingInsights(listing) {
@@ -638,7 +746,18 @@ function deriveListingInsights(listing) {
       ? null
       : Number(listing.radar_max_price);
 
-  if (Number.isFinite(currentPrice) && Number.isFinite(maxPrice)) {
+  const budgetCurrency = String(
+    listing.radar_budget_currency || "BRL",
+  ).toUpperCase();
+  const listingCurrency = String(
+    listing.currency || "BRL",
+  ).toUpperCase();
+
+  if (
+    Number.isFinite(currentPrice) &&
+    Number.isFinite(maxPrice) &&
+    listingCurrency === budgetCurrency
+  ) {
     if (currentPrice <= maxPrice) {
       addTag("Dentro do teto");
       reasons.push("preço dentro do teto do radar");
@@ -646,6 +765,15 @@ function deriveListingInsights(listing) {
       addTag("Acima do teto");
       reasons.push("preço acima do teto do radar");
     }
+  } else if (
+    Number.isFinite(currentPrice) &&
+    Number.isFinite(maxPrice) &&
+    listingCurrency !== budgetCurrency
+  ) {
+    addTag("Moeda externa");
+    reasons.push(
+      `teto em ${budgetCurrency} não aplicado a ${listingCurrency}`,
+    );
   }
 
   const firstPrice =
@@ -670,16 +798,38 @@ function deriveListingInsights(listing) {
       {
         query: listing.radar_query,
         max_price: listing.radar_max_price,
+        priority_terms_json:
+          listing.radar_priority_terms_json,
+        penalized_terms_json:
+          listing.radar_penalized_terms_json,
+        required_terms_json:
+          listing.radar_required_terms_json,
+        exclude_terms_json:
+          listing.radar_exclude_terms_json,
+        criteria_weight:
+          listing.radar_criteria_weight,
+        budget_currency:
+          listing.radar_budget_currency,
       },
       listing,
     );
 
-    if (matchMetrics.strongHits > 0) {
-      reasons.push(
-        matchMetrics.strongHits === 1
-          ? "1 sinal forte compatível"
-          : `${matchMetrics.strongHits} sinais fortes compatíveis`,
-      );
+    const criteria = matchMetrics.criteria;
+
+    if (criteria?.tier === "alta") {
+      addTag("Prioridade alta");
+    } else if (criteria?.tier === "media") {
+      addTag("Prioridade média");
+    }
+
+    if (criteria?.rejected) {
+      addTag("Fora dos critérios");
+    }
+
+    for (const reason of criteria?.reasons || []) {
+      if (!reasons.includes(reason)) {
+        reasons.push(reason);
+      }
     }
   }
 
@@ -687,10 +837,24 @@ function deriveListingInsights(listing) {
     listing.grail_score ?? listing.hybrid_score ?? 0,
   );
 
+  const ruleCriteria = matchMetrics?.criteria || null;
+
   let inboxScore = Number.isFinite(baseScore) ? baseScore : 0;
 
-  if (matchMetrics?.strongHits) {
-    inboxScore += Math.min(24, matchMetrics.strongHits * 12);
+  if (ruleCriteria?.hasCustomRules) {
+    inboxScore = blendCriteriaScore(
+      inboxScore,
+      ruleCriteria,
+      {
+        criteria_weight:
+          listing.radar_criteria_weight,
+      },
+    );
+  } else if (matchMetrics?.strongHits) {
+    inboxScore += Math.min(
+      24,
+      matchMetrics.strongHits * 12,
+    );
   }
 
   if (tags.includes("Dentro do teto")) inboxScore += 10;
@@ -700,12 +864,20 @@ function deriveListingInsights(listing) {
   if (listing.status === "interessante") inboxScore += 15;
   if (listing.status === "descartado" || listing.status === "vendido") inboxScore -= 30;
 
-  inboxScore = Math.max(0, Math.min(100, Math.round(inboxScore)));
+  if (ruleCriteria?.rejected) {
+    inboxScore = 0;
+  }
+
+  inboxScore = Math.max(
+    0,
+    Math.min(100, Math.round(inboxScore)),
+  );
 
   let inboxTier = "triagem";
 
   if (listing.radar_id) {
-    if (inboxScore >= 80) inboxTier = "grail";
+    if (ruleCriteria?.rejected) inboxTier = "ruido";
+    else if (inboxScore >= 80) inboxTier = "grail";
     else if (inboxScore >= 55) inboxTier = "provavel";
     else if (inboxScore >= 25) inboxTier = "talvez";
     else inboxTier = "ruido";
@@ -728,7 +900,21 @@ function deriveListingInsights(listing) {
     tags: tags.slice(0, 8),
     inbox_score: inboxScore,
     inbox_tier: inboxTier,
-    score_reason: reasons.slice(0, 4).join(" • "),
+    rule_score:
+      ruleCriteria?.score ??
+      listing.rule_score ??
+      null,
+    rule_tier:
+      ruleCriteria?.tier ??
+      listing.rule_tier ??
+      null,
+    rule_rejected: Boolean(
+      ruleCriteria?.rejected ??
+      listing.rule_rejected,
+    ),
+    rule_reasons:
+      ruleCriteria?.reasons || [],
+    score_reason: reasons.slice(0, 5).join(" • "),
   };
 }
 
@@ -738,11 +924,31 @@ async function autoAssignListing(listing, radars) {
       radar,
       metrics: radarMatchMetrics(radar, listing),
     }))
-    .filter((candidate) =>
-      candidate.metrics.strongHits > 0 ||
-      candidate.metrics.weightedHits >= 2.5,
-    )
-    .sort((a, b) => b.metrics.fit - a.metrics.fit)
+    .filter((candidate) => {
+      const criteria = candidate.metrics.criteria;
+
+      if (criteria?.rejected) return false;
+
+      if (criteria?.hasCustomRules) {
+        return (
+          criteria.score >= 25 ||
+          criteria.matchedPriority.length > 0 ||
+          criteria.matchedRequired.length > 0
+        );
+      }
+
+      return (
+        candidate.metrics.strongHits > 0 ||
+        candidate.metrics.weightedHits >= 2.5
+      );
+    })
+    .sort((a, b) => {
+      const scoreA = a.metrics.criteria?.score || 0;
+      const scoreB = b.metrics.criteria?.score || 0;
+
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      return b.metrics.fit - a.metrics.fit;
+    })
     .slice(0, 3);
 
   if (!candidates.length) return null;
@@ -762,7 +968,16 @@ async function autoAssignListing(listing, radars) {
       intelligence.grail_score ?? intelligence.hybrid_score ?? 0,
     );
 
-    const combined = intelligenceScore + candidate.metrics.fit * 30;
+    const criteria = candidate.metrics.criteria;
+    const criteriaScore = blendCriteriaScore(
+      intelligenceScore,
+      criteria,
+      candidate.radar,
+    );
+    const combined = Math.min(
+      100,
+      criteriaScore + candidate.metrics.fit * 15,
+    );
 
     if (!best || combined > best.combined) {
       best = {
@@ -782,7 +997,9 @@ async function autoAssignListing(listing, radars) {
     `UPDATE listings
      SET radar_id = ?, visual_score = ?, semantic_score = ?, hybrid_score = ?,
          image_features_json = ?, image_embedding_json = ?,
-         preference_score = ?, grail_score = ?, updated_at = CURRENT_TIMESTAMP
+         preference_score = ?, grail_score = ?,
+         rule_score = ?, rule_tier = ?, rule_rejected = ?,
+         rule_reason_json = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
     [
       best.radar.id,
@@ -793,6 +1010,10 @@ async function autoAssignListing(listing, radars) {
       best.intelligence.image_embedding_json,
       best.intelligence.preference_score,
       best.intelligence.grail_score,
+      best.metrics.criteria?.score ?? null,
+      best.metrics.criteria?.tier ?? null,
+      best.metrics.criteria?.rejected ? 1 : 0,
+      JSON.stringify(best.metrics.criteria?.reasons || []),
       listing.id,
     ],
   );
@@ -885,7 +1106,23 @@ app.post(
 
   async (req, res) => {
     try {
-      const { name, query, max_price, category, visual_enabled, visual_weight, min_visual_similarity, semantic_enabled, semantic_weight } = req.body;
+      const {
+        name,
+        query,
+        max_price,
+        category,
+        visual_enabled,
+        visual_weight,
+        min_visual_similarity,
+        semantic_enabled,
+        semantic_weight,
+        priority_terms,
+        penalized_terms,
+        required_terms,
+        exclude_terms,
+        criteria_weight,
+        budget_currency,
+      } = req.body;
 
       if (!name || !query) {
         return res.status(400).json({
@@ -905,10 +1142,16 @@ app.post(
           visual_weight,
           min_visual_similarity,
           semantic_enabled,
-          semantic_weight
+          semantic_weight,
+          priority_terms_json,
+          penalized_terms_json,
+          required_terms_json,
+          exclude_terms_json,
+          criteria_weight,
+          budget_currency
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
 
         [
@@ -923,6 +1166,16 @@ app.post(
           Math.min(1, Math.max(0, Number(min_visual_similarity) || 0.45)),
           semantic_enabled === undefined ? 1 : (semantic_enabled ? 1 : 0),
           Math.min(100, Math.max(0, Number(semantic_weight) || 70)),
+          termsJson(priority_terms),
+          termsJson(penalized_terms),
+          termsJson(required_terms),
+          termsJson(exclude_terms),
+          Math.min(100, Math.max(0, Number(criteria_weight) || 65)),
+          ["BRL", "USD", "EUR", "GBP", "JPY"].includes(
+            String(budget_currency || "BRL").toUpperCase(),
+          )
+            ? String(budget_currency || "BRL").toUpperCase()
+            : "BRL",
         ],
       );
 
@@ -1113,6 +1366,33 @@ app.patch(
           req.body.semantic_enabled !== undefined ? Boolean(req.body.semantic_enabled) : Boolean(radar.semantic_enabled),
         semantic_weight:
           req.body.semantic_weight !== undefined ? Math.min(100, Math.max(0, Number(req.body.semantic_weight) || 70)) : Number(radar.semantic_weight || 70),
+        priority_terms_json:
+          req.body.priority_terms !== undefined
+            ? termsJson(req.body.priority_terms)
+            : radar.priority_terms_json || "[]",
+        penalized_terms_json:
+          req.body.penalized_terms !== undefined
+            ? termsJson(req.body.penalized_terms)
+            : radar.penalized_terms_json || "[]",
+        required_terms_json:
+          req.body.required_terms !== undefined
+            ? termsJson(req.body.required_terms)
+            : radar.required_terms_json || "[]",
+        exclude_terms_json:
+          req.body.exclude_terms !== undefined
+            ? termsJson(req.body.exclude_terms)
+            : radar.exclude_terms_json || "[]",
+        criteria_weight:
+          req.body.criteria_weight !== undefined
+            ? Math.min(100, Math.max(0, Number(req.body.criteria_weight) || 65))
+            : Number(radar.criteria_weight || 65),
+        budget_currency:
+          req.body.budget_currency !== undefined &&
+          ["BRL", "USD", "EUR", "GBP", "JPY"].includes(
+            String(req.body.budget_currency).toUpperCase(),
+          )
+            ? String(req.body.budget_currency).toUpperCase()
+            : String(radar.budget_currency || "BRL").toUpperCase(),
       };
 
       if (!next.name || !next.query) {
@@ -1134,7 +1414,13 @@ app.patch(
           visual_weight = ?,
           min_visual_similarity = ?,
           semantic_enabled = ?,
-          semantic_weight = ?
+          semantic_weight = ?,
+          priority_terms_json = ?,
+          penalized_terms_json = ?,
+          required_terms_json = ?,
+          exclude_terms_json = ?,
+          criteria_weight = ?,
+          budget_currency = ?
 
         WHERE id = ?
         `,
@@ -1151,6 +1437,12 @@ app.patch(
           next.min_visual_similarity,
           next.semantic_enabled ? 1 : 0,
           next.semantic_weight,
+          next.priority_terms_json,
+          next.penalized_terms_json,
+          next.required_terms_json,
+          next.exclude_terms_json,
+          next.criteria_weight,
+          next.budget_currency,
 
           req.params.id,
         ],
@@ -1162,7 +1454,13 @@ app.patch(
         [req.params.id],
       );
 
-      res.json(updated);
+      const criteriaSummary =
+        await reapplyCriteriaForRadar(updated);
+
+      res.json({
+        ...updated,
+        criteria_summary: criteriaSummary,
+      });
     } catch (err) {
       res.status(500).json({
         error: err.message,
@@ -1504,6 +1802,89 @@ app.get("/api/semantic/status", (_req, res) => {
   res.json(semanticStatus());
 });
 
+app.get("/api/international-cost/settings", async (_req, res) => {
+  try {
+    const settings =
+      await getInternationalCostSettings();
+
+    let fx = null;
+    let fxError = null;
+
+    if (settings.enabled) {
+      try {
+        const result = await getFxRates();
+        fx = {
+          source: result.source,
+          rates: result.rates,
+          cached: Boolean(result.cached),
+        };
+      } catch (err) {
+        fxError = err.message;
+      }
+    }
+
+    res.json({
+      ...settings,
+      fx,
+      fx_error: fxError,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch("/api/international-cost/settings", async (req, res) => {
+  try {
+    const next =
+      await saveInternationalCostSettings({
+        enabled:
+          req.body.enabled !== undefined
+            ? Boolean(req.body.enabled)
+            : undefined,
+        program:
+          req.body.program !== undefined
+            ? req.body.program
+            : undefined,
+        icms_rate_percent:
+          req.body.icms_rate_percent !== undefined
+            ? req.body.icms_rate_percent
+            : undefined,
+        handling_fee_brl:
+          req.body.handling_fee_brl !== undefined
+            ? req.body.handling_fee_brl
+            : undefined,
+        destination_postal_code:
+          req.body.destination_postal_code !== undefined
+            ? req.body.destination_postal_code
+            : undefined,
+      });
+
+    let fx = null;
+    let fxError = null;
+
+    if (next.enabled) {
+      try {
+        const result = await getFxRates();
+        fx = {
+          source: result.source,
+          rates: result.rates,
+          cached: Boolean(result.cached),
+        };
+      } catch (err) {
+        fxError = err.message;
+      }
+    }
+
+    res.json({
+      ...next,
+      fx,
+      fx_error: fxError,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/catalog-discoveries", async (req, res) => {
   try {
     const params = [];
@@ -1810,6 +2191,24 @@ app.get(
           r.max_price
             AS radar_max_price,
 
+          r.priority_terms_json
+            AS radar_priority_terms_json,
+
+          r.penalized_terms_json
+            AS radar_penalized_terms_json,
+
+          r.required_terms_json
+            AS radar_required_terms_json,
+
+          r.exclude_terms_json
+            AS radar_exclude_terms_json,
+
+          r.criteria_weight
+            AS radar_criteria_weight,
+
+          r.budget_currency
+            AS radar_budget_currency,
+
           (
 
             SELECT
@@ -1856,6 +2255,8 @@ app.get(
 
           END,
 
+          COALESCE(l.rule_rejected, 0) ASC,
+          COALESCE(l.rule_score, 0) DESC,
           COALESCE(l.grail_score, l.hybrid_score, 0) DESC,
           COALESCE(l.hybrid_score, 0) DESC,
           l.updated_at DESC
@@ -1865,11 +2266,70 @@ app.get(
         params,
       );
 
+      const internationalSettings =
+        await getInternationalCostSettings().catch(
+          () => null,
+        );
+
+      let fxInfo = null;
+
+      if (
+        internationalSettings?.enabled &&
+        rows.some(
+          (row) =>
+            String(row.currency || "BRL").toUpperCase() !==
+            "BRL",
+        )
+      ) {
+        try {
+          fxInfo = await getFxRates();
+        } catch {
+          fxInfo = null;
+        }
+      }
+
       res.json(
-        rows.map((row) => ({
-          ...row,
-          ...deriveListingInsights(row),
-        })),
+        rows.map((row) => {
+          let internationalCost = null;
+
+          if (
+            internationalSettings?.enabled &&
+            fxInfo?.rates &&
+            String(row.currency || "BRL").toUpperCase() !==
+              "BRL"
+          ) {
+            internationalCost =
+              estimateBrazilImportCost({
+                price: row.current_price,
+                currency: row.currency,
+                shippingPrice: row.shipping_price,
+                shippingCurrency:
+                  row.shipping_currency ||
+                  row.currency,
+                settings: internationalSettings,
+                rates: fxInfo.rates,
+              });
+
+            if (internationalCost) {
+              internationalCost.fx_source =
+                fxInfo.source || null;
+              internationalCost.fx_rate_to_brl =
+                Number(
+                  fxInfo.rates[
+                    String(
+                      row.currency || "",
+                    ).toUpperCase()
+                  ],
+                ) || null;
+            }
+          }
+
+          return {
+            ...row,
+            ...deriveListingInsights(row),
+            international_cost: internationalCost,
+          };
+        }),
       );
     } catch (err) {
       res.status(500).json({
