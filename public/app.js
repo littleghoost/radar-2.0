@@ -99,6 +99,7 @@ function updateBulkActions() {
     "#applySelectedStatus",
     "#autoAssignSelected",
     "#rescoreSelected",
+    "#openSelectedLinks",
     "#copySelectedLinks",
     "#clearListingSelection",
   ].forEach((selector) => {
@@ -277,6 +278,27 @@ async function rescoreSelectedListings() {
   } catch (err) {
     alert(err.message);
   }
+}
+
+function openSelectedLinks() {
+  const selected = state.listings.filter((listing) =>
+    state.selectedListings.has(Number(listing.id)),
+  );
+
+  if (!selected.length) return;
+
+  if (
+    selected.length > 8 &&
+    !confirm(`Abrir ${selected.length} anúncios em novas abas?`)
+  ) {
+    return;
+  }
+
+  selected.forEach((listing) => {
+    if (listing.url) {
+      window.open(listing.url, "_blank", "noopener,noreferrer");
+    }
+  });
 }
 
 async function copySelectedLinks() {
@@ -1451,6 +1473,11 @@ $("#autoAssignSelected")?.addEventListener(
 $("#rescoreSelected")?.addEventListener(
   "click",
   rescoreSelectedListings,
+);
+
+$("#openSelectedLinks")?.addEventListener(
+  "click",
+  openSelectedLinks,
 );
 
 $("#copySelectedLinks")?.addEventListener(
