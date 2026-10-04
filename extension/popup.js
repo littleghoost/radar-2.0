@@ -104,7 +104,7 @@ async function sendItems() {
         items: lastCapture.items,
       }),
     });
-    $('#preview').innerHTML = `<strong>${result.imported} importado(s)</strong>${result.duplicates} duplicado(s) • ${result.invalid} inválido(s) • ${result.failed} falha(s)`;
+    $('#preview').innerHTML = `<strong>${result.imported} importado(s) • ${result.updated || 0} atualizado(s)</strong>${result.duplicates} sem mudança • ${result.invalid} inválido(s) • ${result.failed} falha(s)`;
     button.textContent = result.imported ? 'Enviado ✓' : 'Nada novo';
   } catch (error) {
     $('#preview').innerHTML = `<strong>Falha ao importar</strong>${escapeHtml(error.message)}`;

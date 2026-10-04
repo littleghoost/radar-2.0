@@ -1124,7 +1124,7 @@ app.post("/api/import/assisted", async (req, res) => {
       if (!radar) return res.status(404).json({ error: "Radar não encontrado." });
     }
 
-    const summary = { imported: 0, duplicates: 0, invalid: 0, failed: 0, listings: [] };
+    const summary = { imported: 0, updated: 0, duplicates: 0, invalid: 0, failed: 0, listings: [] };
 
     for (const raw of items) {
       try {
@@ -1143,9 +1143,31 @@ app.post("/api/import/assisted", async (req, res) => {
           continue;
         }
 
-        const existing = await get("SELECT id FROM listings WHERE url = ?", [url]);
+        const existing = await get("SELECT id, current_price, title, image_url FROM listings WHERE url = ?", [url]);
         if (existing) {
-          summary.duplicates += 1;
+          const nextPrice = Number.isFinite(currentPrice) ? currentPrice : null;
+          const priceChanged = nextPrice !== null && Number(existing.current_price) !== nextPrice;
+          const metadataChanged = existing.title !== title || (imageUrl && existing.image_url !== imageUrl);
+
+          await run(
+            `UPDATE listings
+             SET title = ?, platform = ?, image_url = COALESCE(?, image_url),
+                 current_price = COALESCE(?, current_price), currency = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [title, platform, imageUrl, nextPrice, currency, existing.id],
+          );
+
+          if (priceChanged) {
+            await run("INSERT INTO price_history (listing_id, price) VALUES (?, ?)", [existing.id, nextPrice]);
+          }
+
+          if (priceChanged || metadataChanged) {
+            summary.updated += 1;
+            const refreshed = await get("SELECT * FROM listings WHERE id = ?", [existing.id]);
+            summary.listings.push(refreshed);
+          } else {
+            summary.duplicates += 1;
+          }
           continue;
         }
 
@@ -1189,11 +1211,11 @@ app.post("/api/import/assisted", async (req, res) => {
       }
     }
 
-    if (summary.imported > 0) {
+    if (summary.imported > 0 || summary.updated > 0) {
       await run(
         `INSERT INTO activity_events (radar_id, type, title, detail, metadata_json)
          VALUES (?, 'assisted_import', 'Importação assistida concluída', ?, ?)`,
-        [radarId, `${summary.imported} anúncio(s) importado(s) do navegador.`, JSON.stringify(summary)],
+        [radarId, `${summary.imported} importado(s), ${summary.updated} atualizado(s) pelo navegador.`, JSON.stringify(summary)],
       );
     }
 
