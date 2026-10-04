@@ -3,6 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
 const fsp = require("fs/promises");
+const { spawn } = require("child_process");
 const db = require("./database");
 const { getEbayStatus, getOlxStatus, getDepopStatus } = require("./services/sources");
 const { createRadarRunner } = require("./services/radarRunner");
@@ -3174,6 +3175,38 @@ strong{color:#7ce7a5}
    TOKEN MERCADO LIVRE
 ========================= */
 
+function openTrustedDesktopUrl(rawUrl) {
+  if (process.env.RADAR_DESKTOP !== "1") {
+    throw new Error("Abertura externa só está disponível no Radar Desktop.");
+  }
+
+  const parsed = new URL(String(rawUrl || ""));
+
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname !== "auth.mercadolivre.com.br"
+  ) {
+    throw new Error("URL externa não autorizada pelo Radar Desktop.");
+  }
+
+  if (process.platform !== "win32") {
+    throw new Error("Abertura externa automática ainda só está preparada para Windows.");
+  }
+
+  const child = spawn(
+    "rundll32.exe",
+    ["url.dll,FileProtocolHandler", parsed.toString()],
+    {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    },
+  );
+
+  child.unref();
+  return true;
+}
+
 async function cloudBridgeRequest(
   pathname,
   options = {},
@@ -3417,11 +3450,13 @@ app.post("/api/mercadolivre/connect/start", async (_req, res) => {
       ],
     );
 
+    openTrustedDesktopUrl(data.auth_url);
+
     res.json({
       ok: true,
       mode: "desktop_bridge",
       pairing_id: data.pairing_id,
-      auth_url: data.auth_url,
+      browser_opened: true,
       expires_in_seconds: data.expires_in_seconds || 900,
     });
   } catch (err) {

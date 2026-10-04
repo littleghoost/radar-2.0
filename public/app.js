@@ -2086,23 +2086,14 @@ async function runScheduledRadarsAfterConnection() {
 
 let mercadoLivreConnectAttempt = 0;
 
-async function openExternalAuthorization(url) {
-  const openUrl = window.__TAURI__?.opener?.openUrl;
-
-  if (typeof openUrl === "function") {
-    await openUrl(url);
-    return;
-  }
-
-  const popup = window.open(
-    url,
-    "_blank",
-    "noopener,noreferrer",
-  );
-
-  if (!popup) {
-    window.location.href = url;
-  }
+function errorMessage(error) {
+  if (error?.message) return String(error.message);
+  if (typeof error === "string") return error;
+  try {
+    const text = JSON.stringify(error);
+    if (text && text !== "{}") return text;
+  } catch {}
+  return "Falha inesperada ao conectar o Mercado Livre.";
 }
 
 async function connectMercadoLivre() {
@@ -2117,11 +2108,11 @@ async function connectMercadoLivre() {
 
     if (attempt !== mercadoLivreConnectAttempt) return;
 
-    if (!start.auth_url) {
-      throw new Error("O servidor não retornou a URL de autorização.");
-    }
-
     if (start.mode === "web") {
+      if (!start.auth_url) {
+        throw new Error("O servidor não retornou a URL de autorização.");
+      }
+
       window.location.href = start.auth_url;
       return;
     }
@@ -2130,7 +2121,11 @@ async function connectMercadoLivre() {
       throw new Error("O pareamento do Desktop não foi criado.");
     }
 
-    await openExternalAuthorization(start.auth_url);
+    if (!start.browser_opened) {
+      throw new Error(
+        "O Radar criou o pareamento, mas não conseguiu abrir o navegador.",
+      );
+    }
 
     if (attempt !== mercadoLivreConnectAttempt) return;
 
@@ -2198,7 +2193,7 @@ async function connectMercadoLivre() {
     );
   } catch (err) {
     if (attempt !== mercadoLivreConnectAttempt) return;
-    alert(err.message);
+    alert(errorMessage(err));
   }
 }
 
