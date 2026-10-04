@@ -2084,31 +2084,45 @@ async function runScheduledRadarsAfterConnection() {
   }
 }
 
+let mercadoLivreConnectAttempt = 0;
+
+async function openExternalAuthorization(url) {
+  const openUrl = window.__TAURI__?.opener?.openUrl;
+
+  if (typeof openUrl === "function") {
+    await openUrl(url);
+    return;
+  }
+
+  const popup = window.open(
+    url,
+    "_blank",
+    "noopener,noreferrer",
+  );
+
+  if (!popup) {
+    window.location.href = url;
+  }
+}
+
 async function connectMercadoLivre() {
-  let authWindow = null;
+  const attempt = ++mercadoLivreConnectAttempt;
+  let missingCount = 0;
 
   try {
-    authWindow = window.open(
-      "about:blank",
-      "radar_mercadolivre_oauth",
-      "width=720,height=760",
-    );
-
     const start = await api("/api/mercadolivre/connect/start", {
       method: "POST",
       body: "{}",
     });
+
+    if (attempt !== mercadoLivreConnectAttempt) return;
 
     if (!start.auth_url) {
       throw new Error("O servidor não retornou a URL de autorização.");
     }
 
     if (start.mode === "web") {
-      if (authWindow) {
-        authWindow.location.href = start.auth_url;
-      } else {
-        window.location.href = start.auth_url;
-      }
+      window.location.href = start.auth_url;
       return;
     }
 
@@ -2116,30 +2130,38 @@ async function connectMercadoLivre() {
       throw new Error("O pareamento do Desktop não foi criado.");
     }
 
-    if (authWindow) {
-      authWindow.location.href = start.auth_url;
-    } else {
-      window.open(start.auth_url, "_blank", "noopener,noreferrer");
-    }
+    await openExternalAuthorization(start.auth_url);
+
+    if (attempt !== mercadoLivreConnectAttempt) return;
 
     const deadline =
       Date.now() +
       Number(start.expires_in_seconds || 900) * 1000;
 
-    while (Date.now() < deadline) {
+    while (
+      attempt === mercadoLivreConnectAttempt &&
+      Date.now() < deadline
+    ) {
       await delay(1800);
 
-      const status = await api(
-        `/api/mercadolivre/connect/status?pairing_id=${encodeURIComponent(start.pairing_id)}`,
-      );
+      if (attempt !== mercadoLivreConnectAttempt) return;
+
+      let status;
+
+      try {
+        status = await api(
+          `/api/mercadolivre/connect/status?pairing_id=${encodeURIComponent(start.pairing_id)}`,
+        );
+      } catch (err) {
+        if (attempt !== mercadoLivreConnectAttempt) return;
+        throw err;
+      }
 
       if (status.status === "connected") {
-        try {
-          authWindow?.close();
-        } catch {}
-
         await loadConnections();
         await runScheduledRadarsAfterConnection();
+
+        if (attempt !== mercadoLivreConnectAttempt) return;
 
         alert(
           status.provider_username
@@ -2149,7 +2171,19 @@ async function connectMercadoLivre() {
         return;
       }
 
+      if (status.status === "missing") {
+        missingCount += 1;
+
+        if (missingCount < 3) {
+          continue;
+        }
+      } else {
+        missingCount = 0;
+      }
+
       if (["error", "expired", "missing"].includes(status.status)) {
+        if (attempt !== mercadoLivreConnectAttempt) return;
+
         throw new Error(
           status.error ||
             "A autorização expirou. Tente conectar novamente.",
@@ -2157,14 +2191,13 @@ async function connectMercadoLivre() {
       }
     }
 
+    if (attempt !== mercadoLivreConnectAttempt) return;
+
     throw new Error(
       "A autorização demorou demais. Tente conectar novamente.",
     );
   } catch (err) {
-    try {
-      authWindow?.close();
-    } catch {}
-
+    if (attempt !== mercadoLivreConnectAttempt) return;
     alert(err.message);
   }
 }
