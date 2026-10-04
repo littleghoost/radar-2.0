@@ -50,8 +50,11 @@
           : 'USD';
 
     if (currency === 'BRL' || currency === 'EUR') {
-      if (raw.includes(',')) raw = raw.replace(/\./g, '').replace(',', '.');
-      else if ((raw.match(/\./g) || []).length > 1) raw = raw.replace(/\./g, '');
+      if (raw.includes(',')) {
+        raw = raw.replace(/\./g, '').replace(',', '.');
+      } else if (/^\d{1,3}(?:\.\d{3})+$/.test(raw)) {
+        raw = raw.replace(/\./g, '');
+      }
     } else if (raw.includes('.') && raw.includes(',')) {
       raw = raw.replace(/,/g, '');
     } else if ((raw.match(/,/g) || []).length === 1 && /,[0-9]{2}$/.test(raw)) {
