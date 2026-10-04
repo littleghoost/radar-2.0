@@ -352,6 +352,204 @@ async function scoreListingForRadar({ radarId, title, imageUrl, currentPrice, cu
   };
 }
 
+const AUTO_ASSIGN_STOPWORDS = new Set([
+  "para", "com", "sem", "por", "uma", "uns", "das", "dos", "de", "da", "do",
+  "the", "and", "for", "completa", "original", "vintage", "camera", "filmadora",
+]);
+
+function normalizeSearchWords(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length >= 3 && !AUTO_ASSIGN_STOPWORDS.has(word));
+}
+
+function radarMatchMetrics(radar, listing) {
+  const queryWords = [...new Set(normalizeSearchWords(radar.query))];
+  if (!queryWords.length) {
+    return { fit: 0, hits: 0, strongHits: 0, weightedHits: 0 };
+  }
+
+  const haystack = new Set(
+    normalizeSearchWords(
+      [listing.title, listing.platform, listing.notes].filter(Boolean).join(" "),
+    ),
+  );
+
+  let hits = 0;
+  let strongHits = 0;
+  let weightedHits = 0;
+
+  for (const word of queryWords) {
+    if (!haystack.has(word)) continue;
+
+    hits += 1;
+
+    const modelToken = /\d/.test(word);
+    const strongKeyword = ["nightshot", "hdd", "noturna", "visao"].includes(word);
+    const genericKeyword = ["sony", "handycam", "dcr"].includes(word);
+
+    if (modelToken || strongKeyword) {
+      strongHits += 1;
+      weightedHits += modelToken ? 3 : 2.5;
+    } else {
+      weightedHits += genericKeyword ? 0.4 : 1;
+    }
+  }
+
+  const queryText = String(radar.query || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const listingText = String(listing.title || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  if (
+    /dcr[\s-]*sr/.test(queryText) &&
+    /\b(?:dcr[\s-]*)?sr\d+\b/.test(listingText)
+  ) {
+    hits += 1;
+    strongHits += 1;
+    weightedHits += 3;
+  }
+
+  let fit = weightedHits / Math.max(3, Math.min(queryWords.length, 8));
+
+  if (
+    radar.max_price !== null &&
+    radar.max_price !== undefined &&
+    listing.current_price !== null &&
+    listing.current_price !== undefined
+  ) {
+    if (Number(listing.current_price) <= Number(radar.max_price)) {
+      fit += 0.08;
+    } else {
+      fit -= 0.18;
+    }
+  }
+
+  return {
+    fit: Math.max(0, Math.min(1, fit)),
+    hits,
+    strongHits,
+    weightedHits,
+  };
+}
+
+function radarTextFit(radar, listing) {
+  return radarMatchMetrics(radar, listing).fit;
+}
+
+async function applyRadarToListing(listing, radarId) {
+  const intelligence = await scoreListingForRadar({
+    radarId,
+    title: listing.title,
+    imageUrl: listing.image_url,
+    currentPrice: listing.current_price,
+    currency: listing.currency || "BRL",
+  });
+
+  await run(
+    `UPDATE listings
+     SET radar_id = ?, visual_score = ?, semantic_score = ?, hybrid_score = ?,
+         image_features_json = ?, image_embedding_json = ?,
+         preference_score = ?, grail_score = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [
+      radarId || null,
+      intelligence.visual_score,
+      intelligence.semantic_score,
+      intelligence.hybrid_score,
+      intelligence.image_features_json,
+      intelligence.image_embedding_json,
+      intelligence.preference_score,
+      intelligence.grail_score,
+      listing.id,
+    ],
+  );
+
+  return intelligence;
+}
+
+async function autoAssignListing(listing, radars) {
+  const candidates = radars
+    .map((radar) => ({
+      radar,
+      metrics: radarMatchMetrics(radar, listing),
+    }))
+    .filter((candidate) =>
+      candidate.metrics.strongHits > 0 ||
+      candidate.metrics.weightedHits >= 2.5,
+    )
+    .sort((a, b) => b.metrics.fit - a.metrics.fit)
+    .slice(0, 3);
+
+  if (!candidates.length) return null;
+
+  let best = null;
+
+  for (const candidate of candidates) {
+    const intelligence = await scoreListingForRadar({
+      radarId: candidate.radar.id,
+      title: listing.title,
+      imageUrl: listing.image_url,
+      currentPrice: listing.current_price,
+      currency: listing.currency || "BRL",
+    });
+
+    const intelligenceScore = Number(
+      intelligence.grail_score ?? intelligence.hybrid_score ?? 0,
+    );
+
+    const combined = intelligenceScore + candidate.metrics.fit * 30;
+
+    if (!best || combined > best.combined) {
+      best = {
+        radar: candidate.radar,
+        intelligence,
+        metrics: candidate.metrics,
+        combined,
+      };
+    }
+  }
+
+  if (!best) {
+    return null;
+  }
+
+  await run(
+    `UPDATE listings
+     SET radar_id = ?, visual_score = ?, semantic_score = ?, hybrid_score = ?,
+         image_features_json = ?, image_embedding_json = ?,
+         preference_score = ?, grail_score = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [
+      best.radar.id,
+      best.intelligence.visual_score,
+      best.intelligence.semantic_score,
+      best.intelligence.hybrid_score,
+      best.intelligence.image_features_json,
+      best.intelligence.image_embedding_json,
+      best.intelligence.preference_score,
+      best.intelligence.grail_score,
+      listing.id,
+    ],
+  );
+
+  return {
+    radar_id: best.radar.id,
+    radar_name: best.radar.name,
+    score: Math.round(best.combined),
+  };
+}
+
 /* =========================
    HEALTH
 ========================= */
@@ -1059,7 +1257,9 @@ app.get(
 
       const params = [];
 
-      if (radar_id) {
+      if (radar_id === "none") {
+        filters.push("l.radar_id IS NULL");
+      } else if (radar_id) {
         filters.push("l.radar_id = ?");
 
         params.push(radar_id);
@@ -1279,6 +1479,165 @@ app.post("/api/import/assisted", async (req, res) => {
     }
 
     res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* =========================
+   AÇÕES EM MASSA
+========================= */
+
+app.post("/api/listings/bulk", async (req, res) => {
+  try {
+    const ids = [...new Set(
+      (Array.isArray(req.body?.ids) ? req.body.ids : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    )].slice(0, 200);
+
+    const action = String(req.body?.action || "").trim();
+
+    if (!ids.length) {
+      return res.status(400).json({ error: "Selecione pelo menos um anúncio." });
+    }
+
+    const placeholders = ids.map(() => "?").join(",");
+    const listings = await all(
+      `SELECT * FROM listings WHERE id IN (${placeholders})`,
+      ids,
+    );
+
+    if (!listings.length) {
+      return res.status(404).json({ error: "Nenhum anúncio selecionado foi encontrado." });
+    }
+
+    if (action === "delete") {
+      await run(
+        `DELETE FROM price_history WHERE listing_id IN (${placeholders})`,
+        ids,
+      );
+      await run(
+        `DELETE FROM listings WHERE id IN (${placeholders})`,
+        ids,
+      );
+
+      return res.json({ ok: true, action, affected: listings.length });
+    }
+
+    if (action === "status") {
+      const status = String(req.body?.status || "").trim();
+      const allowed = new Set(["novo", "interessante", "descartado", "vendido"]);
+
+      if (!allowed.has(status)) {
+        return res.status(400).json({ error: "Status inválido." });
+      }
+
+      await run(
+        `UPDATE listings
+         SET status = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id IN (${placeholders})`,
+        [status, ...ids],
+      );
+
+      const feedbackChanged =
+        ["interessante", "descartado"].includes(status) ||
+        listings.some((listing) =>
+          ["interessante", "descartado"].includes(listing.status),
+        );
+
+      if (feedbackChanged) {
+        const categories = await all(
+          `SELECT DISTINCT COALESCE(r.category, 'geral') AS category
+           FROM listings l
+           LEFT JOIN radars r ON r.id = l.radar_id
+           WHERE l.id IN (${placeholders})`,
+          ids,
+        );
+
+        for (const row of categories) {
+          await rebuildPreferenceScores(row.category || "geral");
+        }
+      }
+
+      return res.json({ ok: true, action, affected: listings.length, status });
+    }
+
+    if (action === "move") {
+      const rawRadarId = req.body?.radar_id;
+      const radarId =
+        rawRadarId === null || rawRadarId === "" || rawRadarId === "none"
+          ? null
+          : Number(rawRadarId);
+
+      if (radarId) {
+        const radar = await get("SELECT id FROM radars WHERE id = ?", [radarId]);
+        if (!radar) {
+          return res.status(404).json({ error: "Radar de destino não encontrado." });
+        }
+      }
+
+      let affected = 0;
+
+      for (const listing of listings) {
+        await applyRadarToListing(listing, radarId);
+        affected += 1;
+      }
+
+      return res.json({ ok: true, action, affected, radar_id: radarId });
+    }
+
+    if (action === "auto_assign") {
+      const radars = await all("SELECT * FROM radars ORDER BY id ASC");
+
+      if (!radars.length) {
+        return res.status(400).json({ error: "Crie pelo menos um radar antes de auto-organizar." });
+      }
+
+      const assignments = [];
+      let unassigned = 0;
+
+      for (const listing of listings) {
+        const assignment = await autoAssignListing(listing, radars);
+
+        if (assignment) {
+          assignments.push({
+            listing_id: listing.id,
+            title: listing.title,
+            ...assignment,
+          });
+        } else {
+          unassigned += 1;
+        }
+      }
+
+      return res.json({
+        ok: true,
+        action,
+        affected: assignments.length,
+        unassigned,
+        assignments,
+      });
+    }
+
+    if (action === "rescore") {
+      let affected = 0;
+
+      for (const listing of listings) {
+        if (!listing.radar_id) continue;
+        await applyRadarToListing(listing, listing.radar_id);
+        affected += 1;
+      }
+
+      return res.json({
+        ok: true,
+        action,
+        affected,
+        skipped: listings.length - affected,
+      });
+    }
+
+    return res.status(400).json({ error: "Ação em massa inválida." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

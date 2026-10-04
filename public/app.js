@@ -38,16 +38,35 @@ function updateBulkActions() {
   const selectedVisible = visibleIds.filter((id) =>
     state.selectedListings.has(id),
   );
+  const count = state.selectedListings.size;
+  const hasSelection = count > 0;
 
-  const button = $("#deleteSelectedListings");
-  const selectAll = $("#selectAllListings");
+  [
+    "#deleteSelectedListings",
+    "#moveSelectedListings",
+    "#applySelectedStatus",
+    "#autoAssignSelected",
+    "#rescoreSelected",
+    "#copySelectedLinks",
+    "#clearListingSelection",
+  ].forEach((selector) => {
+    const control = $(selector);
+    if (control) control.disabled = !hasSelection;
+  });
 
-  if (button) {
-    button.disabled = state.selectedListings.size === 0;
-    button.textContent = state.selectedListings.size
-      ? `Excluir selecionados (${state.selectedListings.size})`
-      : "Excluir selecionados";
+  const deleteButton = $("#deleteSelectedListings");
+  if (deleteButton) {
+    deleteButton.textContent = hasSelection ? `Excluir (${count})` : "Excluir";
   }
+
+  const label = $("#bulkSelectionLabel");
+  if (label) {
+    label.textContent = hasSelection
+      ? `${count} selecionado(s)`
+      : "Selecionar todos visíveis";
+  }
+
+  const selectAll = $("#selectAllListings");
 
   if (selectAll) {
     selectAll.checked =
@@ -93,45 +112,149 @@ function toggleSelectAllListings(checked) {
   updateBulkActions();
 }
 
-async function removeSelectedListings() {
+async function runBulkListingAction(action, extra = {}) {
   const ids = [...state.selectedListings];
 
   if (!ids.length) {
+    return null;
+  }
+
+  return api("/api/listings/bulk", {
+    method: "POST",
+    body: JSON.stringify({
+      ids,
+      action,
+      ...extra,
+    }),
+  });
+}
+
+async function removeSelectedListings() {
+  const count = state.selectedListings.size;
+
+  if (!count) {
     return;
   }
 
   const confirmed = confirm(
-    `Excluir ${ids.length} anúncio(s) selecionado(s) do Radar?`,
+    `Excluir ${count} anúncio(s) selecionado(s) do Radar?`,
   );
 
   if (!confirmed) {
     return;
   }
 
-  const button = $("#deleteSelectedListings");
-
-  if (button) {
-    button.disabled = true;
-    button.textContent = "Excluindo...";
-  }
-
   try {
-    await Promise.all(
-      ids.map((id) =>
-        api(`/api/listings/${id}`, {
-          method: "DELETE",
-        }),
-      ),
-    );
-
+    await runBulkListingAction("delete");
     state.selectedListings.clear();
-
-    await loadListings();
-    await loadRadars();
+    await Promise.all([loadListings(), loadRadars()]);
   } catch (err) {
     alert(err.message);
     updateBulkActions();
   }
+}
+
+async function moveSelectedListings() {
+  const radarId = $("#bulkRadarSelect")?.value;
+
+  if (!radarId) {
+    alert("Escolha um radar de destino.");
+    return;
+  }
+
+  try {
+    const result = await runBulkListingAction("move", {
+      radar_id: radarId,
+    });
+
+    state.selectedListings.clear();
+    await Promise.all([loadListings(), loadRadars()]);
+    alert(`${result.affected} anúncio(s) movido(s).`);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function applySelectedStatus() {
+  const status = $("#bulkStatusSelect")?.value;
+
+  if (!status) {
+    alert("Escolha um status.");
+    return;
+  }
+
+  try {
+    const result = await runBulkListingAction("status", { status });
+
+    state.selectedListings.clear();
+    await Promise.all([loadListings(), loadRadars()]);
+    alert(`${result.affected} anúncio(s) atualizado(s).`);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function autoAssignSelectedListings() {
+  try {
+    const result = await runBulkListingAction("auto_assign");
+
+    state.selectedListings.clear();
+    await Promise.all([loadListings(), loadRadars()]);
+
+    const extra = result.unassigned
+      ? ` • ${result.unassigned} sem correspondência segura`
+      : "";
+
+    alert(`${result.affected} anúncio(s) auto-organizado(s)${extra}.`);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function rescoreSelectedListings() {
+  try {
+    const result = await runBulkListingAction("rescore");
+    state.selectedListings.clear();
+    await loadListings();
+
+    const extra = result.skipped
+      ? ` • ${result.skipped} sem radar`
+      : "";
+
+    alert(`${result.affected} anúncio(s) reanalisado(s)${extra}.`);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function copySelectedLinks() {
+  const selected = state.listings.filter((listing) =>
+    state.selectedListings.has(Number(listing.id)),
+  );
+
+  const text = selected.map((listing) => listing.url).filter(Boolean).join("\n");
+
+  if (!text) {
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    alert(`${selected.length} link(s) copiado(s).`);
+  } catch {
+    prompt("Copie os links:", text);
+  }
+}
+
+function clearListingSelection() {
+  state.selectedListings.clear();
+
+  document.querySelectorAll(".listing-select").forEach((input) => {
+    input.checked = false;
+    input.closest(".listing-card")?.classList.remove("selected");
+  });
+
+  updateBulkActions();
 }
 
 $("#openRadarModal").onclick = () => radarModal.showModal();
@@ -543,6 +666,12 @@ async function loadRadars() {
 
       </option>
 
+      <option value="none">
+
+        Sem radar
+
+      </option>
+
       ${options}
 
     `;
@@ -563,6 +692,11 @@ async function loadRadars() {
 
   if ($("#importRadar")) {
     $("#importRadar").innerHTML = `<option value="">Sem radar</option>${options}`;
+  }
+
+  if ($("#bulkRadarSelect")) {
+    $("#bulkRadarSelect").innerHTML =
+      `<option value="">Mover para radar...</option><option value="none">Sem radar</option>${options}`;
   }
 }
 
@@ -807,6 +941,46 @@ async function loadListings() {
 
   state.listings = await api(`/api/listings?${params.toString()}`);
 
+  const sort = $("#sortFilter")?.value || "default";
+
+  if (sort !== "default") {
+    const numeric = (value, fallback = 0) => {
+      if (value === null || value === undefined || value === "") {
+        return fallback;
+      }
+
+      const number = Number(value);
+      return Number.isFinite(number) ? number : fallback;
+    };
+
+    state.listings.sort((a, b) => {
+      if (sort === "recent") {
+        return new Date(b.updated_at || b.created_at || 0) -
+          new Date(a.updated_at || a.created_at || 0);
+      }
+
+      if (sort === "price_asc") {
+        return numeric(a.current_price, Number.POSITIVE_INFINITY) -
+          numeric(b.current_price, Number.POSITIVE_INFINITY);
+      }
+
+      if (sort === "price_desc") {
+        return numeric(b.current_price, Number.NEGATIVE_INFINITY) -
+          numeric(a.current_price, Number.NEGATIVE_INFINITY);
+      }
+
+      if (sort === "grail_desc") {
+        return numeric(b.grail_score) - numeric(a.grail_score);
+      }
+
+      if (sort === "score_desc") {
+        return numeric(b.hybrid_score) - numeric(a.hybrid_score);
+      }
+
+      return 0;
+    });
+  }
+
   const visibleIds = new Set(
     state.listings.map((listing) => Number(listing.id)),
   );
@@ -836,6 +1010,7 @@ async function loadListings() {
 
     `;
 
+    updateBulkActions();
     return;
   }
 
@@ -1163,6 +1338,36 @@ $("#deleteSelectedListings")?.addEventListener(
   removeSelectedListings,
 );
 
+$("#moveSelectedListings")?.addEventListener(
+  "click",
+  moveSelectedListings,
+);
+
+$("#applySelectedStatus")?.addEventListener(
+  "click",
+  applySelectedStatus,
+);
+
+$("#autoAssignSelected")?.addEventListener(
+  "click",
+  autoAssignSelectedListings,
+);
+
+$("#rescoreSelected")?.addEventListener(
+  "click",
+  rescoreSelectedListings,
+);
+
+$("#copySelectedLinks")?.addEventListener(
+  "click",
+  copySelectedLinks,
+);
+
+$("#clearListingSelection")?.addEventListener(
+  "click",
+  clearListingSelection,
+);
+
 /* =========================
    CRIAR RADAR
 ========================= */
@@ -1371,6 +1576,8 @@ $("#radarFilter").onchange = (event) => {
 };
 
 $("#statusFilter").onchange = loadListings;
+
+$("#sortFilter").onchange = loadListings;
 
 /* =========================
    PESQUISA
