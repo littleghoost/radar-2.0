@@ -119,6 +119,8 @@ db.serialize(() => {
       access_token TEXT,
       refresh_token TEXT,
       expires_at DATETIME,
+      bridge_client_id TEXT,
+      bridge_client_key TEXT,
       status TEXT DEFAULT 'disconnected',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -126,6 +128,71 @@ db.serialize(() => {
       UNIQUE(user_id, provider)
     )
   `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS oauth_bridge_sessions (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      client_id TEXT,
+      client_key TEXT,
+      code_verifier TEXT,
+      status TEXT DEFAULT 'pending',
+      access_token TEXT,
+      refresh_token TEXT,
+      expires_at DATETIME,
+      provider_user_id TEXT,
+      provider_username TEXT,
+      error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS desktop_bridge_clients (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      secret_hash TEXT NOT NULL,
+      provider_user_id TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_used_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      revoked_at DATETIME
+    )
+  `);
+
+  db.all(
+    "PRAGMA table_info(connections)",
+    (err, columns) => {
+      if (err) {
+        console.error(err);
+        return;
+      }
+
+      if (!columns.some((column) => column.name === "bridge_client_id")) {
+        db.run("ALTER TABLE connections ADD COLUMN bridge_client_id TEXT");
+      }
+      if (!columns.some((column) => column.name === "bridge_client_key")) {
+        db.run("ALTER TABLE connections ADD COLUMN bridge_client_key TEXT");
+      }
+    },
+  );
+
+  db.all(
+    "PRAGMA table_info(oauth_bridge_sessions)",
+    (err, columns) => {
+      if (err) {
+        console.error(err);
+        return;
+      }
+
+      if (!columns.some((column) => column.name === "client_id")) {
+        db.run("ALTER TABLE oauth_bridge_sessions ADD COLUMN client_id TEXT");
+      }
+      if (!columns.some((column) => column.name === "client_key")) {
+        db.run("ALTER TABLE oauth_bridge_sessions ADD COLUMN client_key TEXT");
+      }
+    },
+  );
 
   /* =========================
      ANÚNCIOS

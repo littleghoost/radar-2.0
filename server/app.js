@@ -93,6 +93,8 @@ app.post("/logout", (_req, res) => {
 app.use((req, res, next) => {
   if (!authEnabled()) return next();
   if (req.path === "/api/health") return next();
+  if (req.path === "/auth/mercadolivre/callback") return next();
+  if (req.path.startsWith("/bridge/")) return next();
   if (isAuthenticated(req)) return next();
 
   if (req.path.startsWith("/api/")) {
@@ -2548,6 +2550,121 @@ app.get(
    OAUTH MERCADO LIVRE
 ========================= */
 
+const DEFAULT_CLOUD_BRIDGE_URL =
+  process.env.RADAR_CLOUD_URL ||
+  "https://radar-2-0-littleghoost.fly.dev";
+
+function base64Url(buffer) {
+  return Buffer.from(buffer)
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
+function bridgeClientKeyHash(value) {
+  return crypto
+    .createHash("sha256")
+    .update(String(value || ""))
+    .digest("hex");
+}
+
+async function requireBridgeClient(req, res, next) {
+  try {
+    const clientId = String(
+      req.headers["x-radar-client-id"] || "",
+    );
+    const clientKey = String(
+      req.headers["x-radar-client-key"] || "",
+    );
+
+    if (
+      !/^[a-f0-9]{32}$/i.test(clientId) ||
+      clientKey.length < 32
+    ) {
+      return res.status(401).json({
+        error: "Credencial do Radar Desktop ausente.",
+      });
+    }
+
+    const client = await get(
+      `SELECT * FROM desktop_bridge_clients
+       WHERE id = ? AND revoked_at IS NULL`,
+      [clientId],
+    );
+
+    if (!client) {
+      return res.status(401).json({
+        error: "Radar Desktop não reconhecido.",
+      });
+    }
+
+    const suppliedHash = bridgeClientKeyHash(clientKey);
+
+    if (!safeEqualText(suppliedHash, client.secret_hash)) {
+      return res.status(401).json({
+        error: "Credencial do Radar Desktop inválida.",
+      });
+    }
+
+    await run(
+      `UPDATE desktop_bridge_clients
+       SET last_used_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [client.id],
+    );
+
+    req.bridgeClient = client;
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+function createBridgeOAuthState(pairingId, secret) {
+  const timestamp = Date.now();
+  const nonce = crypto.randomBytes(18).toString("hex");
+  const payload = `bridge.${timestamp}.${pairingId}.${nonce}`;
+  const signature = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+
+  return `${payload}.${signature}`;
+}
+
+function validateBridgeOAuthState(state, secret) {
+  const parts = String(state || "").split(".");
+
+  if (parts.length !== 5 || parts[0] !== "bridge") {
+    return null;
+  }
+
+  const [, timestamp, pairingId, nonce, signature] = parts;
+  const payload = `bridge.${timestamp}.${pairingId}.${nonce}`;
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+
+  if (signature.length !== expected.length) return null;
+  if (
+    !crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expected),
+    )
+  ) {
+    return null;
+  }
+
+  const age = Date.now() - Number(timestamp);
+  if (!Number.isFinite(age) || age < 0 || age > 15 * 60 * 1000) {
+    return null;
+  }
+
+  return { pairingId };
+}
+
 function getMlConfig() {
   const clientId = process.env.ML_CLIENT_ID;
   const clientSecret = process.env.ML_CLIENT_SECRET;
@@ -2583,6 +2700,227 @@ function validateOAuthState(state, secret) {
   return Number.isFinite(age) && age >= 0 && age <= 10 * 60 * 1000;
 }
 
+app.post(
+  "/bridge/mercadolivre/start",
+  async (_req, res) => {
+    try {
+      const {
+        clientId: mlClientId,
+        redirectUri,
+        stateSecret,
+      } = getMlConfig();
+
+      await run(
+        `DELETE FROM oauth_bridge_sessions
+         WHERE created_at < datetime('now', '-30 minutes')`,
+      );
+
+      await run(
+        `DELETE FROM desktop_bridge_clients
+         WHERE provider_user_id IS NULL
+           AND created_at < datetime('now', '-30 minutes')`,
+      );
+
+      const pairingId = crypto.randomBytes(24).toString("hex");
+      const bridgeClientId =
+        crypto.randomBytes(16).toString("hex");
+      const bridgeClientKey =
+        base64Url(crypto.randomBytes(32));
+      const codeVerifier =
+        base64Url(crypto.randomBytes(48));
+      const codeChallenge = base64Url(
+        crypto.createHash("sha256").update(codeVerifier).digest(),
+      );
+      const state = createBridgeOAuthState(
+        pairingId,
+        stateSecret,
+      );
+
+      await run(
+        `INSERT INTO desktop_bridge_clients
+          (id, provider, secret_hash)
+         VALUES (?, 'mercadolivre', ?)`,
+        [
+          bridgeClientId,
+          bridgeClientKeyHash(bridgeClientKey),
+        ],
+      );
+
+      await run(
+        `INSERT INTO oauth_bridge_sessions
+          (id, provider, client_id, code_verifier, status)
+         VALUES (?, 'mercadolivre', ?, ?, 'pending')`,
+        [pairingId, bridgeClientId, codeVerifier],
+      );
+
+      const url = new URL(
+        "https://auth.mercadolivre.com.br/authorization",
+      );
+      url.searchParams.set("response_type", "code");
+      url.searchParams.set("client_id", mlClientId);
+      url.searchParams.set("redirect_uri", redirectUri);
+      url.searchParams.set("state", state);
+      url.searchParams.set("code_challenge", codeChallenge);
+      url.searchParams.set("code_challenge_method", "S256");
+
+      res.json({
+        ok: true,
+        pairing_id: pairingId,
+        bridge_client_id: bridgeClientId,
+        bridge_client_key: bridgeClientKey,
+        auth_url: url.toString(),
+        expires_in_seconds: 900,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+app.get(
+  "/bridge/mercadolivre/session/:id",
+  requireBridgeClient,
+  async (req, res) => {
+    try {
+      const pairingId = String(req.params.id || "");
+      if (!/^[a-f0-9]{48}$/i.test(pairingId)) {
+        return res.status(400).json({ error: "Pareamento inválido." });
+      }
+
+      const session = await get(
+        `SELECT * FROM oauth_bridge_sessions
+         WHERE id = ? AND provider = 'mercadolivre'`,
+        [pairingId],
+      );
+
+      if (!session) {
+        return res.status(404).json({
+          status: "missing",
+          error: "Pareamento não encontrado ou já finalizado.",
+        });
+      }
+
+      if (session.client_id !== req.bridgeClient.id) {
+        return res.status(403).json({
+          error: "Este pareamento pertence a outro Radar Desktop.",
+        });
+      }
+
+      const ageMs =
+        Date.now() - new Date(`${session.created_at}Z`).getTime();
+
+      if (Number.isFinite(ageMs) && ageMs > 20 * 60 * 1000) {
+        await run(
+          `UPDATE oauth_bridge_sessions
+           SET status = 'expired', access_token = NULL,
+               refresh_token = NULL, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [pairingId],
+        );
+
+        return res.json({ status: "expired" });
+      }
+
+      if (session.status === "ready") {
+        return res.json({
+          status: "ready",
+          provider_user_id: session.provider_user_id,
+          provider_username: session.provider_username,
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+          expires_at: session.expires_at,
+        });
+      }
+
+      res.json({
+        status: session.status || "pending",
+        error: session.error || null,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+app.delete(
+  "/bridge/mercadolivre/session/:id",
+  requireBridgeClient,
+  async (req, res) => {
+    try {
+      const pairingId = String(req.params.id || "");
+      await run(
+        `DELETE FROM oauth_bridge_sessions
+         WHERE id = ?
+           AND provider = 'mercadolivre'
+           AND client_id = ?`,
+        [pairingId, req.bridgeClient.id],
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+app.post(
+  "/bridge/mercadolivre/refresh",
+  requireBridgeClient,
+  async (req, res) => {
+    try {
+      const refreshToken = String(req.body?.refresh_token || "").trim();
+      if (!refreshToken) {
+        return res.status(400).json({ error: "Refresh token ausente." });
+      }
+
+      const { clientId, clientSecret } = getMlConfig();
+      const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+      });
+
+      const response = await fetch(
+        "https://api.mercadolibre.com/oauth/token",
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body,
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return res.status(response.status).json({
+          error:
+            data.message ||
+            data.error_description ||
+            data.error ||
+            "Falha ao renovar token.",
+        });
+      }
+
+      const expiresAt = data.expires_in
+        ? new Date(
+            Date.now() + Number(data.expires_in) * 1000,
+          ).toISOString()
+        : null;
+
+      res.json({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token || refreshToken,
+        expires_at: expiresAt,
+        user_id: data.user_id || null,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 app.get("/auth/mercadolivre", (_req, res) => {
   try {
     const { clientId, redirectUri, stateSecret } = getMlConfig();
@@ -2605,8 +2943,27 @@ app.get("/auth/mercadolivre/callback", async (req, res) => {
     const { code, state } = req.query;
     const { clientId, clientSecret, redirectUri, stateSecret } = getMlConfig();
 
-    if (!code || !validateOAuthState(state, stateSecret)) {
+    const bridgeState = validateBridgeOAuthState(state, stateSecret);
+    const normalState = validateOAuthState(state, stateSecret);
+
+    if (!code || (!bridgeState && !normalState)) {
       return res.status(400).send("Resposta OAuth inválida ou expirada.");
+    }
+
+    let bridgeSession = null;
+
+    if (bridgeState) {
+      bridgeSession = await get(
+        `SELECT * FROM oauth_bridge_sessions
+         WHERE id = ? AND provider = 'mercadolivre'`,
+        [bridgeState.pairingId],
+      );
+
+      if (!bridgeSession || bridgeSession.status !== "pending") {
+        return res.status(400).send(
+          "Pareamento OAuth não encontrado, expirado ou já utilizado.",
+        );
+      }
     }
 
     const tokenBody = new URLSearchParams({
@@ -2617,35 +2974,145 @@ app.get("/auth/mercadolivre/callback", async (req, res) => {
       redirect_uri: redirectUri,
     });
 
-    const tokenResponse = await fetch("https://api.mercadolibre.com/oauth/token", {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body: tokenBody,
-    });
-
-    const tokenData = await tokenResponse.json();
-    if (!tokenResponse.ok) {
-      throw new Error(tokenData.message || tokenData.error || "Falha ao obter token do Mercado Livre.");
+    if (bridgeSession?.code_verifier) {
+      tokenBody.set("code_verifier", bridgeSession.code_verifier);
     }
 
-    const profileResponse = await fetch("https://api.mercadolibre.com/users/me", {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` },
-    });
-    const profile = await profileResponse.json();
+    const tokenResponse = await fetch(
+      "https://api.mercadolibre.com/oauth/token",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: tokenBody,
+      },
+    );
+    const tokenData = await tokenResponse.json().catch(() => ({}));
+
+    if (!tokenResponse.ok) {
+      const message =
+        tokenData.message ||
+        tokenData.error_description ||
+        tokenData.error ||
+        "Falha ao obter token do Mercado Livre.";
+
+      if (bridgeSession) {
+        await run(
+          `UPDATE oauth_bridge_sessions
+           SET status = 'error', error = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [message, bridgeSession.id],
+        );
+      }
+
+      throw new Error(message);
+    }
+
+    const profileResponse = await fetch(
+      "https://api.mercadolibre.com/users/me",
+      {
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+          accept: "application/json",
+        },
+      },
+    );
+    const profile = await profileResponse.json().catch(() => ({}));
 
     if (!profileResponse.ok) {
-      throw new Error(profile.message || "Falha ao carregar perfil do Mercado Livre.");
+      const message =
+        profile.message || "Falha ao carregar perfil do Mercado Livre.";
+
+      if (bridgeSession) {
+        await run(
+          `UPDATE oauth_bridge_sessions
+           SET status = 'error', error = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [message, bridgeSession.id],
+        );
+      }
+
+      throw new Error(message);
     }
 
-    const user = await get("SELECT * FROM users LIMIT 1");
-    if (!user) throw new Error("Usuário local não encontrado.");
-
     const expiresAt = tokenData.expires_in
-      ? new Date(Date.now() + Number(tokenData.expires_in) * 1000).toISOString()
+      ? new Date(
+          Date.now() + Number(tokenData.expires_in) * 1000,
+        ).toISOString()
       : null;
+
+    const providerUserId = String(
+      tokenData.user_id || profile.id || "",
+    );
+    const providerUsername =
+      profile.nickname || profile.email || null;
+    if (bridgeSession) {
+      await run(
+        `UPDATE oauth_bridge_sessions
+         SET status = 'ready',
+             access_token = ?,
+             refresh_token = ?,
+             expires_at = ?,
+             provider_user_id = ?,
+             provider_username = ?,
+             error = NULL,
+             code_verifier = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          tokenData.access_token,
+          tokenData.refresh_token || null,
+          expiresAt,
+          providerUserId,
+          providerUsername,
+          bridgeSession.id,
+        ],
+      );
+
+      if (bridgeSession.client_id) {
+        await run(
+          `UPDATE desktop_bridge_clients
+           SET provider_user_id = ?,
+               last_used_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [providerUserId, bridgeSession.client_id],
+        );
+      }
+
+      const safeUsername = String(providerUsername || "sua conta")
+        .replace(/[<>&"]/g, "");
+
+      return res
+        .status(200)
+        .type("html")
+        .send(`<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mercado Livre conectado</title>
+<style>
+body{margin:0;background:#0d0d10;color:#f4f4f5;font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh}
+main{max-width:520px;padding:32px;text-align:center;border:1px solid #2c2c34;border-radius:20px;background:#15151a}
+h1{margin:0 0 12px;font-size:28px}p{color:#aaaab4;line-height:1.55}
+strong{color:#7ce7a5}
+</style>
+</head>
+<body>
+<main>
+<h1>Mercado Livre conectado ✅</h1>
+<p>A autorização foi concluída para <strong>${safeUsername}</strong>.</p>
+<p>Você já pode fechar esta aba. O Radar 2.0 Desktop vai concluir o pareamento automaticamente.</p>
+</main>
+</body>
+</html>`);
+    }
+    const user = await get("SELECT * FROM users LIMIT 1");
+    if (!user) {
+      throw new Error("Usuário local não encontrado.");
+    }
 
     await run(
       `INSERT INTO connections (
@@ -2662,8 +3129,8 @@ app.get("/auth/mercadolivre/callback", async (req, res) => {
         updated_at = CURRENT_TIMESTAMP`,
       [
         user.id,
-        String(tokenData.user_id || profile.id || ""),
-        profile.nickname || profile.email || null,
+        providerUserId,
+        providerUsername,
         tokenData.access_token,
         tokenData.refresh_token || null,
         expiresAt,
@@ -2680,6 +3147,44 @@ app.get("/auth/mercadolivre/callback", async (req, res) => {
 /* =========================
    TOKEN MERCADO LIVRE
 ========================= */
+
+async function cloudBridgeRequest(
+  pathname,
+  options = {},
+  credentials = null,
+) {
+  const headers = {
+    ...(options.body ? { "content-type": "application/json" } : {}),
+    ...(options.headers || {}),
+  };
+
+  if (credentials?.clientId && credentials?.clientKey) {
+    headers["x-radar-client-id"] = credentials.clientId;
+    headers["x-radar-client-key"] = credentials.clientKey;
+  }
+
+  const response = await fetch(
+    DEFAULT_CLOUD_BRIDGE_URL + pathname,
+    {
+      ...options,
+      headers,
+    },
+  );
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const error = new Error(
+      data.error ||
+        "Servidor de autorização respondeu " + response.status + ".",
+    );
+    error.status = response.status;
+    error.payload = data;
+    throw error;
+  }
+
+  return data;
+}
 
 async function getValidMercadoLivreConnection(userId) {
   const connection = await get(
@@ -2710,39 +3215,119 @@ async function getValidMercadoLivreConnection(userId) {
     return { ...connection, status: "reauthorization_required" };
   }
 
-  const { clientId, clientSecret } = getMlConfig();
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: connection.refresh_token,
-  });
+  let data = null;
 
-  const response = await fetch("https://api.mercadolibre.com/oauth/token", {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body,
-  });
+  if (process.env.RADAR_DESKTOP === "1") {
+    if (
+      !connection.bridge_client_id ||
+      !connection.bridge_client_key
+    ) {
+      await run(
+        `UPDATE connections
+         SET status = 'reauthorization_required',
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [connection.id],
+      );
 
-  const data = await response.json();
+      return {
+        ...connection,
+        status: "reauthorization_required",
+      };
+    }
 
-  if (!response.ok) {
-    console.error("Falha ao renovar token do Mercado Livre:", data);
-    await run(
-      `UPDATE connections
-       SET status = 'reauthorization_required', updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [connection.id],
+    try {
+      data = await cloudBridgeRequest(
+        "/bridge/mercadolivre/refresh",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            refresh_token: connection.refresh_token,
+          }),
+        },
+        {
+          clientId: connection.bridge_client_id,
+          clientKey: connection.bridge_client_key,
+        },
+      );
+    } catch (err) {
+      console.error(
+        "Falha ao renovar token do Mercado Livre pela ponte:",
+        err.message,
+      );
+
+      if ([400, 401, 403].includes(Number(err.status))) {
+        await run(
+          `UPDATE connections
+           SET status = 'reauthorization_required',
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [connection.id],
+        );
+
+        return {
+          ...connection,
+          status: "reauthorization_required",
+        };
+      }
+
+      return {
+        ...connection,
+        status: "temporarily_unavailable",
+      };
+    }
+  } else {
+    const { clientId, clientSecret } = getMlConfig();
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: connection.refresh_token,
+    });
+
+    const response = await fetch(
+      "https://api.mercadolibre.com/oauth/token",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body,
+      },
     );
-    return { ...connection, status: "reauthorization_required" };
+
+    data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      console.error("Falha ao renovar token do Mercado Livre:", data);
+      await run(
+        `UPDATE connections
+         SET status = 'reauthorization_required',
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [connection.id],
+      );
+      return {
+        ...connection,
+        status: "reauthorization_required",
+      };
+    }
+
+    if (data.expires_in) {
+      data.expires_at = new Date(
+        Date.now() + Number(data.expires_in) * 1000,
+      ).toISOString();
+    }
   }
 
-  const nextExpiresAt = data.expires_in
-    ? new Date(Date.now() + Number(data.expires_in) * 1000).toISOString()
-    : null;
+  const nextExpiresAt =
+    data.expires_at ||
+    (data.expires_in
+      ? new Date(
+          Date.now() + Number(data.expires_in) * 1000,
+        ).toISOString()
+      : null);
 
   await run(
     `UPDATE connections
@@ -2759,6 +3344,171 @@ async function getValidMercadoLivreConnection(userId) {
 
   return get("SELECT * FROM connections WHERE id = ?", [connection.id]);
 }
+
+/* =========================
+   PAREAMENTO MERCADO LIVRE DESKTOP
+========================= */
+
+app.post("/api/mercadolivre/connect/start", async (_req, res) => {
+  try {
+    if (process.env.RADAR_DESKTOP !== "1") {
+      return res.json({
+        ok: true,
+        mode: "web",
+        auth_url: "/auth/mercadolivre",
+      });
+    }
+
+    const data = await cloudBridgeRequest(
+      "/bridge/mercadolivre/start",
+      { method: "POST", body: "{}" },
+    );
+
+    if (
+      !data.pairing_id ||
+      !data.bridge_client_id ||
+      !data.bridge_client_key ||
+      !data.auth_url
+    ) {
+      throw new Error(
+        "O servidor não conseguiu criar as credenciais de pareamento.",
+      );
+    }
+
+    await run(
+      `DELETE FROM oauth_bridge_sessions
+       WHERE provider = 'mercadolivre_desktop'`,
+    );
+
+    await run(
+      `INSERT INTO oauth_bridge_sessions
+        (id, provider, client_id, client_key, status)
+       VALUES (?, 'mercadolivre_desktop', ?, ?, 'pending')`,
+      [
+        data.pairing_id,
+        data.bridge_client_id,
+        data.bridge_client_key,
+      ],
+    );
+
+    res.json({
+      ok: true,
+      mode: "desktop_bridge",
+      pairing_id: data.pairing_id,
+      auth_url: data.auth_url,
+      expires_in_seconds: data.expires_in_seconds || 900,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.get("/api/mercadolivre/connect/status", async (req, res) => {
+  try {
+    const pairingId = String(req.query.pairing_id || "");
+
+    if (!/^[a-f0-9]{48}$/i.test(pairingId)) {
+      return res.status(400).json({ error: "Pareamento inválido." });
+    }
+
+    const localSession = await get(
+      `SELECT * FROM oauth_bridge_sessions
+       WHERE id = ? AND provider = 'mercadolivre_desktop'`,
+      [pairingId],
+    );
+
+    if (
+      !localSession ||
+      !localSession.client_id ||
+      !localSession.client_key
+    ) {
+      return res.json({ status: "missing" });
+    }
+
+    const bridgeCredentials = {
+      clientId: localSession.client_id,
+      clientKey: localSession.client_key,
+    };
+
+    const data = await cloudBridgeRequest(
+      `/bridge/mercadolivre/session/${pairingId}`,
+      {},
+      bridgeCredentials,
+    );
+
+    if (data.status !== "ready") {
+      return res.json({
+        status: data.status || "pending",
+        error: data.error || null,
+      });
+    }
+
+    if (!data.access_token) {
+      return res.status(502).json({
+        error: "O servidor concluiu a autorização sem retornar um token.",
+      });
+    }
+
+    const user = await get("SELECT * FROM users LIMIT 1");
+    if (!user) {
+      return res.status(500).json({ error: "Usuário local não encontrado." });
+    }
+
+    await run(
+      `INSERT INTO connections (
+        user_id, provider, provider_user_id, provider_username,
+        access_token, refresh_token, expires_at,
+        bridge_client_id, bridge_client_key,
+        status, updated_at
+      ) VALUES (?, 'mercadolivre', ?, ?, ?, ?, ?, ?, ?, 'connected', CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, provider) DO UPDATE SET
+        provider_user_id = excluded.provider_user_id,
+        provider_username = excluded.provider_username,
+        access_token = excluded.access_token,
+        refresh_token = excluded.refresh_token,
+        expires_at = excluded.expires_at,
+        bridge_client_id = excluded.bridge_client_id,
+        bridge_client_key = excluded.bridge_client_key,
+        status = 'connected',
+        updated_at = CURRENT_TIMESTAMP`,
+      [
+        user.id,
+        data.provider_user_id || null,
+        data.provider_username || null,
+        data.access_token,
+        data.refresh_token || null,
+        data.expires_at || null,
+        localSession.client_id,
+        localSession.client_key,
+      ],
+    );
+
+    cloudBridgeRequest(
+      `/bridge/mercadolivre/session/${pairingId}`,
+      { method: "DELETE" },
+      bridgeCredentials,
+    ).catch(() => {});
+
+    await run(
+      `DELETE FROM oauth_bridge_sessions
+       WHERE id = ? AND provider = 'mercadolivre_desktop'`,
+      [pairingId],
+    );
+
+    res.json({
+      status: "connected",
+      provider: "mercadolivre",
+      provider_username: data.provider_username || null,
+      expires_at: data.expires_at || null,
+    });
+  } catch (err) {
+    if (err.status === 404) {
+      return res.json({ status: "missing" });
+    }
+
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
 
 /* =========================
    IMPORTAR ITEM MERCADO LIVRE

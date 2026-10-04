@@ -2054,9 +2054,123 @@ function showExtensionInstall() {
    CONECTAR
 ========================= */
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runScheduledRadarsAfterConnection() {
+  try {
+    await loadRadars();
+
+    const enabled = state.radars
+      .filter((radar) => Boolean(radar.schedule_enabled))
+      .slice(0, 5);
+
+    for (const radar of enabled) {
+      await api(`/api/radars/${radar.id}/run`, {
+        method: "POST",
+        body: JSON.stringify({ trigger: "source_connected" }),
+      }).catch(() => null);
+    }
+
+    await Promise.all([
+      loadListings(),
+      loadActivity(),
+      loadNotifications(),
+    ]);
+  } catch {
+    // A conexão continua válida mesmo se a primeira rodada falhar.
+  }
+}
+
+async function connectMercadoLivre() {
+  let authWindow = null;
+
+  try {
+    authWindow = window.open(
+      "about:blank",
+      "radar_mercadolivre_oauth",
+      "width=720,height=760",
+    );
+
+    const start = await api("/api/mercadolivre/connect/start", {
+      method: "POST",
+      body: "{}",
+    });
+
+    if (!start.auth_url) {
+      throw new Error("O servidor não retornou a URL de autorização.");
+    }
+
+    if (start.mode === "web") {
+      if (authWindow) {
+        authWindow.location.href = start.auth_url;
+      } else {
+        window.location.href = start.auth_url;
+      }
+      return;
+    }
+
+    if (!start.pairing_id) {
+      throw new Error("O pareamento do Desktop não foi criado.");
+    }
+
+    if (authWindow) {
+      authWindow.location.href = start.auth_url;
+    } else {
+      window.open(start.auth_url, "_blank", "noopener,noreferrer");
+    }
+
+    const deadline =
+      Date.now() +
+      Number(start.expires_in_seconds || 900) * 1000;
+
+    while (Date.now() < deadline) {
+      await delay(1800);
+
+      const status = await api(
+        `/api/mercadolivre/connect/status?pairing_id=${encodeURIComponent(start.pairing_id)}`,
+      );
+
+      if (status.status === "connected") {
+        try {
+          authWindow?.close();
+        } catch {}
+
+        await loadConnections();
+        await runScheduledRadarsAfterConnection();
+
+        alert(
+          status.provider_username
+            ? `Mercado Livre conectado como @${status.provider_username}. Primeira rodada automática concluída.`
+            : "Mercado Livre conectado. Primeira rodada automática concluída.",
+        );
+        return;
+      }
+
+      if (["error", "expired", "missing"].includes(status.status)) {
+        throw new Error(
+          status.error ||
+            "A autorização expirou. Tente conectar novamente.",
+        );
+      }
+    }
+
+    throw new Error(
+      "A autorização demorou demais. Tente conectar novamente.",
+    );
+  } catch (err) {
+    try {
+      authWindow?.close();
+    } catch {}
+
+    alert(err.message);
+  }
+}
+
 function connectProvider(provider) {
   if (provider === "mercadolivre") {
-    window.location.href = "/auth/mercadolivre";
+    connectMercadoLivre();
     return;
   }
 
