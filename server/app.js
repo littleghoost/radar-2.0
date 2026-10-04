@@ -100,6 +100,7 @@ app.use((req, res, next) => {
   if (!authEnabled()) return next();
   if (req.path === "/api/health") return next();
   if (req.path === "/auth/mercadolivre/callback") return next();
+  if (req.path === "/webhooks/ebay/marketplace-account-deletion") return next();
   if (req.path.startsWith("/bridge/")) return next();
   if (isAuthenticated(req)) return next();
 
@@ -109,6 +110,76 @@ app.use((req, res, next) => {
 
   return res.redirect("/login");
 });
+
+const EBAY_DELETION_ENDPOINT =
+  process.env.EBAY_DELETION_ENDPOINT ||
+  "https://radar-2-0-littleghoost.fly.dev/webhooks/ebay/marketplace-account-deletion";
+
+async function getEbayDeletionVerificationToken() {
+  if (process.env.EBAY_DELETION_VERIFICATION_TOKEN) {
+    return process.env.EBAY_DELETION_VERIFICATION_TOKEN.trim();
+  }
+
+  const row = await get(
+    `SELECT value
+     FROM integration_settings
+     WHERE key = 'ebay_deletion_verification_token'
+     LIMIT 1`,
+  );
+
+  return row?.value ? String(row.value).trim() : null;
+}
+
+app.get(
+  "/webhooks/ebay/marketplace-account-deletion",
+  async (req, res) => {
+    try {
+      const challengeCode = String(
+        req.query.challenge_code || "",
+      ).trim();
+
+      if (!challengeCode) {
+        return res.status(400).json({
+          error: "challenge_code ausente.",
+        });
+      }
+
+      const verificationToken =
+        await getEbayDeletionVerificationToken();
+
+      if (!verificationToken) {
+        return res.status(503).json({
+          error: "Verification token do eBay não configurado.",
+        });
+      }
+
+      const challengeResponse = crypto
+        .createHash("sha256")
+        .update(
+          challengeCode +
+            verificationToken +
+            EBAY_DELETION_ENDPOINT,
+        )
+        .digest("hex");
+
+      res
+        .status(200)
+        .type("application/json")
+        .json({ challengeResponse });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+app.post(
+  "/webhooks/ebay/marketplace-account-deletion",
+  async (_req, res) => {
+    // O Radar não persiste o payload de exclusão nem identificadores do usuário.
+    // Acknowledge imediato para impedir retries desnecessários do eBay.
+    res.status(204).end();
+  },
+);
 
 app.get("/api/image-proxy", async (req, res) => {
   try {
