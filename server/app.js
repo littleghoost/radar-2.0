@@ -127,7 +127,20 @@ async function getEbayDeletionVerificationToken() {
      LIMIT 1`,
   );
 
-  return row?.value ? String(row.value).trim() : null;
+  if (row?.value) {
+    return String(row.value).trim();
+  }
+
+  const stateSecret = process.env.OAUTH_STATE_SECRET;
+
+  if (!stateSecret) {
+    return null;
+  }
+
+  return crypto
+    .createHmac("sha256", stateSecret)
+    .update("radar2-ebay-marketplace-account-deletion-v1")
+    .digest("base64url");
 }
 
 app.get(
@@ -1535,6 +1548,59 @@ app.get("/api/catalog-discoveries", async (req, res) => {
     );
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/ebay/deletion-config", async (_req, res) => {
+  try {
+    if (process.env.RADAR_DESKTOP !== "1") {
+      return res.status(403).json({
+        error: "Abra esta configuração pelo Radar Desktop.",
+      });
+    }
+
+    const user = await get("SELECT * FROM users LIMIT 1");
+
+    if (!user) {
+      return res.status(500).json({
+        error: "Usuário local não encontrado.",
+      });
+    }
+
+    const bridge = await get(
+      `SELECT bridge_client_id, bridge_client_key
+       FROM connections
+       WHERE user_id = ?
+         AND provider = 'mercadolivre'
+         AND status = 'connected'
+       LIMIT 1`,
+      [user.id],
+    );
+
+    if (
+      !bridge?.bridge_client_id ||
+      !bridge?.bridge_client_key
+    ) {
+      return res.status(409).json({
+        error:
+          "A ponte segura do Desktop não está disponível. Reconecte o Mercado Livre primeiro.",
+      });
+    }
+
+    const data = await cloudBridgeRequest(
+      "/bridge/ebay/deletion-config",
+      {},
+      {
+        clientId: bridge.bridge_client_id,
+        clientKey: bridge.bridge_client_key,
+      },
+    );
+
+    res.json(data);
+  } catch (err) {
+    res.status(err.status || 500).json({
+      error: err.message,
+    });
   }
 });
 
@@ -3138,6 +3204,30 @@ app.post(
       );
 
       res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+app.get(
+  "/bridge/ebay/deletion-config",
+  requireBridgeClient,
+  async (_req, res) => {
+    try {
+      const verificationToken =
+        await getEbayDeletionVerificationToken();
+
+      if (!verificationToken) {
+        return res.status(503).json({
+          error: "Verification token do eBay não disponível.",
+        });
+      }
+
+      res.json({
+        endpoint: EBAY_DELETION_ENDPOINT,
+        verification_token: verificationToken,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
