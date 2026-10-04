@@ -1909,7 +1909,8 @@ async function loadConnections() {
     const descriptions = {
       olx: "Conta da OLX para futuras integrações autorizadas.",
 
-      mercadolivre: "Conecte sua conta do Mercado Livre.",
+      mercadolivre:
+        "Busca automática oficial, atualização de preço e verificação de disponibilidade.",
 
       ebay: "Conecte sua conta do eBay.",
       depop: "API oficial de parceiros da Depop; não possui busca geral do marketplace.",

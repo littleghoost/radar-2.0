@@ -2863,6 +2863,32 @@ app.delete(
 );
 
 app.post(
+  "/bridge/client/revoke",
+  requireBridgeClient,
+  async (req, res) => {
+    try {
+      await run(
+        `UPDATE desktop_bridge_clients
+         SET revoked_at = CURRENT_TIMESTAMP,
+             last_used_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [req.bridgeClient.id],
+      );
+
+      await run(
+        `DELETE FROM oauth_bridge_sessions
+         WHERE client_id = ?`,
+        [req.bridgeClient.id],
+      );
+
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+app.post(
   "/bridge/mercadolivre/refresh",
   requireBridgeClient,
   async (req, res) => {
@@ -3653,6 +3679,32 @@ app.delete(
         return res.status(404).json({
           error: "Usuário não encontrado.",
         });
+      }
+
+      const existing = await get(
+        `SELECT * FROM connections
+         WHERE user_id = ? AND provider = ?
+         LIMIT 1`,
+        [user.id, req.params.provider],
+      );
+
+      if (
+        process.env.RADAR_DESKTOP === "1" &&
+        req.params.provider === "mercadolivre" &&
+        existing?.bridge_client_id &&
+        existing?.bridge_client_key
+      ) {
+        await cloudBridgeRequest(
+          "/bridge/client/revoke",
+          {
+            method: "POST",
+            body: "{}",
+          },
+          {
+            clientId: existing.bridge_client_id,
+            clientKey: existing.bridge_client_key,
+          },
+        ).catch(() => {});
       }
 
       await run(
