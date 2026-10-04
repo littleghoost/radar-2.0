@@ -1,5 +1,48 @@
 const tokenCache = new Map();
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(
+  url,
+  options = {},
+  attempts = 2,
+) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, options);
+
+      if (
+        attempt < attempts &&
+        [408, 425, 429, 500, 502, 503, 504].includes(
+          response.status,
+        )
+      ) {
+        await response
+          .arrayBuffer()
+          .catch(() => null);
+        await sleep(350 * attempt);
+        continue;
+      }
+
+      return response;
+    } catch (err) {
+      lastError = err;
+
+      if (attempt >= attempts) {
+        throw err;
+      }
+
+      await sleep(350 * attempt);
+    }
+  }
+
+  throw lastError || new Error("Falha de rede no eBay.");
+}
+
 function normalizeCredentials(credentials = null) {
   const clientId =
     credentials?.clientId ||
@@ -49,7 +92,7 @@ async function getApplicationToken(credentials = null) {
     scope: "https://api.ebay.com/oauth/api_scope",
   });
 
-  const response = await fetch(
+  const response = await fetchWithRetry(
     "https://api.ebay.com/identity/v1/oauth2/token",
     {
       method: "POST",
@@ -141,13 +184,53 @@ function normalizeItems(data, searchQuery = null) {
   });
 }
 
+function roundRobinUniqueItems(
+  groups,
+  limit = 50,
+) {
+  const output = [];
+  const seen = new Set();
+  const safeGroups = (groups || []).filter(
+    (group) => Array.isArray(group) && group.length,
+  );
+  const maxLength = safeGroups.reduce(
+    (max, group) => Math.max(max, group.length),
+    0,
+  );
+
+  for (
+    let row = 0;
+    row < maxLength && output.length < limit;
+    row += 1
+  ) {
+    for (const group of safeGroups) {
+      const item = group[row];
+      if (!item) continue;
+
+      const key =
+        item.external_id ||
+        item.url ||
+        `${item.title}|${item.price}`;
+
+      if (!key || seen.has(key)) continue;
+
+      seen.add(key);
+      output.push(item);
+
+      if (output.length >= limit) break;
+    }
+  }
+
+  return output;
+}
+
 async function requestBrowse(
   url,
   accessToken,
   marketplaceId,
   options = {},
 ) {
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     ...options,
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -303,7 +386,7 @@ async function enrichShippingDetails({
   };
 }
 
-function buildEbayQueries(query, maxQueries = 6) {
+function buildEbayQueries(query, maxQueries = 8) {
   const explicit = String(query || "")
     .split("|")
     .map((part) => part.replace(/\s+/g, " ").trim())
@@ -454,7 +537,7 @@ async function searchEbay({
     }
 
     const settled = await Promise.allSettled(requests);
-    const itemsByKey = new Map();
+    const itemGroups = [];
     const modes = [];
     const errors = [];
 
@@ -467,23 +550,20 @@ async function searchEbay({
       }
 
       modes.push(result.value.mode);
-
-      for (const item of normalizeItems(
-        result.value.data,
-        result.value.query,
-      )) {
-        const key =
-          item.external_id ||
-          item.url ||
-          `${item.title}|${item.price}`;
-
-        if (!itemsByKey.has(key)) {
-          itemsByKey.set(key, item);
-        }
-      }
+      itemGroups.push(
+        normalizeItems(
+          result.value.data,
+          result.value.query,
+        ),
+      );
     }
 
-    if (!itemsByKey.size && errors.length) {
+    const baseItems = roundRobinUniqueItems(
+      itemGroups,
+      Math.max(Number(limit || 50), 1),
+    );
+
+    if (!baseItems.length && errors.length) {
       return {
         source: "ebay",
         ok: false,
@@ -493,11 +573,6 @@ async function searchEbay({
         items: [],
       };
     }
-
-    const baseItems = [...itemsByKey.values()].slice(
-      0,
-      Math.max(Number(limit || 50), 1),
-    );
 
     const shippingEnrichment = endUserContext
       ? await enrichShippingDetails({

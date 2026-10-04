@@ -363,6 +363,17 @@ function resetRadarFormForCreate() {
 
   const label = $("#radarReferenceLabel");
   if (label) label.textContent = "Escolher imagem";
+
+  const plannerBox = $("#searchPlannerBox");
+  const plannerList = $("#searchPlanList");
+  const manualQuery = $("#manualSearchQuery");
+
+  if (plannerBox) plannerBox.hidden = true;
+  if (plannerList) {
+    plannerList.innerHTML =
+      '<div class="empty">Salve o radar para gerar o plano de busca.</div>';
+  }
+  if (manualQuery) manualQuery.value = "";
 }
 
 function openNewRadarModal() {
@@ -1060,6 +1071,269 @@ async function configureSchedule(id) {
 }
 
 /* =========================
+   SEARCH PLANNER
+========================= */
+
+function plannerOriginLabel(origin) {
+  return {
+    base: "Base",
+    priority: "Prioridade",
+    required: "Obrigatória",
+    learned_model: "Modelo aprendido",
+    manual: "Manual",
+  }[origin] || "Gerada";
+}
+
+function renderSearchPlan(plan) {
+  const box = $("#searchPlannerBox");
+  const list = $("#searchPlanList");
+  const visual = $("#visualSearchStatus");
+
+  if (!box || !list || !visual) return;
+
+  box.hidden = false;
+
+  const explorationCount = Number(
+    plan?.exploration_count || 0,
+  );
+
+  visual.innerHTML = `
+    ${
+      plan?.visual_search_active
+        ? '<span class="planner-visual-pill active">◎ Busca por imagem ativa no eBay compatível</span>'
+        : '<span class="planner-visual-pill">◎ Adicione uma imagem de referência para habilitar busca visual onde a fonte permitir</span>'
+    }
+    <span class="planner-visual-pill ${
+      explorationCount > 0 ? "active" : ""
+    }">
+      ↗ ${explorationCount} busca(s) nova(s) na próxima rodada
+    </span>
+  `;
+
+  const queries = Array.isArray(plan?.queries)
+    ? plan.queries
+    : [];
+
+  if (!queries.length) {
+    list.innerHTML = `
+      <div class="empty">
+        Nenhuma estratégia gerada ainda.
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = queries
+    .map((query) => {
+      const enabled = Boolean(query.enabled);
+      const performance = Math.round(
+        Number(query.performance_score ?? 50),
+      );
+      const plannerScore = Math.round(
+        Number(query.planner_score ?? performance),
+      );
+
+      return `
+        <article
+          class="search-plan-item ${enabled ? "" : "paused"} ${query.next_selected ? "next-selected" : ""}"
+          data-query-id="${query.id}"
+        >
+          <label class="planner-toggle">
+            <input
+              type="checkbox"
+              data-planner-action="toggle"
+              ${enabled ? "checked" : ""}
+            />
+            <span></span>
+          </label>
+
+          <div class="search-plan-main">
+            <div class="search-plan-title">
+              <strong>${escapeHtml(query.query_text)}</strong>
+              ${
+                query.next_selected
+                  ? '<span class="planner-next-badge">PRÓXIMA RODADA</span>'
+                  : ""
+              }
+            </div>
+            <div class="search-plan-meta">
+              <span>${escapeHtml(plannerOriginLabel(query.origin))}</span>
+              <span>Planner ${plannerScore}</span>
+              <span>Qualidade ${performance}</span>
+              <span>${Number(query.runs || 0)} rodada(s)</span>
+              <span>${Number(query.results_found || 0)} resultado(s)</span>
+              <span>${Number(query.qualified_found || 0)} bom(ns)</span>
+            </div>
+          </div>
+
+          ${
+            query.origin === "manual"
+              ? `<button
+                   type="button"
+                   class="icon-btn planner-delete"
+                   data-planner-action="delete"
+                   title="Apagar busca manual"
+                 >×</button>`
+              : ""
+          }
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function loadSearchPlan(radarId) {
+  const list = $("#searchPlanList");
+  const box = $("#searchPlannerBox");
+
+  if (!radarId || !list || !box) return;
+
+  box.hidden = false;
+  list.innerHTML = `
+    <div class="empty">Montando estratégia...</div>
+  `;
+
+  try {
+    const plan = await api(
+      `/api/radars/${radarId}/search-plan`,
+    );
+    renderSearchPlan(plan);
+  } catch (err) {
+    list.innerHTML = `
+      <div class="empty">${escapeHtml(errorMessage(err))}</div>
+    `;
+  }
+}
+
+$("#searchPlanList")?.addEventListener(
+  "change",
+  async (event) => {
+    const input = event.target.closest(
+      '[data-planner-action="toggle"]',
+    );
+    if (!input) return;
+
+    const form = $("#radarForm");
+    const radarId = form?.dataset?.editingRadarId;
+    const row = input.closest(".search-plan-item");
+    const queryId = row?.dataset?.queryId;
+
+    if (!radarId || !queryId) return;
+
+    try {
+      await api(
+        `/api/radars/${radarId}/search-plan/query/${queryId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            enabled: input.checked,
+          }),
+        },
+      );
+
+      await loadSearchPlan(radarId);
+    } catch (err) {
+      input.checked = !input.checked;
+      alert(errorMessage(err));
+    }
+  },
+);
+
+$("#searchPlanList")?.addEventListener(
+  "click",
+  async (event) => {
+    const button = event.target.closest(
+      '[data-planner-action="delete"]',
+    );
+    if (!button) return;
+
+    const form = $("#radarForm");
+    const radarId = form?.dataset?.editingRadarId;
+    const row = button.closest(".search-plan-item");
+    const queryId = row?.dataset?.queryId;
+
+    if (!radarId || !queryId) return;
+
+    try {
+      await api(
+        `/api/radars/${radarId}/search-plan/query/${queryId}`,
+        { method: "DELETE" },
+      );
+      await loadSearchPlan(radarId);
+    } catch (err) {
+      alert(errorMessage(err));
+    }
+  },
+);
+
+$("#regenerateSearchPlan")?.addEventListener(
+  "click",
+  async () => {
+    const form = $("#radarForm");
+    const radarId = form?.dataset?.editingRadarId;
+    if (!radarId) return;
+
+    const button = $("#regenerateSearchPlan");
+    const old = button.textContent;
+    button.disabled = true;
+    button.textContent = "Gerando...";
+
+    try {
+      const plan = await api(
+        `/api/radars/${radarId}/search-plan/regenerate`,
+        {
+          method: "POST",
+          body: "{}",
+        },
+      );
+
+      await loadSearchPlan(radarId);
+    } catch (err) {
+      alert(errorMessage(err));
+    } finally {
+      button.disabled = false;
+      button.textContent = old;
+    }
+  },
+);
+
+$("#addManualSearchQuery")?.addEventListener(
+  "click",
+  async () => {
+    const form = $("#radarForm");
+    const radarId = form?.dataset?.editingRadarId;
+    const input = $("#manualSearchQuery");
+    const query = input?.value?.trim();
+
+    if (!radarId || !query) return;
+
+    try {
+      await api(
+        `/api/radars/${radarId}/search-plan/query`,
+        {
+          method: "POST",
+          body: JSON.stringify({ query }),
+        },
+      );
+
+      input.value = "";
+      await loadSearchPlan(radarId);
+    } catch (err) {
+      alert(errorMessage(err));
+    }
+  },
+);
+
+$("#manualSearchQuery")?.addEventListener(
+  "keydown",
+  (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    $("#addManualSearchQuery")?.click();
+  },
+);
+
+/* =========================
    EDITAR RADAR
 ========================= */
 
@@ -1102,6 +1376,12 @@ async function editRadar(id) {
     String(radar.semantic_weight ?? 70);
   form.elements.min_visual_similarity.value =
     String(radar.min_visual_similarity ?? 0.45);
+  form.elements.smart_alerts_enabled.checked =
+    Boolean(radar.smart_alerts_enabled ?? 1);
+  form.elements.alert_min_score.value =
+    String(radar.alert_min_score ?? 78);
+  form.elements.alert_price_drop_percent.value =
+    String(radar.alert_price_drop_percent ?? 10);
 
   $("#radarModalEyebrow").textContent = "EDITAR";
   $("#radarModalTitle").textContent =
@@ -1117,6 +1397,7 @@ async function editRadar(id) {
   }
 
   radarModal.showModal();
+  loadSearchPlan(radar.id);
 }
 
 /* =========================
@@ -1762,6 +2043,14 @@ $("#radarForm").onsubmit = async (event) => {
     min_visual_similarity: Number(
       form.get("min_visual_similarity") || 0.45,
     ),
+    smart_alerts_enabled:
+      formElement.elements.smart_alerts_enabled.checked,
+    alert_min_score: Number(
+      form.get("alert_min_score") || 78,
+    ),
+    alert_price_drop_percent: Number(
+      form.get("alert_price_drop_percent") || 10,
+    ),
   };
 
   if (!editingRadarId) {
@@ -2078,6 +2367,7 @@ async function loadNotifications() {
 
 function activityIcon(type) {
   return {
+    smart_alert: "⚡",
     new_listing: "+",
     price_drop: "↓",
     listing_unavailable: "−",
@@ -2100,6 +2390,7 @@ async function loadActivity() {
 
     const completed = runs.filter((run) => run.status === "completed").length;
     const failed = runs.filter((run) => run.status === "failed").length;
+    const smartAlerts = events.filter((event) => event.type === "smart_alert").length;
     const newListings = events.filter((event) => event.type === "new_listing").length;
     const priceDrops = events.filter((event) => event.type === "price_drop").length;
     const unavailable = events.filter((event) => event.type === "listing_unavailable").length;
@@ -2107,6 +2398,7 @@ async function loadActivity() {
     $("#activityStats").innerHTML = `
       <article><span>Execuções</span><strong>${runs.length}</strong></article>
       <article><span>Concluídas</span><strong>${completed}</strong></article>
+      <article><span>Smart alerts</span><strong>${smartAlerts}</strong></article>
       <article><span>Novos anúncios</span><strong>${newListings}</strong></article>
       <article><span>Quedas de preço</span><strong>${priceDrops}</strong></article>
       <article><span>Indisponíveis</span><strong>${unavailable}</strong></article>

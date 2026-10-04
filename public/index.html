@@ -421,8 +421,8 @@
 
               <div class="setting-group">
                 <strong>Notificações do Windows</strong>
-                <label><input type="checkbox" name="notify_new_listings" /> Novos anúncios</label>
-                <label><input type="checkbox" name="notify_price_drops" /> Quedas de preço</label>
+                <label><input type="checkbox" name="notify_new_listings" /> Achados fortes</label>
+                <label><input type="checkbox" name="notify_price_drops" /> Quedas relevantes</label>
                 <label><input type="checkbox" name="notify_unavailable" /> Anúncios indisponíveis</label>
                 <label><input type="checkbox" name="notify_errors" /> Falhas nas fontes</label>
               </div>
@@ -549,6 +549,32 @@
           </label>
         </div>
 
+        <div class="visual-radar-box search-planner-box" id="searchPlannerBox" hidden>
+          <div class="planner-head">
+            <div>
+              <span class="eyebrow"> SEARCH PLANNER </span>
+              <strong>Estratégia de busca automática</strong>
+              <small>O Radar gera várias buscas, mede quais funcionam e prioriza as melhores nas próximas rodadas.</small>
+            </div>
+            <button type="button" class="secondary compact" id="regenerateSearchPlan">Regerar plano</button>
+          </div>
+
+          <div id="visualSearchStatus" class="planner-visual-status"></div>
+
+          <div id="searchPlanList" class="search-plan-list">
+            <div class="empty">Salve o radar para gerar o plano de busca.</div>
+          </div>
+
+          <div class="planner-add-row">
+            <input
+              id="manualSearchQuery"
+              type="text"
+              placeholder="Adicionar busca manual, ex.: Sony DCR-SR300 NightShot"
+            />
+            <button type="button" class="secondary" id="addManualSearchQuery">Adicionar</button>
+          </div>
+        </div>
+
         <div class="visual-radar-box">
           <div>
             <span class="eyebrow"> RADAR POR IMAGEM </span>
@@ -597,6 +623,51 @@
                 <option value="0.60">60% — parecido</option>
                 <option value="0.75">75% — bem parecido</option>
               </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="visual-radar-box">
+          <div>
+            <span class="eyebrow"> ALERTAS INTELIGENTES </span>
+            <strong>Só interromper quando valer a pena</strong>
+            <small>A atividade completa continua registrada; o badge destaca apenas achados fortes, quedas relevantes e erros.</small>
+          </div>
+
+          <label class="setting-row">
+            <span>
+              <strong>Ativar smart alerts</strong>
+              <small>Cria um alerta prioritário apenas quando o anúncio ultrapassa o score mínimo ou cai bastante de preço.</small>
+            </span>
+            <input type="checkbox" name="smart_alerts_enabled" checked />
+          </label>
+
+          <div class="two-cols">
+            <label>
+              Score mínimo para alertar
+              <input
+                name="alert_min_score"
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value="78"
+              />
+            </label>
+
+            <label>
+              Queda mínima de preço
+              <div class="suffix-input">
+                <input
+                  name="alert_price_drop_percent"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="10"
+                />
+                <span>%</span>
+              </div>
             </label>
           </div>
         </div>

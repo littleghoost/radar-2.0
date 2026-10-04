@@ -1,4 +1,49 @@
-function buildQueryVariants(query, maxVariants = 6) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(
+  url,
+  options = {},
+  attempts = 2,
+) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, options);
+
+      if (
+        attempt < attempts &&
+        [408, 425, 429, 500, 502, 503, 504].includes(
+          response.status,
+        )
+      ) {
+        await response
+          .arrayBuffer()
+          .catch(() => null);
+        await sleep(350 * attempt);
+        continue;
+      }
+
+      return response;
+    } catch (err) {
+      lastError = err;
+
+      if (attempt >= attempts) {
+        throw err;
+      }
+
+      await sleep(350 * attempt);
+    }
+  }
+
+  throw lastError || new Error(
+    "Falha de rede no Mercado Livre.",
+  );
+}
+
+function buildQueryVariants(query, maxVariants = 8) {
   const explicit = String(query || "")
     .split("|")
     .map((part) => part.replace(/\s+/g, " ").trim())
@@ -33,6 +78,42 @@ function buildQueryVariants(query, maxVariants = 6) {
   return [...new Set(variants.filter(Boolean))].slice(0, maxVariants);
 }
 
+function roundRobinUniqueItems(
+  groups,
+  limit = 50,
+) {
+  const output = [];
+  const seen = new Set();
+  const safeGroups = (groups || []).filter(
+    (group) => Array.isArray(group) && group.length,
+  );
+  const maxLength = safeGroups.reduce(
+    (max, group) => Math.max(max, group.length),
+    0,
+  );
+
+  for (
+    let row = 0;
+    row < maxLength && output.length < limit;
+    row += 1
+  ) {
+    for (const group of safeGroups) {
+      const item = group[row];
+      if (!item) continue;
+
+      const key = item.external_id || item.url;
+      if (!key || seen.has(key)) continue;
+
+      seen.add(key);
+      output.push(item);
+
+      if (output.length >= limit) break;
+    }
+  }
+
+  return output;
+}
+
 async function searchCatalogProducts({
   queries,
   accessToken,
@@ -56,7 +137,7 @@ async function searchCatalogProducts({
       let response;
 
       try {
-        response = await fetch(url, {
+        response = await fetchWithRetry(url, {
           headers: {
             Authorization: `Bearer ${accessToken}`,
             accept: "application/json",
@@ -188,7 +269,7 @@ async function searchMercadoLivre({ query, accessToken, limit = 50 }) {
       let response;
 
       try {
-        response = await fetch(url, {
+        response = await fetchWithRetry(url, {
           headers: {
             Authorization: `Bearer ${accessToken}`,
             accept: "application/json",
@@ -248,19 +329,15 @@ async function searchMercadoLivre({ query, accessToken, limit = 50 }) {
     }),
   );
 
-  const deduped = new Map();
+  const itemGroups = settled
+    .filter((result) => result.ok)
+    .map((result) => result.items);
 
-  for (const result of settled) {
-    if (!result.ok) continue;
+  const items = roundRobinUniqueItems(
+    itemGroups,
+    Math.max(Number(limit || 50), 1),
+  );
 
-    for (const item of result.items) {
-      const key = item.external_id || item.url;
-      if (!key || deduped.has(key)) continue;
-      deduped.set(key, item);
-    }
-  }
-
-  const items = [...deduped.values()].slice(0, Number(limit || 50));
   const successful = settled.filter((result) => result.ok);
   const errors = settled
     .filter((result) => !result.ok)
@@ -332,7 +409,7 @@ async function checkMercadoLivreListing({
     };
   }
 
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `https://api.mercadolibre.com/items/${encodeURIComponent(externalId)}`,
     {
       headers: {

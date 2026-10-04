@@ -12,6 +12,9 @@ const {
   getDepopStatus,
 } = require("./services/sources");
 const { createRadarRunner } = require("./services/radarRunner");
+const {
+  createSearchPlanner,
+} = require("./services/searchPlanner");
 const { extractVisualFeatures, downloadImage, visualSimilarity, hybridScore } = require("./services/visualSimilarity");
 const { embedImage, cosineSimilarity: semanticSimilarity, status: semanticStatus, MODEL_ID } = require("./services/semanticVision");
 const { buildPreferenceProfile, preferenceScore, grailScore } = require("./services/preferenceLearning");
@@ -481,6 +484,12 @@ async function saveInternationalCostSettings(input = {}) {
 
   return next;
 }
+
+const searchPlanner = createSearchPlanner({
+  get,
+  all,
+  run,
+});
 
 const radarRunner = createRadarRunner({
   get,
@@ -1076,6 +1085,140 @@ async function autoAssignListing(listing, radars) {
   };
 }
 
+async function createBridgeSmartAlertForNewListing(
+  listing,
+) {
+  if (!listing?.radar_id) return false;
+
+  const radar = await get(
+    "SELECT * FROM radars WHERE id = ?",
+    [listing.radar_id],
+  );
+
+  if (!radar || !Boolean(radar.smart_alerts_enabled ?? 1)) {
+    return false;
+  }
+
+  const criteria = evaluateRadarCriteria(
+    radar,
+    listing,
+  );
+
+  if (criteria.rejected) return false;
+
+  const baseScore = Number(
+    listing.grail_score ??
+      listing.hybrid_score ??
+      listing.rule_score ??
+      0,
+  );
+
+  const rankingScore = blendCriteriaScore(
+    baseScore,
+    criteria,
+    radar,
+  );
+
+  const minScore = Math.max(
+    0,
+    Math.min(
+      100,
+      Number(radar.alert_min_score ?? 78) || 78,
+    ),
+  );
+
+  if (rankingScore < minScore) {
+    return false;
+  }
+
+  await run(
+    `INSERT INTO activity_events
+      (radar_id, listing_id, type, title, detail, metadata_json)
+     VALUES (?, ?, 'smart_alert', ?, ?, ?)`,
+    [
+      radar.id,
+      listing.id,
+      `Achado forte: ${listing.title}`,
+      `${listing.platform} • score ${Math.round(rankingScore)}/100`,
+      JSON.stringify({
+        kind: "high_score_new_listing",
+        score: rankingScore,
+        threshold: minScore,
+        url: listing.url || null,
+        platform: listing.platform || null,
+        captured_by_bridge: true,
+      }),
+    ],
+  );
+
+  return true;
+}
+
+async function createBridgeSmartPriceDropAlert({
+  listing,
+  previousPrice,
+  nextPrice,
+  currency,
+}) {
+  if (
+    !listing?.radar_id ||
+    !Number.isFinite(previousPrice) ||
+    previousPrice <= 0 ||
+    !Number.isFinite(nextPrice)
+  ) {
+    return false;
+  }
+
+  const radar = await get(
+    "SELECT * FROM radars WHERE id = ?",
+    [listing.radar_id],
+  );
+
+  if (!radar || !Boolean(radar.smart_alerts_enabled ?? 1)) {
+    return false;
+  }
+
+  const dropPercent =
+    ((previousPrice - nextPrice) / previousPrice) *
+    100;
+  const threshold = Math.max(
+    0,
+    Math.min(
+      100,
+      Number(radar.alert_price_drop_percent ?? 10) || 10,
+    ),
+  );
+
+  if (dropPercent < threshold) {
+    return false;
+  }
+
+  await run(
+    `INSERT INTO activity_events
+      (radar_id, listing_id, type, title, detail, metadata_json)
+     VALUES (?, ?, 'smart_alert', ?, ?, ?)`,
+    [
+      radar.id,
+      listing.id,
+      `Queda relevante: ${listing.title}`,
+      `${currency} ${previousPrice} → ${currency} ${nextPrice} (-${dropPercent.toFixed(1)}%)`,
+      JSON.stringify({
+        kind: "significant_price_drop",
+        drop_percent: dropPercent,
+        threshold,
+        previous_price: previousPrice,
+        current_price: nextPrice,
+        currency,
+        url: listing.url || null,
+        platform: listing.platform || null,
+        captured_by_bridge: true,
+      }),
+    ],
+  );
+
+  return true;
+}
+
 /* =========================
    HEALTH
 ========================= */
@@ -1173,6 +1316,9 @@ app.post(
         exclude_terms,
         criteria_weight,
         budget_currency,
+        smart_alerts_enabled,
+        alert_min_score,
+        alert_price_drop_percent,
       } = req.body;
 
       if (!name || !query) {
@@ -1199,10 +1345,13 @@ app.post(
           required_terms_json,
           exclude_terms_json,
           criteria_weight,
-          budget_currency
+          budget_currency,
+          smart_alerts_enabled,
+          alert_min_score,
+          alert_price_drop_percent
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
 
         [
@@ -1227,6 +1376,25 @@ app.post(
           )
             ? String(budget_currency || "BRL").toUpperCase()
             : "BRL",
+          smart_alerts_enabled === undefined
+            ? 1
+            : smart_alerts_enabled
+              ? 1
+              : 0,
+          Math.min(
+            100,
+            Math.max(
+              0,
+              Number(alert_min_score ?? 78) || 78,
+            ),
+          ),
+          Math.min(
+            100,
+            Math.max(
+              0,
+              Number(alert_price_drop_percent ?? 10) || 10,
+            ),
+          ),
         ],
       );
 
@@ -1235,6 +1403,8 @@ app.post(
 
         [result.id],
       );
+
+      await searchPlanner.ensurePlan(radar);
 
       res.status(201).json(radar);
     } catch (err) {
@@ -1446,6 +1616,30 @@ app.patch(
           )
             ? String(req.body.budget_currency).toUpperCase()
             : String(radar.budget_currency || "BRL").toUpperCase(),
+        smart_alerts_enabled:
+          req.body.smart_alerts_enabled !== undefined
+            ? Boolean(req.body.smart_alerts_enabled)
+            : Boolean(radar.smart_alerts_enabled),
+        alert_min_score:
+          req.body.alert_min_score !== undefined
+            ? Math.min(
+                100,
+                Math.max(
+                  0,
+                  Number(req.body.alert_min_score) || 78,
+                ),
+              )
+            : Number(radar.alert_min_score ?? 78),
+        alert_price_drop_percent:
+          req.body.alert_price_drop_percent !== undefined
+            ? Math.min(
+                100,
+                Math.max(
+                  0,
+                  Number(req.body.alert_price_drop_percent) || 10,
+                ),
+              )
+            : Number(radar.alert_price_drop_percent ?? 10),
       };
 
       if (!next.name || !next.query) {
@@ -1473,7 +1667,10 @@ app.patch(
           required_terms_json = ?,
           exclude_terms_json = ?,
           criteria_weight = ?,
-          budget_currency = ?
+          budget_currency = ?,
+          smart_alerts_enabled = ?,
+          alert_min_score = ?,
+          alert_price_drop_percent = ?
 
         WHERE id = ?
         `,
@@ -1496,6 +1693,9 @@ app.patch(
           next.exclude_terms_json,
           next.criteria_weight,
           next.budget_currency,
+          next.smart_alerts_enabled ? 1 : 0,
+          next.alert_min_score,
+          next.alert_price_drop_percent,
 
           req.params.id,
         ],
@@ -1510,10 +1710,195 @@ app.patch(
       const criteriaSummary =
         await reapplyCriteriaForRadar(updated);
 
+      const strategyChanged = [
+        "query",
+        "priority_terms",
+        "required_terms",
+      ].some((key) =>
+        Object.prototype.hasOwnProperty.call(
+          req.body || {},
+          key,
+        ),
+      );
+
+      const searchPlan = strategyChanged
+        ? await searchPlanner.regeneratePlan(updated)
+        : await searchPlanner.ensurePlan(updated);
+
       res.json({
         ...updated,
         criteria_summary: criteriaSummary,
+        search_plan_count: searchPlan.length,
       });
+    } catch (err) {
+      res.status(500).json({
+        error: err.message,
+      });
+    }
+  },
+);
+
+/* =========================
+   SEARCH PLANNER
+========================= */
+
+app.get("/api/radars/:id/search-plan", async (req, res) => {
+  try {
+    const radar = await get(
+      "SELECT * FROM radars WHERE id = ?",
+      [req.params.id],
+    );
+
+    if (!radar) {
+      return res.status(404).json({
+        error: "Radar não encontrado.",
+      });
+    }
+
+    const rows = await searchPlanner.ensurePlan(radar);
+    const selected =
+      await searchPlanner.selectedQueries(radar, 8);
+    const selectedIds = new Set(
+      selected.rows.map((row) => Number(row.id)),
+    );
+
+    res.json({
+      radar_id: radar.id,
+      visual_search_active: Boolean(
+        radar.reference_image_path,
+      ),
+      exploration_count:
+        Number(selected.exploration_count || 0),
+      queries: rows.map((row) => ({
+        ...row,
+        next_selected: selectedIds.has(
+          Number(row.id),
+        ),
+      })),
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({
+      error: err.message,
+    });
+  }
+});
+
+app.post(
+  "/api/radars/:id/search-plan/regenerate",
+  async (req, res) => {
+    try {
+      const radar = await get(
+        "SELECT * FROM radars WHERE id = ?",
+        [req.params.id],
+      );
+
+      if (!radar) {
+        return res.status(404).json({
+          error: "Radar não encontrado.",
+        });
+      }
+
+      const rows =
+        await searchPlanner.regeneratePlan(radar);
+
+      res.json({
+        ok: true,
+        radar_id: radar.id,
+        queries: rows,
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({
+        error: err.message,
+      });
+    }
+  },
+);
+
+app.post(
+  "/api/radars/:id/search-plan/query",
+  async (req, res) => {
+    try {
+      const radar = await get(
+        "SELECT id FROM radars WHERE id = ?",
+        [req.params.id],
+      );
+
+      if (!radar) {
+        return res.status(404).json({
+          error: "Radar não encontrado.",
+        });
+      }
+
+      const row = await searchPlanner.addManualQuery(
+        radar.id,
+        req.body?.query,
+      );
+
+      res.status(201).json(row);
+    } catch (err) {
+      res.status(err.status || 500).json({
+        error: err.message,
+      });
+    }
+  },
+);
+
+app.patch(
+  "/api/radars/:id/search-plan/query/:queryId",
+  async (req, res) => {
+    try {
+      const row = await searchPlanner.setQueryState(
+        req.params.id,
+        req.params.queryId,
+        {
+          enabled:
+            req.body?.enabled === undefined
+              ? undefined
+              : Boolean(req.body.enabled),
+          baseWeight: req.body?.base_weight,
+        },
+      );
+
+      res.json(row);
+    } catch (err) {
+      res.status(err.status || 500).json({
+        error: err.message,
+      });
+    }
+  },
+);
+
+app.delete(
+  "/api/radars/:id/search-plan/query/:queryId",
+  async (req, res) => {
+    try {
+      const row = await get(
+        `SELECT *
+         FROM radar_search_queries
+         WHERE id = ? AND radar_id = ?`,
+        [req.params.queryId, req.params.id],
+      );
+
+      if (!row) {
+        return res.status(404).json({
+          error: "Query não encontrada.",
+        });
+      }
+
+      if (row.origin !== "manual") {
+        return res.status(409).json({
+          error:
+            "Queries automáticas podem ser pausadas; só queries manuais podem ser apagadas.",
+        });
+      }
+
+      await run(
+        `DELETE FROM radar_search_queries
+         WHERE id = ? AND radar_id = ?`,
+        [req.params.queryId, req.params.id],
+      );
+
+      res.json({ ok: true });
     } catch (err) {
       res.status(500).json({
         error: err.message,
@@ -1565,6 +1950,11 @@ app.delete(
       if (radar.reference_image_path) {
         await fsp.unlink(radar.reference_image_path).catch(() => {});
       }
+
+      await run(
+        "DELETE FROM radar_search_queries WHERE radar_id = ?",
+        [req.params.id],
+      );
 
       await run(
         "DELETE FROM radars WHERE id = ?",
@@ -1758,8 +2148,7 @@ app.get("/api/activity", async (req, res) => {
 app.get("/api/notifications/summary", async (_req, res) => {
   try {
     const importantTypes = [
-      "new_listing",
-      "price_drop",
+      "smart_alert",
       "listing_unavailable",
       "source_error",
       "run_failed",
@@ -1769,8 +2158,21 @@ app.get("/api/notifications/summary", async (_req, res) => {
     const summary = await get(
       `SELECT
          COUNT(*) AS unseen_total,
-         SUM(CASE WHEN type = 'new_listing' THEN 1 ELSE 0 END) AS new_listings,
-         SUM(CASE WHEN type = 'price_drop' THEN 1 ELSE 0 END) AS price_drops,
+         SUM(CASE WHEN type = 'smart_alert' THEN 1 ELSE 0 END) AS smart_alerts,
+         SUM(
+           CASE
+             WHEN type = 'smart_alert'
+              AND metadata_json LIKE '%"kind":"high_score_new_listing"%'
+             THEN 1 ELSE 0
+           END
+         ) AS new_listings,
+         SUM(
+           CASE
+             WHEN type = 'smart_alert'
+              AND metadata_json LIKE '%"kind":"significant_price_drop"%'
+             THEN 1 ELSE 0
+           END
+         ) AS price_drops,
          SUM(CASE WHEN type = 'listing_unavailable' THEN 1 ELSE 0 END) AS unavailable,
          SUM(CASE WHEN type IN ('source_error', 'run_failed') THEN 1 ELSE 0 END) AS errors
        FROM activity_events
@@ -1780,6 +2182,7 @@ app.get("/api/notifications/summary", async (_req, res) => {
 
     res.json({
       unseen_total: Number(summary?.unseen_total || 0),
+      smart_alerts: Number(summary?.smart_alerts || 0),
       new_listings: Number(summary?.new_listings || 0),
       price_drops: Number(summary?.price_drops || 0),
       unavailable: Number(summary?.unavailable || 0),
@@ -1796,7 +2199,7 @@ app.post("/api/notifications/mark-seen", async (_req, res) => {
       `UPDATE activity_events
        SET seen = 1
        WHERE seen = 0
-         AND type IN ('new_listing', 'price_drop', 'listing_unavailable', 'source_error', 'run_failed')`,
+         AND type IN ('smart_alert', 'listing_unavailable', 'source_error', 'run_failed')`,
     );
 
     res.json({ ok: true, marked: result.changes });
@@ -2711,6 +3114,16 @@ app.post("/api/import/assisted", async (req, res) => {
                 }),
               ],
             );
+
+            if (isAutoCapture) {
+              await createBridgeSmartPriceDropAlert({
+                listing: refreshed,
+                previousPrice,
+                nextPrice,
+                currency,
+              });
+            }
+
             summary.price_drops += 1;
           }
 
@@ -2815,6 +3228,10 @@ app.post("/api/import/assisted", async (req, res) => {
                 auto_assigned: Boolean(listing.radar_id),
               }),
             ],
+          );
+
+          await createBridgeSmartAlertForNewListing(
+            listing,
           );
         }
 

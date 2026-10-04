@@ -7,6 +7,9 @@ const {
   evaluateRadarCriteria,
   blendCriteriaScore,
 } = require('./radarCriteria');
+const {
+  createSearchPlanner,
+} = require("./searchPlanner");
 
 
 async function mapWithConcurrency(items, limit, mapper) {
@@ -46,6 +49,143 @@ function createRadarRunner({
   getValidMercadoLivreConnection,
   getInternationalCostSettings,
 }) {
+  const searchPlanner = createSearchPlanner({
+    get,
+    all,
+    run,
+  });
+
+  function radarAlertConfig(radar = {}) {
+    return {
+      enabled: Boolean(
+        radar.smart_alerts_enabled ?? 1,
+      ),
+      minScore: Math.max(
+        0,
+        Math.min(
+          100,
+          Number(radar.alert_min_score ?? 78) || 78,
+        ),
+      ),
+      minPriceDropPercent: Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            radar.alert_price_drop_percent ?? 10,
+          ) || 10,
+        ),
+      ),
+    };
+  }
+
+  function itemRankingScore(item = {}) {
+    return Number(
+      item.ranking_score ??
+        item.grail_score ??
+        item.hybrid_score ??
+        item.rule_score ??
+        0,
+    );
+  }
+
+  async function createSmartNewListingAlert({
+    radar,
+    runId,
+    listingId,
+    item,
+  }) {
+    const config = radarAlertConfig(radar);
+    const score = itemRankingScore(item);
+
+    if (!config.enabled || score < config.minScore) {
+      return false;
+    }
+
+    await run(
+      `INSERT INTO activity_events
+        (radar_id, run_id, listing_id, type, title, detail, metadata_json)
+       VALUES (?, ?, ?, 'smart_alert', ?, ?, ?)`,
+      [
+        radar.id,
+        runId,
+        listingId,
+        `Achado forte: ${item.title}`,
+        `${item.platform} • score ${Math.round(score)}/100`,
+        JSON.stringify({
+          kind: "high_score_new_listing",
+          score,
+          threshold: config.minScore,
+          url: item.url || null,
+          platform: item.platform || null,
+          currency: item.currency || null,
+          price: item.price ?? null,
+          rule_tier: item.rule_tier || null,
+          search_query: item.search_query || null,
+        }),
+      ],
+    );
+
+    return true;
+  }
+
+  async function createSmartPriceDropAlert({
+    radar,
+    runId,
+    listingId,
+    title,
+    platform,
+    url,
+    previousPrice,
+    nextPrice,
+    currency,
+  }) {
+    const config = radarAlertConfig(radar);
+
+    if (
+      !config.enabled ||
+      !Number.isFinite(previousPrice) ||
+      previousPrice <= 0 ||
+      !Number.isFinite(nextPrice)
+    ) {
+      return false;
+    }
+
+    const dropPercent =
+      ((previousPrice - nextPrice) / previousPrice) *
+      100;
+
+    if (dropPercent < config.minPriceDropPercent) {
+      return false;
+    }
+
+    await run(
+      `INSERT INTO activity_events
+        (radar_id, run_id, listing_id, type, title, detail, metadata_json)
+       VALUES (?, ?, ?, 'smart_alert', ?, ?, ?)`,
+      [
+        radar.id,
+        runId,
+        listingId,
+        `Queda relevante: ${title}`,
+        `${currency} ${previousPrice} → ${currency} ${nextPrice} (-${dropPercent.toFixed(1)}%)`,
+        JSON.stringify({
+          kind: "significant_price_drop",
+          drop_percent: dropPercent,
+          threshold:
+            config.minPriceDropPercent,
+          previous_price: previousPrice,
+          current_price: nextPrice,
+          currency,
+          url: url || null,
+          platform: platform || null,
+        }),
+      ],
+    );
+
+    return true;
+  }
+
   async function verifyKnownListings({
     radar,
     runId,
@@ -206,6 +346,18 @@ function createRadarRunner({
             }),
           ],
         );
+        await createSmartPriceDropAlert({
+          radar,
+          runId,
+          listingId: listing.id,
+          title: listing.title,
+          platform: listing.platform,
+          url: listing.url,
+          previousPrice,
+          nextPrice,
+          currency: verifiedCurrency,
+        });
+
         priceDrops += 1;
       }
 
@@ -335,8 +487,14 @@ function createRadarRunner({
           referenceImageBuffer = null;
         }
       }
+
+      const plannedSearch = await searchPlanner.selectedQueries(
+        radar,
+        8,
+      );
+
       const sourceRuns = await searchAllSources({
-        query: radar.query,
+        query: plannedSearch.query || radar.query,
         referenceImageBuffer,
         mercadoLivreAccessToken:
           mlConnection?.status === 'connected' ? mlConnection.access_token : null,
@@ -596,6 +754,22 @@ function createRadarRunner({
         };
       });
 
+      const plannerCanLearn = sourceRuns.some(
+        (source) =>
+          source.ok &&
+          ["ebay", "mercadolivre"].includes(
+            source.source,
+          ),
+      );
+
+      if (plannerCanLearn) {
+        await searchPlanner.recordPerformance(
+          radar.id,
+          plannedSearch.rows,
+          results,
+        );
+      }
+
       const criteriaRejected = results.filter(
         (item) => Boolean(item.rule_rejected),
       ).length;
@@ -704,6 +878,14 @@ function createRadarRunner({
               JSON.stringify({ url: item.url, platform: item.platform, visual_score: item.visual_score, semantic_score: item.semantic_score, hybrid_score: item.hybrid_score, preference_score: item.preference_score, grail_score: item.grail_score }),
             ],
           );
+
+          await createSmartNewListingAlert({
+            radar,
+            runId: runRecord.id,
+            listingId: insert.id,
+            item,
+          });
+
           added += 1;
           continue;
         }
@@ -811,6 +993,18 @@ function createRadarRunner({
               }),
             ],
           );
+          await createSmartPriceDropAlert({
+            radar,
+            runId: runRecord.id,
+            listingId: existing.id,
+            title: item.title,
+            platform: item.platform,
+            url: item.url,
+            previousPrice,
+            nextPrice,
+            currency,
+          });
+
           priceDrops += 1;
         }
 

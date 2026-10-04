@@ -50,6 +50,9 @@ db.serialize(() => {
       exclude_terms_json TEXT DEFAULT '[]',
       criteria_weight INTEGER DEFAULT 65,
       budget_currency TEXT DEFAULT 'BRL',
+      smart_alerts_enabled INTEGER DEFAULT 1,
+      alert_min_score INTEGER DEFAULT 78,
+      alert_price_drop_percent REAL DEFAULT 10,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -125,6 +128,15 @@ db.serialize(() => {
       }
       if (!names.has("budget_currency")) {
         db.run("ALTER TABLE radars ADD COLUMN budget_currency TEXT DEFAULT 'BRL'");
+      }
+      if (!names.has("smart_alerts_enabled")) {
+        db.run("ALTER TABLE radars ADD COLUMN smart_alerts_enabled INTEGER DEFAULT 1");
+      }
+      if (!names.has("alert_min_score")) {
+        db.run("ALTER TABLE radars ADD COLUMN alert_min_score INTEGER DEFAULT 78");
+      }
+      if (!names.has("alert_price_drop_percent")) {
+        db.run("ALTER TABLE radars ADD COLUMN alert_price_drop_percent REAL DEFAULT 10");
       }
     },
   );
@@ -254,6 +266,35 @@ db.serialize(() => {
       last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(radar_id, source_key, external_id)
     )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS radar_search_queries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      radar_id INTEGER NOT NULL,
+      query_text TEXT NOT NULL,
+      normalized_query TEXT NOT NULL,
+      origin TEXT DEFAULT 'generated',
+      enabled INTEGER DEFAULT 1,
+      base_weight INTEGER DEFAULT 70,
+      runs INTEGER DEFAULT 0,
+      results_found INTEGER DEFAULT 0,
+      qualified_found INTEGER DEFAULT 0,
+      rejected_found INTEGER DEFAULT 0,
+      last_results_found INTEGER DEFAULT 0,
+      last_qualified_found INTEGER DEFAULT 0,
+      performance_score INTEGER DEFAULT 50,
+      last_run_at DATETIME,
+      last_result_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(radar_id, normalized_query)
+    )
+  `);
+
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_radar_search_queries_radar
+    ON radar_search_queries(radar_id, enabled, performance_score)
   `);
 
   /* =========================
