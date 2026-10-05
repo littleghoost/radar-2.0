@@ -328,11 +328,15 @@ function delay(ms) {
 }
 
 async function collectFromAutoBrowseTab(tabId) {
-  await delay(2200);
+  // Marketplaces renderizam os cards depois do evento load. Em vez de
+  // assumir que a primeira resposta vazia significa “sem resultados”,
+  // damos tempo para a listagem hidratar e repetimos a leitura.
+  await delay(1800);
 
   let lastError = null;
+  let lastCapture = null;
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
       const response = await chrome.tabs.sendMessage(
         tabId,
@@ -343,18 +347,28 @@ async function collectFromAutoBrowseTab(tabId) {
       );
 
       if (response?.capture) {
-        return response.capture;
-      }
+        lastCapture = response.capture;
 
-      lastError = new Error(
-        response?.error ||
-          'Collector não respondeu.',
-      );
+        if (lastCapture.items?.length) {
+          return lastCapture;
+        }
+      } else {
+        lastError = new Error(
+          response?.error ||
+            'Collector não respondeu.',
+        );
+      }
     } catch (error) {
       lastError = error;
     }
 
-    await delay(1400);
+    // Backoff curto: até ~13 s extras para páginas client-side.
+    await delay(1400 + attempt * 300);
+  }
+
+  // Uma captura vazia válida é diferente de falha do collector.
+  if (lastCapture) {
+    return lastCapture;
   }
 
   throw lastError ||
@@ -391,6 +405,7 @@ async function runAutoBrowseJob(job) {
       price_drops:
         result?.result?.price_drops || 0,
       error: result?.error || null,
+      diagnostics: capture?.diagnostics || null,
     };
   } finally {
     if (tab?.id) {
@@ -414,6 +429,22 @@ async function processAutoBrowseTick() {
 
   try {
     await ensureDefaults();
+
+    // Não consome a fila se o Desktop estiver offline. Sem o backend,
+    // a busca até pode abrir, mas nenhum resultado pode ser persistido.
+    try {
+      await radarApi('/api/health');
+    } catch (error) {
+      await chrome.storage.local.set({
+        lastAutoBrowseAt: new Date().toISOString(),
+        lastAutoBrowseError: 'Radar Desktop offline. Fila preservada.',
+      });
+      return {
+        ok: false,
+        skipped: true,
+        reason: 'radar_offline',
+      };
+    }
 
     const stored = await chrome.storage.local.get({
       autoBrowseEnabled: false,
@@ -502,6 +533,8 @@ async function processAutoBrowseTick() {
         queue.length,
       lastAutoBrowseError:
         result.error || null,
+      lastAutoBrowseDiagnostics:
+        result.diagnostics || null,
       lastAutoBrowseStatus:
         result.ok
           ? `${job.source} • ${job.query}`

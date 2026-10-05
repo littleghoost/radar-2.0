@@ -1,12 +1,23 @@
 {
   "manifest_version": 3,
   "name": "Radar 2.0 Bridge",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Sincroniza anúncios visíveis com a Inbox inteligente do Radar 2.0.",
-  "permissions": ["activeTab", "scripting", "storage", "notifications", "alarms"],
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "notifications",
+    "alarms"
+  ],
   "host_permissions": [
     "http://127.0.0.1:3130/*",
-    "http://localhost:3130/*"
+    "http://localhost:3130/*",
+    "*://*.olx.com.br/*",
+    "*://*.enjoei.com.br/*",
+    "*://*.mercadolivre.com.br/*",
+    "*://*.mercadolibre.com/*",
+    "*://*.depop.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -23,7 +34,9 @@
         "*://*.ebay.com/*",
         "*://*.depop.com/*"
       ],
-      "js": ["collector.js"],
+      "js": [
+        "collector.js"
+      ],
       "run_at": "document_idle"
     }
   ],

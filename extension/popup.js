@@ -116,6 +116,7 @@ async function loadAutoBrowseState() {
     lastAutoBrowseRemaining: 0,
     lastAutoBrowseError: null,
     lastAutoBrowseStatus: null,
+    lastAutoBrowseDiagnostics: null,
   });
 
   const checkbox = $('#autoBrowseEnabled');
@@ -160,12 +161,21 @@ async function loadAutoBrowseState() {
       minute: '2-digit',
     });
 
+    const d = stored.lastAutoBrowseDiagnostics || {};
+    const diagnosticText =
+      Number(stored.lastAutoBrowseCount || 0) === 0 &&
+      Object.keys(d).length
+        ? ` • diag URLs ${d.listingUrls ?? '?'} → válidas ${d.passedUrl ?? '?'} → cards ${d.passedVisible ?? '?'} → img ${d.passedImage ?? '?'} → texto ${d.passedText ?? '?'} → título ${d.passedTitle ?? '?'}`
+        : '';
+
+    const bridgeVersion = chrome.runtime.getManifest().version;
+
     status.textContent =
-      `Ligado • ${stored.lastAutoBrowseStatus || 'aguardando'} • ` +
+      `Ligado [v${bridgeVersion}] • ${stored.lastAutoBrowseStatus || 'aguardando'} • ` +
       `${stored.lastAutoBrowseCount || 0} lidos • ` +
       `${stored.lastAutoBrowseImported || 0} novos • ` +
       `${stored.lastAutoBrowseUpdated || 0} atualizados • ` +
-      `fila ${queueCount} • ${time}`;
+      `fila ${queueCount} • ${time}${diagnosticText}`;
     return;
   }
 
