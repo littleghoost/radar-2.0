@@ -406,6 +406,7 @@ async function runAutoBrowseJob(job) {
         result?.result?.price_drops || 0,
       error: result?.error || null,
       diagnostics: capture?.diagnostics || null,
+      source_url: capture?.source_url || job.url,
     };
   } finally {
     if (tab?.id) {
@@ -535,6 +536,8 @@ async function processAutoBrowseTick() {
         result.error || null,
       lastAutoBrowseDiagnostics:
         result.diagnostics || null,
+      lastAutoBrowseSourceUrl:
+        result.source_url || job.url || null,
       lastAutoBrowseStatus:
         result.ok
           ? `${job.source} • ${job.query}`

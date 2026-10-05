@@ -14,18 +14,39 @@ async function radarApi(path, options = {}) {
 }
 
 async function loadRadarStatus() {
-  try {
-    await radarApi('/api/health');
-    $('#statusDot').className = 'dot online';
-    $('#offlineCard').hidden = true;
-    $('#mainCard').hidden = false;
-    await loadRadars();
-    await loadAutoCaptureState();
-    await loadAutoBrowseState();
-  } catch {
+  let healthError = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await radarApi('/api/health');
+      healthError = null;
+      break;
+    } catch (error) {
+      healthError = error;
+      await new Promise((resolve) => setTimeout(resolve, 250 + attempt * 250));
+    }
+  }
+
+  if (healthError) {
     $('#statusDot').className = 'dot offline';
     $('#offlineCard').hidden = false;
     $('#mainCard').hidden = true;
+    return;
+  }
+
+  $('#statusDot').className = 'dot online';
+  $('#offlineCard').hidden = true;
+  $('#mainCard').hidden = false;
+
+  const results = await Promise.allSettled([
+    loadRadars(),
+    loadAutoCaptureState(),
+    loadAutoBrowseState(),
+  ]);
+
+  const failed = results.find((result) => result.status === 'rejected');
+  if (failed) {
+    console.warn('Radar conectado, mas parte do popup falhou:', failed.reason);
   }
 }
 
@@ -117,6 +138,7 @@ async function loadAutoBrowseState() {
     lastAutoBrowseError: null,
     lastAutoBrowseStatus: null,
     lastAutoBrowseDiagnostics: null,
+    lastAutoBrowseSourceUrl: null,
   });
 
   const checkbox = $('#autoBrowseEnabled');
@@ -165,7 +187,7 @@ async function loadAutoBrowseState() {
     const diagnosticText =
       Number(stored.lastAutoBrowseCount || 0) === 0 &&
       Object.keys(d).length
-        ? ` • diag URLs ${d.listingUrls ?? '?'} → válidas ${d.passedUrl ?? '?'} → cards ${d.passedVisible ?? '?'} → img ${d.passedImage ?? '?'} → texto ${d.passedText ?? '?'} → título ${d.passedTitle ?? '?'}`
+        ? ` • diag links ${d.anchors ?? '?'} • URLs anúncio ${d.listingUrls ?? '?'} → válidas ${d.passedUrl ?? '?'} → cards ${d.passedVisible ?? '?'} → img ${d.passedImage ?? '?'} → texto ${d.passedText ?? '?'} → título ${d.passedTitle ?? '?'} • imgs pág ${d.images ?? '?'} • preços ${d.priceTexts ?? '?'}`
         : '';
 
     const bridgeVersion = chrome.runtime.getManifest().version;
