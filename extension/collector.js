@@ -99,7 +99,9 @@
       }
 
       if (platform === 'Enjoei') {
-        const match = path.match(/\/p\/[^/?#]*-(\d{6,})(?:\/)?$/i);
+        const match =
+          path.match(/\/p\/[^/?#]*-(\d{6,})(?:\/)?$/i) ||
+          path.match(/(?:^|[-/])(\d{6,})(?:\/)?$/i);
         return match ? `enjoei:${match[1]}` : cleanUrl(u.href);
       }
 
@@ -276,6 +278,94 @@
     } catch { return false; }
   }
 
+  function collectEnjoeiProductCards(limit, diagnostics) {
+    const cards = [...document.querySelectorAll('.c-product-card')];
+    diagnostics.enjoeiCards = cards.length;
+
+    const seen = new Set();
+    const items = [];
+
+    for (const card of cards) {
+      if (items.length >= limit) break;
+
+      const links = [
+        ...(card.matches?.('a[href]') ? [card] : []),
+        ...card.querySelectorAll('a[href]'),
+      ];
+
+      const anchor =
+        links.find((link) => link.querySelector?.('img')) ||
+        links.find((link) => link.querySelector?.('h1,h2,h3,h4,h5,h6,[role="heading"]')) ||
+        links[0];
+
+      if (!anchor) continue;
+
+      const rawUrl = absoluteUrl(anchor.getAttribute('href'));
+      const url = rawUrl ? cleanUrl(rawUrl) : null;
+      if (!url || !/^https?:/i.test(url)) continue;
+
+      try {
+        const host = new URL(url).hostname.toLowerCase();
+        if (!host.endsWith('enjoei.com.br')) continue;
+      } catch {
+        continue;
+      }
+
+      const identity = listingIdentity(url, 'Enjoei');
+      if (!identity || seen.has(identity)) continue;
+      diagnostics.passedUrl += 1;
+
+      const rect = card.getBoundingClientRect?.();
+      if (rect && rect.width === 0 && rect.height === 0) continue;
+      diagnostics.passedVisible += 1;
+
+      const image = card.querySelector('img') || anchor.querySelector?.('img');
+      if (!image) continue;
+      diagnostics.passedImage += 1;
+
+      const text = String(card.innerText || anchor.innerText || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (text.length < 8 || !/R\$\s*\d/.test(text)) continue;
+      diagnostics.passedText += 1;
+
+      const heading = card.querySelector('h1,h2,h3,h4,h5,h6,[role="heading"]');
+      let title = String(
+        heading?.innerText ||
+          image.alt ||
+          anchor.getAttribute('title') ||
+          anchor.innerText ||
+          text,
+      )
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (title.length > 180) title = title.slice(0, 180);
+      if (title.length < 3) continue;
+      diagnostics.passedTitle += 1;
+
+      const { price, currency } = parsePrice(text);
+      const imageUrl = absoluteUrl(
+        image.currentSrc ||
+          image.src ||
+          image.getAttribute('data-src') ||
+          image.getAttribute('data-lazy-src'),
+      );
+
+      seen.add(identity);
+      items.push({
+        title,
+        platform: 'Enjoei',
+        url,
+        image_url: imageUrl,
+        current_price: price,
+        currency,
+      });
+    }
+
+    return items;
+  }
+
   function collectVisibleListings(limit = 100) {
     const platform = detectPlatform(location.hostname);
     const anchors = [...document.querySelectorAll('a[href]')];
@@ -293,6 +383,20 @@
     };
     const seen = new Set();
     const items = [];
+
+    if (platform === 'Enjoei') {
+      const enjoeiItems = collectEnjoeiProductCards(limit, diagnostics);
+      if (enjoeiItems.length) {
+        return {
+          version: 6,
+          source_url: location.href,
+          platform,
+          captured_at: new Date().toISOString(),
+          items: enjoeiItems,
+          diagnostics,
+        };
+      }
+    }
 
     for (const anchor of anchors) {
       if (items.length >= limit) break;
@@ -353,7 +457,7 @@
     }
 
     return {
-      version: 5,
+      version: 6,
       source_url: location.href,
       platform,
       captured_at: new Date().toISOString(),
