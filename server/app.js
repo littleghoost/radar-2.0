@@ -5,6 +5,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const { spawn } = require("child_process");
 const db = require("./database");
+const { registerMobileRelay } = require("./mobileRelay");
 const {
   getEbayStatus,
   validateEbayCredentials,
@@ -37,6 +38,8 @@ fs.mkdirSync(IMAGE_DIR, { recursive: true });
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+registerMobileRelay(app, db);
 
 function parseCookies(req) {
   const header = req.headers.cookie || "";
