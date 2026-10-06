@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d10">
+  <link rel="stylesheet" href="./mobile.css">
+  <title>Parear • Radar 2.0 Mobile</title>
+</head>
+<body>
+  <main class="pair-shell">
+    <section class="pair-card card">
+      <span class="eyebrow">RADAR 2.0</span>
+      <h1>Parear celular</h1>
+      <p id="pairMessage">Este link conecta seu celular ao Radar Desktop.</p>
+
+      <label>
+        Nome deste aparelho
+        <input id="deviceLabel" maxlength="80" value="Meu celular" autocomplete="off">
+      </label>
+
+      <button id="pairButton" class="primary" type="button">Conectar ao Radar</button>
+      <button id="cancelButton" class="ghost wide" type="button">Cancelar</button>
+
+      <small id="pairHint">O código expira em poucos minutos e só pode ser usado uma vez.</small>
+    </section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.hash.replace(/^#/, ""));
+    const pairingId = params.get("id") || "";
+    const pairingSecret = params.get("secret") || "";
+    const relayUrl = location.origin;
+    const button = document.getElementById("pairButton");
+    const message = document.getElementById("pairMessage");
+
+    function fail(text) {
+      message.textContent = text;
+      button.disabled = false;
+      button.textContent = "Tentar novamente";
+    }
+
+    if (!pairingId || !pairingSecret) {
+      fail("Este link de pareamento está incompleto.");
+      button.disabled = true;
+    }
+
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = "Conectando…";
+
+      try {
+        const response = await fetch(
+          relayUrl + "/bridge/mobile/pair/" + encodeURIComponent(pairingId) + "/claim",
+          {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+              pairing_secret: pairingSecret,
+              label: document.getElementById("deviceLabel").value.trim() || "Meu celular",
+            }),
+          },
+        );
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || "Não foi possível parear.");
+        }
+
+        localStorage.setItem("radarMobileMode", "relay");
+        localStorage.setItem("radarMobileRelayUrl", data.relay_url || relayUrl);
+        localStorage.setItem("radarMobileId", data.mobile_id);
+        localStorage.setItem("radarMobileKey", data.mobile_key);
+        localStorage.setItem("radarMobileDesktopId", data.desktop_id || "");
+
+        message.textContent = "Celular conectado. Abrindo o Radar…";
+        history.replaceState(null, "", location.pathname);
+        setTimeout(() => location.replace("./"), 450);
+      } catch (error) {
+        fail(error.message);
+      }
+    });
+
+    document.getElementById("cancelButton").addEventListener("click", () => {
+      location.replace("./");
+    });
+  </script>
+</body>
+</html>
