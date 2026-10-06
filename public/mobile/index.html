@@ -75,13 +75,29 @@
       <section class="section setup card" id="setupCard">
         <span class="eyebrow">CONEXÃO</span>
         <h2>Radar Desktop</h2>
-        <p>Esta primeira versão usa o mesmo backend do Radar. Quando o celular e o PC estiverem na mesma rede, abra no celular o endereço mostrado pelo Desktop.</p>
-        <label>
-          Endereço do Radar
-          <input id="baseUrlInput" inputmode="url" autocomplete="url" placeholder="http://192.168.0.10:3130">
-        </label>
-        <button class="primary" id="saveConnectionButton" type="button">Salvar e conectar</button>
-        <small>Na próxima etapa, esse preenchimento vira pareamento por QR Code.</small>
+
+        <div id="relayPanel" hidden>
+          <p>Este celular está pareado pelo Relay. Você pode ver o último snapshot e deixar comandos na fila mesmo quando o notebook estiver offline.</p>
+          <div class="relay-status-row">
+            <span>Modo</span>
+            <strong>Relay seguro</strong>
+          </div>
+          <div class="relay-status-row">
+            <span>Desktop</span>
+            <strong id="pairedDesktopLabel">Radar Desktop</strong>
+          </div>
+          <button class="ghost wide danger-ghost" id="unlinkButton" type="button">Desvincular este celular</button>
+        </div>
+
+        <div id="localPanel">
+          <p>Sem pareamento, o celular pode acessar o Radar diretamente quando estiver na mesma rede do PC.</p>
+          <label>
+            Endereço do Radar
+            <input id="baseUrlInput" inputmode="url" autocomplete="url" placeholder="http://192.168.0.10:3130">
+          </label>
+          <button class="primary" id="saveConnectionButton" type="button">Salvar e conectar</button>
+          <small>Quando o Desktop gerar o link/QR de pareamento, este modo será trocado automaticamente pelo Relay.</small>
+        </div>
       </section>
     </main>
 
