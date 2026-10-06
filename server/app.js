@@ -13,6 +13,7 @@ const {
   getDepopStatus,
 } = require("./services/sources");
 const { createRadarRunner } = require("./services/radarRunner");
+const { createMobileDesktopSync } = require("./services/mobileDesktopSync");
 const {
   createSearchPlanner,
 } = require("./services/searchPlanner");
@@ -500,6 +501,11 @@ const radarRunner = createRadarRunner({
   run,
   getValidMercadoLivreConnection,
   getInternationalCostSettings,
+});
+
+const mobileDesktopSync = createMobileDesktopSync({
+  db,
+  radarRunner,
 });
 
 async function scoreListingForRadar({
@@ -5080,6 +5086,106 @@ app.delete(
 );
 
 /* =========================
+   MOBILE / RELAY
+========================= */
+
+app.get("/api/mobile/status", async (_req, res) => {
+  try {
+    res.json(await mobileDesktopSync.status());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/mobile/pairing", async (_req, res) => {
+  try {
+    if (process.env.RADAR_DESKTOP !== "1") {
+      return res.status(409).json({
+        error: "Pareamento mobile só está disponível no Radar Desktop.",
+      });
+    }
+
+    const result = await mobileDesktopSync.createPairing();
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.get("/api/mobile/pairing/:id", async (req, res) => {
+  try {
+    if (process.env.RADAR_DESKTOP !== "1") {
+      return res.status(409).json({
+        error: "Pareamento mobile só está disponível no Radar Desktop.",
+      });
+    }
+
+    res.json(
+      await mobileDesktopSync.pairingStatus(
+        String(req.params.id || ""),
+      ),
+    );
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.get("/api/mobile/devices", async (_req, res) => {
+  try {
+    if (process.env.RADAR_DESKTOP !== "1") {
+      return res.json([]);
+    }
+
+    res.json(await mobileDesktopSync.listDevices());
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post("/api/mobile/devices/:id/revoke", async (req, res) => {
+  try {
+    if (process.env.RADAR_DESKTOP !== "1") {
+      return res.status(409).json({
+        error: "Gerenciamento mobile só está disponível no Radar Desktop.",
+      });
+    }
+
+    res.json(
+      await mobileDesktopSync.revokeDevice(
+        String(req.params.id || ""),
+      ),
+    );
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post("/api/mobile/sync-now", async (_req, res) => {
+  try {
+    if (process.env.RADAR_DESKTOP !== "1") {
+      return res.status(409).json({
+        error: "Sincronização mobile só está disponível no Radar Desktop.",
+      });
+    }
+
+    const [snapshot, commands] = await Promise.all([
+      mobileDesktopSync.syncSnapshot(),
+      mobileDesktopSync.pollCommands(),
+    ]);
+
+    res.json({
+      ok: true,
+      snapshot,
+      commands_processed: Array.isArray(commands)
+        ? commands.length
+        : 0,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+/* =========================
    SITE
 ========================= */
 
@@ -5096,5 +5202,6 @@ app.listen(
 
   () => {
     console.log(`Radar 2.0 rodando em http://localhost:${PORT}`);
+    mobileDesktopSync.start();
   },
 );
