@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0d10">
+  <title>Conectar celular • Radar 2.0</title>
+  <style>
+    :root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b0d10;color:#f4f7fb}
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(circle at top right,rgba(115,247,162,.08),transparent 34rem),#0b0d10;min-height:100vh}
+    main{width:min(860px,calc(100% - 32px));margin:0 auto;padding:42px 0 72px}
+    .top{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:24px}
+    .eyebrow{font-size:11px;letter-spacing:.2em;color:#8f9aa7;font-weight:800}
+    h1,h2,h3,p{margin:0}
+    h1{font-size:34px;margin-top:6px}
+    h2{font-size:20px}
+    .back{color:#8f9aa7;text-decoration:none;border:1px solid rgba(255,255,255,.08);padding:10px 13px;border-radius:12px}
+    .grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}
+    .card{border:1px solid rgba(255,255,255,.08);border-radius:20px;background:linear-gradient(180deg,#171c22,#11151a);padding:20px}
+    .lead{color:#8f9aa7;font-size:13px;line-height:1.55;margin-top:9px}
+    button,input{font:inherit}
+    button{border:0;border-radius:13px;font-weight:850;cursor:pointer}
+    .primary{width:100%;padding:14px;background:#f4f7fb;color:#0b0d10;margin-top:18px}
+    .ghost{padding:10px 12px;background:#20262e;color:#f4f7fb}
+    .danger{color:#ff98a2;background:rgba(255,111,125,.08)}
+    .status-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid rgba(255,255,255,.07)}
+    .status-row:first-of-type{margin-top:12px}
+    .status-row span{font-size:12px;color:#8f9aa7}
+    .status-row strong{font-size:12px;text-align:right}
+    .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#ff6f7d;margin-right:7px}
+    .dot.on{background:#73f7a2}
+    .pair-box{margin-top:16px;padding:14px;border-radius:15px;background:#0d1115;border:1px solid rgba(115,247,162,.18)}
+    .pair-box[hidden]{display:none}
+    .pair-box label{display:block;color:#8f9aa7;font-size:11px;margin-bottom:6px}
+    .pair-url{display:flex;gap:8px}
+    .pair-url input{min-width:0;flex:1;background:#090c0f;color:#f4f7fb;border:1px solid rgba(255,255,255,.08);border-radius:11px;padding:11px}
+    .expires{font-size:11px;color:#8f9aa7;margin-top:9px}
+    .device-list{display:grid;gap:8px;margin-top:14px}
+    .device{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px;border-radius:14px;background:#0e1216;border:1px solid rgba(255,255,255,.06)}
+    .device strong{display:block;font-size:13px}
+    .device small{display:block;color:#8f9aa7;margin-top:3px}
+    .empty{color:#8f9aa7;font-size:12px;padding:18px 0}
+    .hint{margin-top:16px;font-size:11px;color:#8f9aa7;line-height:1.55}
+    @media(max-width:720px){.grid{grid-template-columns:1fr}.top{align-items:flex-start}.top h1{font-size:28px}}
+  </style>
+</head>
+<body>
+  <main>
+    <header class="top">
+      <div>
+        <span class="eyebrow">RADAR 2.0</span>
+        <h1>Conectar celular</h1>
+      </div>
+      <a class="back" href="/">Voltar ao Radar</a>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <span class="eyebrow">PAREAMENTO</span>
+        <h2>Radar Mobile</h2>
+        <p class="lead">Gere um link temporário. Ele expira em 10 minutos e só pode conectar um aparelho.</p>
+
+        <div class="status-row">
+          <span>Relay</span>
+          <strong id="relayStatus"><i class="dot"></i> verificando</strong>
+        </div>
+        <div class="status-row">
+          <span>Último snapshot</span>
+          <strong id="snapshotStatus">—</strong>
+        </div>
+
+        <button id="pairButton" class="primary" type="button">Gerar novo pareamento</button>
+
+        <div id="pairBox" class="pair-box" hidden>
+          <label>Link de uso único</label>
+          <div class="pair-url">
+            <input id="pairUrl" readonly>
+            <button id="copyButton" class="ghost" type="button">Copiar</button>
+          </div>
+          <div class="expires" id="pairExpiry">Expira em 10 minutos.</div>
+        </div>
+
+        <p class="hint">Por enquanto você envia esse link para o celular. A próxima revisão desenha o mesmo link como QR Code local, sem mandar a chave de pareamento para serviços externos.</p>
+      </section>
+
+      <section class="card">
+        <span class="eyebrow">DISPOSITIVOS</span>
+        <h2>Celulares conectados</h2>
+        <div id="deviceList" class="device-list">
+          <div class="empty">Carregando…</div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.headers || {}),
+        },
+        ...options,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || `Radar respondeu ${response.status}`);
+      }
+      return data;
+    }
+
+    function dateText(value) {
+      if (!value) return "ainda não sincronizado";
+      try {
+        return new Date(value).toLocaleString("pt-BR");
+      } catch {
+        return String(value);
+      }
+    }
+
+    async function loadStatus() {
+      try {
+        const status = await api("/api/mobile/status");
+        const relay = $("#relayStatus");
+        relay.innerHTML = `<i class="dot ${status.relay_ok ? "on" : ""}"></i>${status.relay_ok ? "conectado" : "offline"}`;
+        $("#snapshotStatus").textContent = dateText(status.last_snapshot_at);
+        renderDevices(status.devices || []);
+      } catch (error) {
+        $("#relayStatus").textContent = error.message;
+      }
+    }
+
+    function renderDevices(devices) {
+      const host = $("#deviceList");
+      const active = devices.filter((device) => !device.revoked_at);
+
+      if (!active.length) {
+        host.innerHTML = '<div class="empty">Nenhum celular pareado ainda.</div>';
+        return;
+      }
+
+      host.innerHTML = "";
+      for (const device of active) {
+        const row = document.createElement("div");
+        row.className = "device";
+
+        const info = document.createElement("div");
+        const title = document.createElement("strong");
+        title.textContent = device.label || "Celular";
+        const small = document.createElement("small");
+        small.textContent = `Último acesso: ${dateText(device.last_seen_at)}`;
+        info.append(title, small);
+
+        const button = document.createElement("button");
+        button.className = "ghost danger";
+        button.type = "button";
+        button.textContent = "Revogar";
+        button.addEventListener("click", async () => {
+          if (!confirm(`Revogar ${device.label || "este celular"}?`)) return;
+          button.disabled = true;
+          try {
+            await api(`/api/mobile/devices/${encodeURIComponent(device.id)}/revoke`, {
+              method: "POST",
+              body: "{}",
+            });
+            await loadStatus();
+          } catch (error) {
+            alert(error.message);
+            button.disabled = false;
+          }
+        });
+
+        row.append(info, button);
+        host.appendChild(row);
+      }
+    }
+
+    $("#pairButton").addEventListener("click", async () => {
+      const button = $("#pairButton");
+      button.disabled = true;
+      button.textContent = "Gerando…";
+
+      try {
+        const data = await api("/api/mobile/pairing", {
+          method: "POST",
+          body: "{}",
+        });
+
+        $("#pairUrl").value = data.pair_url || "";
+        $("#pairBox").hidden = false;
+
+        let remaining = Number(data.expires_in_seconds) || 600;
+        const expiry = $("#pairExpiry");
+        expiry.textContent = `Expira em ${Math.ceil(remaining / 60)} minuto(s).`;
+
+        const timer = setInterval(() => {
+          remaining -= 1;
+          if (remaining <= 0) {
+            clearInterval(timer);
+            expiry.textContent = "Pareamento expirado. Gere outro.";
+            return;
+          }
+          expiry.textContent = `Expira em ${Math.ceil(remaining / 60)} minuto(s).`;
+        }, 1000);
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        button.disabled = false;
+        button.textContent = "Gerar novo pareamento";
+      }
+    });
+
+    $("#copyButton").addEventListener("click", async () => {
+      const input = $("#pairUrl");
+      try {
+        await navigator.clipboard.writeText(input.value);
+        $("#copyButton").textContent = "Copiado";
+        setTimeout(() => {
+          $("#copyButton").textContent = "Copiar";
+        }, 1400);
+      } catch {
+        input.select();
+        document.execCommand("copy");
+      }
+    });
+
+    loadStatus();
+    setInterval(loadStatus, 15000);
+  </script>
+</body>
+</html>
