@@ -78,3 +78,38 @@ O campo **Endereço do Radar** existe como fallback para desenvolvimento.
 - Importação de link pelo celular.
 - Upload de imagem para Radar por imagem.
 - Instalação Android como APK depois da validação da PWA.
+
+
+## Fase 2 implementada na branch
+
+A branch já contém o primeiro relay funcional para pareamento remoto:
+
+- `server/mobileRelay.js`: registro do Desktop, pareamento temporário, dispositivos revogáveis, snapshot e fila de comandos.
+- `server/services/mobileDesktopSync.js`: heartbeat do Desktop, snapshot periódico, polling de comandos e execução local.
+- `/api/mobile/status`: estado da integração no Desktop.
+- `/api/mobile/pairing`: gera link de pareamento de uso único.
+- `/api/mobile/devices`: lista aparelhos pareados.
+- `/api/mobile/devices/:id/revoke`: revoga um celular.
+- `/api/mobile/sync-now`: força snapshot e consumo da fila.
+- `/mobile-setup.html`: tela local para gerar link e gerenciar aparelhos.
+- `/mobile/pair.html`: tela no celular que consome o pareamento e salva credenciais.
+- PWA em modo Relay: usa snapshot cloud, mostra estado do Desktop e enfileira comandos.
+
+### Segurança do MVP
+
+As chaves de Desktop e celular são armazenadas no relay somente como SHA-256. O segredo de pareamento expira em 10 minutos, é de uso único e não vira credencial permanente. O celular pode ser revogado pelo Desktop e a revogação cancela comandos ainda pendentes.
+
+### Comandos atualmente executáveis
+
+- `run_radar`
+- `update_listing_status`
+
+O relay já aceita `import_url`, mas o executor do Desktop ainda responde como não implementado até o importador de URL ser integrado.
+
+### Próxima revisão
+
+1. Gerar QR Code localmente na página `mobile-setup.html`.
+2. Adicionar atalho "Mobile" à interface principal do Desktop.
+3. Testar ponta a ponta com o backend cloud publicado.
+4. Adicionar importação de link no executor Desktop.
+5. Push notifications para grails e quedas de preço.
