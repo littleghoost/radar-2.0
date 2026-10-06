@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d10">
+  <meta name="description" content="Radar 2.0 Mobile — controle seus radares e achados pelo celular.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./mobile.css">
+  <title>Radar 2.0 Mobile</title>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <span class="eyebrow">RADAR 2.0</span>
+        <h1>Mobile</h1>
+      </div>
+      <div class="connection-pill" id="connectionPill">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="connectionText">Conectando…</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero card">
+        <div>
+          <span class="eyebrow">VISÃO GERAL</span>
+          <h2>Seu radar no bolso.</h2>
+          <p id="heroText">Conectando ao Radar Desktop…</p>
+        </div>
+        <button class="ghost" id="refreshButton" type="button">Atualizar</button>
+      </section>
+
+      <section class="stats-grid" aria-label="Resumo">
+        <article class="stat card"><span>Radares</span><strong id="statRadars">—</strong></article>
+        <article class="stat card"><span>Anúncios</span><strong id="statListings">—</strong></article>
+        <article class="stat card"><span>Interessantes</span><strong id="statInteresting">—</strong></article>
+        <article class="stat card"><span>Novos</span><strong id="statNew">—</strong></article>
+      </section>
+
+      <section class="section">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">RADARES</span>
+            <h2>Monitoramento</h2>
+          </div>
+        </div>
+        <div id="radarsList" class="stack">
+          <div class="skeleton card"></div>
+          <div class="skeleton card"></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-heading listings-heading">
+          <div>
+            <span class="eyebrow">ACHADOS</span>
+            <h2>Últimos anúncios</h2>
+          </div>
+          <select id="statusFilter" aria-label="Filtrar anúncios">
+            <option value="">Todos</option>
+            <option value="novo">Novos</option>
+            <option value="interessante">Interessantes</option>
+            <option value="descartado">Descartados</option>
+          </select>
+        </div>
+        <div id="listingsList" class="listing-grid">
+          <div class="skeleton card tall"></div>
+          <div class="skeleton card tall"></div>
+        </div>
+      </section>
+
+      <section class="section setup card" id="setupCard">
+        <span class="eyebrow">CONEXÃO</span>
+        <h2>Radar Desktop</h2>
+        <p>Esta primeira versão usa o mesmo backend do Radar. Quando o celular e o PC estiverem na mesma rede, abra no celular o endereço mostrado pelo Desktop.</p>
+        <label>
+          Endereço do Radar
+          <input id="baseUrlInput" inputmode="url" autocomplete="url" placeholder="http://192.168.0.10:3130">
+        </label>
+        <button class="primary" id="saveConnectionButton" type="button">Salvar e conectar</button>
+        <small>Na próxima etapa, esse preenchimento vira pareamento por QR Code.</small>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Navegação">
+      <button class="nav-item active" data-target="top" type="button">Início</button>
+      <button class="nav-item" data-target="radarsList" type="button">Radares</button>
+      <button class="nav-item" data-target="listingsList" type="button">Achados</button>
+      <button class="nav-item" data-target="setupCard" type="button">Conexão</button>
+    </nav>
+  </div>
+
+  <template id="radarTemplate">
+    <article class="radar-card card">
+      <div class="radar-main">
+        <div>
+          <span class="radar-category"></span>
+          <h3 class="radar-name"></h3>
+          <p class="radar-query"></p>
+        </div>
+        <span class="radar-count"></span>
+      </div>
+      <div class="radar-footer">
+        <span class="radar-schedule"></span>
+        <button class="run-button" type="button">Rodar agora</button>
+      </div>
+    </article>
+  </template>
+
+  <template id="listingTemplate">
+    <article class="listing-card card">
+      <a class="listing-link" target="_blank" rel="noopener noreferrer">
+        <div class="image-wrap">
+          <img class="listing-image" alt="" loading="lazy">
+          <span class="listing-platform"></span>
+        </div>
+        <div class="listing-body">
+          <h3 class="listing-title"></h3>
+          <div class="listing-meta">
+            <strong class="listing-price"></strong>
+            <span class="listing-score"></span>
+          </div>
+        </div>
+      </a>
+      <div class="listing-actions">
+        <button class="status-button interesting" type="button">Interessante</button>
+        <button class="status-button discard" type="button">Descartar</button>
+      </div>
+    </article>
+  </template>
+
+  <script src="./mobile.js" defer></script>
+</body>
+</html>
