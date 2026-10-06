@@ -459,6 +459,19 @@ function createMobileDesktopSync({
   }
 
   async function status() {
+    if (process.env.RADAR_DESKTOP !== "1") {
+      return {
+        enabled: false,
+        configured: false,
+        desktop_id: null,
+        relay_url: baseUrl,
+        relay_ok: false,
+        paired_devices: 0,
+        devices: [],
+        last_snapshot_at: null,
+      };
+    }
+
     const [
       desktopId,
       lastSnapshotAt,
