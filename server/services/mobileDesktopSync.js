@@ -157,11 +157,35 @@ function createMobileDesktopSync({
       await Promise.all([
         dbAll(
           db,
-          "SELECT * FROM radars ORDER BY id DESC LIMIT 50",
+          `SELECT
+             id,
+             name,
+             query,
+             max_price,
+             category,
+             schedule_enabled,
+             schedule_interval_minutes,
+             next_run_at
+           FROM radars
+           ORDER BY id DESC
+           LIMIT 50`,
         ),
         dbAll(
           db,
-          `SELECT *
+          `SELECT
+             id,
+             radar_id,
+             title,
+             platform,
+             url,
+             image_url,
+             current_price,
+             currency,
+             status,
+             grail_score,
+             hybrid_score,
+             rule_score,
+             updated_at
            FROM listings
            ORDER BY datetime(updated_at) DESC, id DESC
            LIMIT 250`,
