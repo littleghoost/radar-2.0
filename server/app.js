@@ -119,6 +119,7 @@ app.use((req, res, next) => {
   if (req.path === "/auth/mercadolivre/callback") return next();
   if (req.path === "/webhooks/ebay/marketplace-account-deletion") return next();
   if (req.path.startsWith("/bridge/")) return next();
+  if (req.path === "/mobile" || req.path.startsWith("/mobile/")) return next();
   if (isAuthenticated(req)) return next();
 
   if (req.path.startsWith("/api/")) {
