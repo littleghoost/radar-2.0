@@ -37,7 +37,7 @@ const PORT = process.env.PORT || 3000;
 const IMAGE_DIR = process.env.IMAGE_DIR || path.join(process.env.DB_PATH ? path.dirname(process.env.DB_PATH) : path.join(__dirname, "..", "data"), "reference-images");
 fs.mkdirSync(IMAGE_DIR, { recursive: true });
 
-app.use(express.json());
+app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: false }));
 
 registerMobileRelay(app, db);
