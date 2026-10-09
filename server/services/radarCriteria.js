@@ -211,6 +211,8 @@ function automaticCategoryGuard(radar = {}, listing = {}) {
       /\bstation dock\b/,
       /\bdock(?:ing)?\b.*\bfor\b/,
       /\bbase de carregamento\b/,
+      /\bbolsa(?: de)?(?: transporte)?\b.*\b(?:handycam|camera|filmadora)\b/,
+      /\b(?:case|bag)\b.*\b(?:handycam|camcorder)\b/,
       /\bservice manual\b/,
       /\bmanual de servico\b/,
     ];

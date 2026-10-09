@@ -163,7 +163,13 @@ function autoBrowseSearchUrl(source, query) {
   }
 
   if (source === 'enjoei') {
-    return `https://www.enjoei.com.br/@search?q=${encoded}`;
+    const slug = clean
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return `https://www.enjoei.com.br/${slug || 'busca'}/s?q=${encoded}`;
   }
 
   if (source === 'mercadolivre') {

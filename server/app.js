@@ -1481,9 +1481,12 @@ async function autoAssignListing(listing, radars) {
 
       if (criteria?.hasCustomRules) {
         return (
-          criteria.score >= 25 ||
           criteria.matchedPriority.length > 0 ||
-          criteria.matchedRequired.length > 0
+          criteria.matchedRequired.length > 0 ||
+          (
+            criteria.tier !== "triagem" &&
+            criteria.score >= 45
+          )
         );
       }
 
@@ -3548,6 +3551,14 @@ app.post("/api/import/assisted", async (req, res) => {
           platform,
           url,
         );
+
+        if (
+          sourceKey === "enjoei" &&
+          !externalId
+        ) {
+          summary.invalid += 1;
+          continue;
+        }
 
         let existing = null;
 

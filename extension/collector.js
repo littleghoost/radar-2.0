@@ -278,6 +278,55 @@
     } catch { return false; }
   }
 
+  function slugifyEnjoeiTitle(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 120);
+  }
+
+  function enjoeiProductUrlFromCard(card, title = '') {
+    const links = [
+      ...(card.matches?.('a[href]') ? [card] : []),
+      ...card.querySelectorAll('a[href]'),
+    ];
+
+    for (const link of links) {
+      const candidate = absoluteUrl(
+        link.getAttribute('href'),
+      );
+      if (
+        candidate &&
+        looksLikeListingUrl(candidate, 'Enjoei')
+      ) {
+        return cleanUrl(candidate);
+      }
+    }
+
+    const html = String(card.outerHTML || '');
+    const embedded = html.match(
+      /(?:https?:\/\/www\.enjoei\.com\.br)?(\/p\/[^"'<>\\s]+-\d{6,})(?:[?"'<>\\s]|$)/i,
+    );
+    if (embedded?.[1]) {
+      return cleanUrl(
+        absoluteUrl(embedded[1]),
+      );
+    }
+
+    const idMatch = html.match(
+      /(?:product[-_]?id|productId)[^0-9]{0,30}(\d{6,})/i,
+    );
+    const slug = slugifyEnjoeiTitle(title);
+    if (idMatch?.[1] && slug) {
+      return `https://www.enjoei.com.br/p/${slug}-${idMatch[1]}`;
+    }
+
+    return null;
+  }
+
   function collectEnjoeiProductCards(limit, diagnostics) {
     const cards = [
       ...document.querySelectorAll(
@@ -298,53 +347,26 @@
     for (const card of cards) {
       if (items.length >= limit) break;
 
-      const links = [
-        ...(card.matches?.('a[href]') ? [card] : []),
-        ...card.querySelectorAll('a[href]'),
-      ];
-
-      const anchor =
-        links.find((link) => link.querySelector?.('img')) ||
-        links.find((link) => link.querySelector?.('h1,h2,h3,h4,h5,h6,[role="heading"]')) ||
-        links[0];
-
-      if (!anchor) continue;
-
-      const rawUrl = absoluteUrl(anchor.getAttribute('href'));
-      const url = rawUrl ? cleanUrl(rawUrl) : null;
-      if (!url || !/^https?:/i.test(url)) continue;
-
-      try {
-        const host = new URL(url).hostname.toLowerCase();
-        if (!host.endsWith('enjoei.com.br')) continue;
-      } catch {
-        continue;
-      }
-
-      const identity = listingIdentity(url, 'Enjoei');
-      if (!identity || seen.has(identity)) continue;
-      diagnostics.passedUrl += 1;
-
       const rect = card.getBoundingClientRect?.();
       if (rect && rect.width === 0 && rect.height === 0) continue;
       diagnostics.passedVisible += 1;
 
-      const image = card.querySelector('img') || anchor.querySelector?.('img');
+      const image = card.querySelector('img');
       if (!image) continue;
       diagnostics.passedImage += 1;
 
-      const text = String(card.innerText || anchor.innerText || '')
+      const text = String(card.innerText || '')
         .replace(/\s+/g, ' ')
         .trim();
       if (text.length < 8 || !/R\$\s*\d/.test(text)) continue;
       diagnostics.passedText += 1;
 
-      const heading = card.querySelector('h1,h2,h3,h4,h5,h6,[role="heading"]');
+      const heading = card.querySelector(
+        'h1,h2,h3,h4,h5,h6,[role="heading"]',
+      );
       let title = String(
         heading?.innerText ||
           image.alt ||
-          anchor.getAttribute('title') ||
-          anchor.innerText ||
           text,
       )
         .replace(/\s+/g, ' ')
@@ -353,6 +375,27 @@
       if (title.length > 180) title = title.slice(0, 180);
       if (title.length < 3) continue;
       diagnostics.passedTitle += 1;
+
+      const url = enjoeiProductUrlFromCard(
+        card,
+        title,
+      );
+      if (
+        !url ||
+        !/^https?:/i.test(url) ||
+        !looksLikeListingUrl(url, 'Enjoei')
+      ) {
+        continue;
+      }
+
+      const identity = listingIdentity(url, 'Enjoei');
+      if (
+        !identity ||
+        seen.has(identity)
+      ) {
+        continue;
+      }
+      diagnostics.passedUrl += 1;
 
       const { price, currency } = parsePrice(text);
       const imageUrl = absoluteUrl(
@@ -398,7 +441,7 @@
       const enjoeiItems = collectEnjoeiProductCards(limit, diagnostics);
       if (enjoeiItems.length) {
         return {
-          version: 7,
+          version: 8,
           source_url: location.href,
           platform,
           captured_at: new Date().toISOString(),
@@ -467,7 +510,7 @@
     }
 
     return {
-      version: 7,
+      version: 8,
       source_url: location.href,
       platform,
       captured_at: new Date().toISOString(),
