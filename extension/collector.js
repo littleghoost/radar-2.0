@@ -279,7 +279,17 @@
   }
 
   function collectEnjoeiProductCards(limit, diagnostics) {
-    const cards = [...document.querySelectorAll('.c-product-card')];
+    const cards = [
+      ...document.querySelectorAll(
+        '.c-product-card, [class*="c-product-card"]:not(.c-content-placeholder), [class*="product-card"]:not(.c-content-placeholder)',
+      ),
+    ].filter(
+      (card, index, all) =>
+        all.indexOf(card) === index &&
+        !card.classList?.contains(
+          'c-content-placeholder',
+        ),
+    );
     diagnostics.enjoeiCards = cards.length;
 
     const seen = new Set();
@@ -388,7 +398,7 @@
       const enjoeiItems = collectEnjoeiProductCards(limit, diagnostics);
       if (enjoeiItems.length) {
         return {
-          version: 6,
+          version: 7,
           source_url: location.href,
           platform,
           captured_at: new Date().toISOString(),
@@ -457,7 +467,7 @@
     }
 
     return {
-      version: 6,
+      version: 7,
       source_url: location.href,
       platform,
       captured_at: new Date().toISOString(),

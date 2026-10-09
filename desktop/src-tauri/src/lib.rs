@@ -41,14 +41,14 @@ struct DesktopSettings {
 impl Default for DesktopSettings {
     fn default() -> Self {
         Self {
-            autostart_enabled: false,
+            autostart_enabled: true,
             background_enabled: true,
             poll_interval_minutes: 5,
             notify_new_listings: true,
             notify_price_drops: true,
             notify_unavailable: true,
             notify_errors: true,
-            start_minimized: false,
+            start_minimized: true,
         }
     }
 }

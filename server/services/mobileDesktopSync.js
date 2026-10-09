@@ -266,9 +266,14 @@ function createMobileDesktopSync({
              current_price,
              currency,
              status,
+             visual_score,
+             semantic_score,
              grail_score,
              hybrid_score,
+             ranking_score,
              rule_score,
+             rule_tier,
+             rule_rejected,
              updated_at
            FROM listings
            ORDER BY datetime(updated_at) DESC, id DESC
@@ -293,6 +298,7 @@ function createMobileDesktopSync({
              height,
              file_size,
              thumbnail_data_url,
+             is_enabled,
              is_primary,
              source,
              created_at,
@@ -919,7 +925,12 @@ function createMobileDesktopSync({
     };
 
     commandLoop();
-    snapshotLoop();
+
+    const initialSnapshotTimer = setTimeout(
+      snapshotLoop,
+      1_000,
+    );
+    initialSnapshotTimer.unref?.();
 
     commandTimer = setInterval(
       commandLoop,

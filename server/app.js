@@ -660,8 +660,9 @@ async function importVisualReference(payload = {}) {
           `INSERT INTO visual_references (
              radar_id, label, image_path, mime_type,
              width, height, file_size, thumbnail_data_url,
-             is_primary, source
-           ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 'legacy')`,
+             features_json, embedding_json, semantic_model,
+             is_enabled, is_primary, source
+           ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, 1, 0, 'legacy')`,
           [
             radar.id,
             "Referência anterior",
@@ -669,6 +670,9 @@ async function importVisualReference(payload = {}) {
             path.extname(radar.reference_image_path).toLowerCase() === ".png"
               ? "image/png"
               : "image/jpeg",
+            radar.reference_features_json || null,
+            radar.reference_embedding_json || null,
+            radar.semantic_model || null,
           ],
         ).catch(() => {});
       }
@@ -686,8 +690,9 @@ async function importVisualReference(payload = {}) {
       `INSERT INTO visual_references (
          radar_id, label, image_path, mime_type,
          width, height, file_size, thumbnail_data_url,
-         is_primary, source
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+         features_json, embedding_json, semantic_model,
+         is_enabled, is_primary, source
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)`,
       [
         radar.id,
         parsed.label ||
@@ -698,6 +703,9 @@ async function importVisualReference(payload = {}) {
         features.height,
         parsed.imageBuffer.length,
         parsed.thumbnailDataUrl,
+        JSON.stringify(features),
+        embedding ? JSON.stringify(embedding) : null,
+        embedding ? MODEL_ID : null,
         String(payload.source || "mobile").slice(0, 40),
       ],
     );
@@ -739,7 +747,7 @@ async function importVisualReference(payload = {}) {
     const reference = await get(
       `SELECT
          id, radar_id, label, mime_type, width, height,
-         file_size, thumbnail_data_url, is_primary,
+         file_size, thumbnail_data_url, is_enabled, is_primary,
          source, created_at, updated_at
        FROM visual_references
        WHERE id = ?`,
@@ -773,23 +781,139 @@ const mobileDesktopSync = createMobileDesktopSync({
   importVisualReference,
 });
 
+async function loadVisualReferenceSets(radar = {}) {
+  const rows = radar.id
+    ? await all(
+        `SELECT
+           id,
+           features_json,
+           embedding_json,
+           semantic_model,
+           is_enabled,
+           is_primary
+         FROM visual_references
+         WHERE radar_id = ?
+           AND COALESCE(is_enabled, 1) = 1
+         ORDER BY is_primary DESC,
+                  datetime(created_at) DESC,
+                  id DESC
+         LIMIT 12`,
+        [radar.id],
+      ).catch(() => [])
+    : [];
+
+  const features = [];
+  const embeddings = [];
+
+  for (const row of rows) {
+    if (row.features_json) {
+      try {
+        const parsed = JSON.parse(row.features_json);
+        if (parsed && typeof parsed === "object") {
+          features.push(parsed);
+        }
+      } catch {}
+    }
+
+    if (row.embedding_json) {
+      try {
+        const parsed = JSON.parse(row.embedding_json);
+        if (Array.isArray(parsed) && parsed.length) {
+          embeddings.push(parsed);
+        }
+      } catch {}
+    }
+  }
+
+  if (!features.length && radar.reference_features_json) {
+    try {
+      const parsed = JSON.parse(
+        radar.reference_features_json,
+      );
+      if (parsed && typeof parsed === "object") {
+        features.push(parsed);
+      }
+    } catch {}
+  }
+
+  if (
+    !embeddings.length &&
+    radar.reference_embedding_json
+  ) {
+    try {
+      const parsed = JSON.parse(
+        radar.reference_embedding_json,
+      );
+      if (Array.isArray(parsed) && parsed.length) {
+        embeddings.push(parsed);
+      }
+    } catch {}
+  }
+
+  return {
+    rows,
+    features,
+    embeddings,
+  };
+}
+
 async function scoreListingForRadar({
   radarId,
   title,
   imageUrl,
   currentPrice,
   currency = "BRL",
+  platform = null,
+  condition = null,
+  notes = null,
   sourceKey = null,
   itemCountry = null,
 }) {
   if (!radarId) {
-    return { visual_score: null, semantic_score: null, hybrid_score: null, preference_score: null, grail_score: null, image_features_json: null, image_embedding_json: null };
+    return {
+      visual_score: null,
+      semantic_score: null,
+      hybrid_score: null,
+      preference_score: null,
+      grail_score: null,
+      ranking_score: null,
+      rule_score: null,
+      rule_tier: null,
+      rule_rejected: 0,
+      rule_reason_json: "[]",
+      image_features_json: null,
+      image_embedding_json: null,
+    };
   }
 
   const radar = await get("SELECT * FROM radars WHERE id = ?", [radarId]);
   if (!radar) {
-    return { visual_score: null, semantic_score: null, hybrid_score: null, preference_score: null, grail_score: null, image_features_json: null, image_embedding_json: null };
+    return {
+      visual_score: null,
+      semantic_score: null,
+      hybrid_score: null,
+      preference_score: null,
+      grail_score: null,
+      ranking_score: null,
+      rule_score: null,
+      rule_tier: null,
+      rule_rejected: 0,
+      rule_reason_json: "[]",
+      image_features_json: null,
+      image_embedding_json: null,
+    };
   }
+
+  const referenceSets =
+    await loadVisualReferenceSets(radar);
+  const visualEnabled = Boolean(
+    radar.visual_enabled &&
+      referenceSets.features.length,
+  );
+  const semanticEnabled = Boolean(
+    radar.semantic_enabled &&
+      referenceSets.embeddings.length,
+  );
 
   let visual = null;
   let semantic = null;
@@ -797,7 +921,7 @@ async function scoreListingForRadar({
   let embedding = null;
   let imageBuffer = null;
 
-  if (imageUrl && (radar.visual_enabled || radar.semantic_enabled)) {
+  if (imageUrl && (visualEnabled || semanticEnabled)) {
     try {
       imageBuffer = await downloadImage(imageUrl);
     } catch {
@@ -805,11 +929,21 @@ async function scoreListingForRadar({
     }
   }
 
-  if (radar.visual_enabled && radar.reference_features_json) {
+  if (visualEnabled) {
     if (imageBuffer) {
       try {
-        features = await extractVisualFeatures(imageBuffer);
-        visual = visualSimilarity(JSON.parse(radar.reference_features_json), features);
+        features = await extractVisualFeatures(
+          imageBuffer,
+        );
+        visual = Math.max(
+          ...referenceSets.features.map(
+            (reference) =>
+              visualSimilarity(
+                reference,
+                features,
+              ),
+          ),
+        );
       } catch {
         visual = 0;
       }
@@ -818,11 +952,19 @@ async function scoreListingForRadar({
     }
   }
 
-  if (radar.semantic_enabled && radar.reference_embedding_json) {
+  if (semanticEnabled) {
     if (imageBuffer) {
       try {
         embedding = await embedImage(imageBuffer);
-        semantic = semanticSimilarity(JSON.parse(radar.reference_embedding_json), embedding);
+        semantic = Math.max(
+          ...referenceSets.embeddings.map(
+            (reference) =>
+              semanticSimilarity(
+                reference,
+                embedding,
+              ),
+          ),
+        );
       } catch {
         semantic = 0;
       }
@@ -839,8 +981,8 @@ async function scoreListingForRadar({
     : sourceKey === "ebay";
 
   const hybrid = hybridScore({
-    visual: radar.visual_enabled && radar.reference_features_json ? visual : null,
-    semantic: radar.semantic_enabled && radar.reference_embedding_json ? semantic : null,
+    visual: visualEnabled ? visual : null,
+    semantic: semanticEnabled ? semantic : null,
     query: radar.query,
     title,
     price: currentPrice === "" ? null : currentPrice,
@@ -855,6 +997,22 @@ async function scoreListingForRadar({
   const profile = await getPreferenceProfile(radar.category || "geral");
   const learned = preferenceScore(embedding, profile);
   const grail = grailScore(hybrid, learned, profile.total_feedback);
+  const criteria = evaluateRadarCriteria(radar, {
+    title,
+    platform,
+    notes,
+    condition,
+    current_price:
+      currentPrice === "" ? null : currentPrice,
+    currency,
+    source_key: sourceKey,
+    item_country: itemCountry,
+  });
+  const ranking = blendCriteriaScore(
+    grail,
+    criteria,
+    radar,
+  );
 
   return {
     visual_score: visual === null ? null : Math.round(visual * 100),
@@ -862,6 +1020,11 @@ async function scoreListingForRadar({
     hybrid_score: hybrid,
     preference_score: learned,
     grail_score: grail,
+    ranking_score: ranking,
+    rule_score: criteria.score,
+    rule_tier: criteria.tier,
+    rule_rejected: criteria.rejected ? 1 : 0,
+    rule_reason_json: JSON.stringify(criteria.reasons),
     image_features_json: features ? JSON.stringify(features) : null,
     image_embedding_json: embedding ? JSON.stringify(embedding) : null,
   };
@@ -929,15 +1092,25 @@ async function reapplyCriteriaForRadar(radar) {
       summary.triagem += 1;
     }
 
+    const rankingScore = blendCriteriaScore(
+      listing.grail_score ??
+        listing.hybrid_score ??
+        0,
+      criteria,
+      radar,
+    );
+
     await run(
       `UPDATE listings
-       SET rule_score = ?,
+       SET ranking_score = ?,
+           rule_score = ?,
            rule_tier = ?,
            rule_rejected = ?,
            rule_reason_json = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
+        rankingScore,
         criteria.score,
         criteria.tier,
         criteria.rejected ? 1 : 0,
@@ -957,6 +1130,9 @@ async function applyRadarToListing(listing, radarId) {
     imageUrl: listing.image_url,
     currentPrice: listing.current_price,
     currency: listing.currency || "BRL",
+    platform: listing.platform || null,
+    condition: listing.condition || null,
+    notes: listing.notes || null,
     sourceKey: listing.source_key || null,
     itemCountry: listing.item_country || null,
   });
@@ -972,7 +1148,7 @@ async function applyRadarToListing(listing, radarId) {
     `UPDATE listings
      SET radar_id = ?, visual_score = ?, semantic_score = ?, hybrid_score = ?,
          image_features_json = ?, image_embedding_json = ?,
-         preference_score = ?, grail_score = ?,
+         preference_score = ?, grail_score = ?, ranking_score = ?,
          rule_score = ?, rule_tier = ?, rule_rejected = ?,
          rule_reason_json = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
@@ -985,6 +1161,7 @@ async function applyRadarToListing(listing, radarId) {
       intelligence.image_embedding_json,
       intelligence.preference_score,
       intelligence.grail_score,
+      intelligence.ranking_score,
       criteria?.score ?? null,
       criteria?.tier ?? null,
       criteria?.rejected ? 1 : 0,
@@ -1140,6 +1317,8 @@ function deriveListingInsights(listing) {
           listing.radar_exclude_terms_json,
         criteria_weight:
           listing.radar_criteria_weight,
+        category:
+          listing.radar_category,
         budget_currency:
           listing.radar_budget_currency,
       },
@@ -1166,7 +1345,10 @@ function deriveListingInsights(listing) {
   }
 
   const baseScore = Number(
-    listing.grail_score ?? listing.hybrid_score ?? 0,
+    listing.ranking_score ??
+      listing.grail_score ??
+      listing.hybrid_score ??
+      0,
   );
 
   const ruleCriteria = matchMetrics?.criteria || null;
@@ -1294,12 +1476,18 @@ async function autoAssignListing(listing, radars) {
       imageUrl: listing.image_url,
       currentPrice: listing.current_price,
       currency: listing.currency || "BRL",
+      platform: listing.platform || null,
+      condition: listing.condition || null,
+      notes: listing.notes || null,
       sourceKey: listing.source_key || null,
       itemCountry: listing.item_country || null,
     });
 
     const intelligenceScore = Number(
-      intelligence.grail_score ?? intelligence.hybrid_score ?? 0,
+      intelligence.ranking_score ??
+        intelligence.grail_score ??
+        intelligence.hybrid_score ??
+        0,
     );
 
     const criteria = candidate.metrics.criteria;
@@ -1331,7 +1519,7 @@ async function autoAssignListing(listing, radars) {
     `UPDATE listings
      SET radar_id = ?, visual_score = ?, semantic_score = ?, hybrid_score = ?,
          image_features_json = ?, image_embedding_json = ?,
-         preference_score = ?, grail_score = ?,
+         preference_score = ?, grail_score = ?, ranking_score = ?,
          rule_score = ?, rule_tier = ?, rule_rejected = ?,
          rule_reason_json = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
@@ -1344,6 +1532,7 @@ async function autoAssignListing(listing, radars) {
       best.intelligence.image_embedding_json,
       best.intelligence.preference_score,
       best.intelligence.grail_score,
+      best.intelligence.ranking_score,
       best.metrics.criteria?.score ?? null,
       best.metrics.criteria?.tier ?? null,
       best.metrics.criteria?.rejected ? 1 : 0,
@@ -1744,7 +1933,7 @@ app.post("/api/radars/:id/reindex-visual", async (req, res) => {
     if (!radar) return res.status(404).json({ error: "Radar não encontrado." });
 
     const listings = await all(
-      "SELECT * FROM listings WHERE radar_id = ? ORDER BY updated_at DESC LIMIT 100",
+      "SELECT * FROM listings WHERE radar_id = ? ORDER BY updated_at DESC LIMIT 500",
       [radar.id],
     );
 
@@ -1758,17 +1947,43 @@ app.post("/api/radars/:id/reindex-visual", async (req, res) => {
           imageUrl: listing.image_url,
           currentPrice: listing.current_price,
           currency: listing.currency || "BRL",
+          platform: listing.platform || null,
+          condition: listing.condition || null,
+          notes: listing.notes || null,
           sourceKey: listing.source_key || null,
           itemCountry: listing.item_country || null,
         });
         await run(
           `UPDATE listings
-           SET visual_score = ?, semantic_score = ?, hybrid_score = ?,
+           SET visual_score = ?,
+               semantic_score = ?,
+               hybrid_score = ?,
+               preference_score = ?,
+               grail_score = ?,
+               ranking_score = ?,
+               rule_score = ?,
+               rule_tier = ?,
+               rule_rejected = ?,
+               rule_reason_json = ?,
                image_features_json = COALESCE(?, image_features_json),
                image_embedding_json = COALESCE(?, image_embedding_json),
                updated_at = CURRENT_TIMESTAMP
            WHERE id = ?`,
-          [score.visual_score, score.semantic_score, score.hybrid_score, score.image_features_json, score.image_embedding_json, listing.id],
+          [
+            score.visual_score,
+            score.semantic_score,
+            score.hybrid_score,
+            score.preference_score,
+            score.grail_score,
+            score.ranking_score,
+            score.rule_score,
+            score.rule_tier,
+            score.rule_rejected,
+            score.rule_reason_json,
+            score.image_features_json,
+            score.image_embedding_json,
+            listing.id,
+          ],
         );
         analyzed += 1;
       } catch {
@@ -2300,14 +2515,14 @@ app.get("/api/desktop/settings", async (_req, res) => {
   try {
     const row = await get("SELECT * FROM desktop_settings WHERE id = 1");
     res.json({
-      autostart_enabled: Boolean(row?.autostart_enabled),
+      autostart_enabled: row ? Boolean(row.autostart_enabled) : true,
       background_enabled: row ? Boolean(row.background_enabled) : true,
       poll_interval_minutes: Number(row?.poll_interval_minutes || 5),
       notify_new_listings: row ? Boolean(row.notify_new_listings) : true,
       notify_price_drops: row ? Boolean(row.notify_price_drops) : true,
       notify_unavailable: row ? Boolean(row.notify_unavailable) : true,
       notify_errors: row ? Boolean(row.notify_errors) : true,
-      start_minimized: Boolean(row?.start_minimized),
+      start_minimized: row ? Boolean(row.start_minimized) : true,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2943,6 +3158,9 @@ app.get(
           r.criteria_weight
             AS radar_criteria_weight,
 
+          r.category
+            AS radar_category,
+
           r.budget_currency
             AS radar_budget_currency,
 
@@ -2993,9 +3211,9 @@ app.get(
           END,
 
           COALESCE(l.rule_rejected, 0) ASC,
+          COALESCE(l.ranking_score, l.grail_score, l.hybrid_score, 0) DESC,
           COALESCE(l.rule_score, 0) DESC,
           COALESCE(l.grail_score, l.hybrid_score, 0) DESC,
-          COALESCE(l.hybrid_score, 0) DESC,
           l.updated_at DESC
 
         `,
@@ -3460,6 +3678,8 @@ app.post("/api/import/assisted", async (req, res) => {
           imageUrl,
           currentPrice: Number.isFinite(currentPrice) ? currentPrice : null,
           currency,
+          platform,
+          sourceKey,
         });
 
         const notes = [
@@ -3473,9 +3693,10 @@ app.post("/api/import/assisted", async (req, res) => {
             source_key, external_id, availability_status, availability_detail,
             last_seen_at, last_checked_at,
             visual_score, semantic_score, hybrid_score, image_features_json, image_embedding_json,
-            preference_score, grail_score
+            preference_score, grail_score, ranking_score,
+            rule_score, rule_tier, rule_rejected, rule_reason_json
           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, 'available', 'seen_in_browser',
-                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)`,
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             radarId, title, platform, url, imageUrl,
             Number.isFinite(currentPrice) ? currentPrice : null, currency, notes,
@@ -3483,6 +3704,9 @@ app.post("/api/import/assisted", async (req, res) => {
             intelligence.visual_score, intelligence.semantic_score, intelligence.hybrid_score,
             intelligence.image_features_json, intelligence.image_embedding_json,
             intelligence.preference_score, intelligence.grail_score,
+            intelligence.ranking_score,
+            intelligence.rule_score, intelligence.rule_tier,
+            intelligence.rule_rejected, intelligence.rule_reason_json,
           ],
         );
 
@@ -3789,6 +4013,8 @@ app.post(
         imageUrl: image_url?.trim() || null,
         currentPrice: current_price,
         currency: "BRL",
+        platform: platform.trim(),
+        notes: notes?.trim() || null,
       });
 
       const result = await run(
@@ -3810,11 +4036,16 @@ app.post(
             image_features_json,
             image_embedding_json,
             preference_score,
-            grail_score
+            grail_score,
+            ranking_score,
+            rule_score,
+            rule_tier,
+            rule_rejected,
+            rule_reason_json
           )
 
           VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
 
           `,
@@ -3842,6 +4073,11 @@ app.post(
           intelligence.image_embedding_json,
           intelligence.preference_score,
           intelligence.grail_score,
+          intelligence.ranking_score,
+          intelligence.rule_score,
+          intelligence.rule_tier,
+          intelligence.rule_rejected,
+          intelligence.rule_reason_json,
         ],
       );
 
@@ -5505,7 +5741,7 @@ app.get("/api/visual-references", async (req, res) => {
     const rows = await all(
       `SELECT
          id, radar_id, label, mime_type, width, height,
-         file_size, thumbnail_data_url, is_primary,
+         file_size, thumbnail_data_url, is_enabled, is_primary,
          source, created_at, updated_at
        FROM visual_references
        ${where}
@@ -5578,8 +5814,25 @@ app.post("/api/visual-references/:id/activate", async (req, res) => {
     }
 
     await run(
-      "UPDATE visual_references SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = CURRENT_TIMESTAMP WHERE radar_id = ?",
-      [reference.id, reference.radar_id],
+      `UPDATE visual_references
+       SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END,
+           is_enabled = CASE WHEN id = ? THEN 1 ELSE COALESCE(is_enabled, 1) END,
+           features_json = CASE WHEN id = ? THEN ? ELSE features_json END,
+           embedding_json = CASE WHEN id = ? THEN ? ELSE embedding_json END,
+           semantic_model = CASE WHEN id = ? THEN ? ELSE semantic_model END,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE radar_id = ?`,
+      [
+        reference.id,
+        reference.id,
+        reference.id,
+        JSON.stringify(features),
+        reference.id,
+        embedding ? JSON.stringify(embedding) : null,
+        reference.id,
+        embedding ? MODEL_ID : null,
+        reference.radar_id,
+      ],
     );
 
     await run(

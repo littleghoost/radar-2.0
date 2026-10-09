@@ -675,6 +675,12 @@ function renderVisualReferences() {
       const badge =
         document.createElement("span");
       badge.className = "visual-primary";
+      badge.textContent = "PRINCIPAL";
+      card.appendChild(badge);
+    } else if (reference.is_enabled !== false) {
+      const badge =
+        document.createElement("span");
+      badge.className = "visual-primary";
       badge.textContent = "ATIVA";
       card.appendChild(badge);
     }
@@ -817,11 +823,27 @@ function renderRadars() {
 function renderListings() {
   const host = $("#listingsList");
   const filter = $("#statusFilter").value;
+  const visibleListings = state.listings
+    .filter(
+      (item) => !item.rule_rejected,
+    )
+    .slice()
+    .sort((a, b) => {
+      const score = (item) =>
+        Number(
+          item.ranking_score ??
+            item.grail_score ??
+            item.hybrid_score ??
+            item.rule_score ??
+            0,
+        ) || 0;
+      return score(b) - score(a);
+    });
   const listings = filter
-    ? state.listings.filter(
+    ? visibleListings.filter(
         (item) => item.status === filter,
       )
-    : state.listings;
+    : visibleListings;
 
   host.innerHTML = "";
 
@@ -856,6 +878,7 @@ function renderListings() {
       );
 
     const score =
+      listing.ranking_score ??
       listing.grail_score ??
       listing.hybrid_score ??
       listing.rule_score;
@@ -865,7 +888,30 @@ function renderListings() {
     ).textContent =
       score === null || score === undefined
         ? ""
-        : `score ${Math.round(score)}`;
+        : `Rank ${Math.round(score)}`;
+
+    const visualChip =
+      node.querySelector(".visual-chip");
+    const semanticChip =
+      node.querySelector(".semantic-chip");
+    const grailChip =
+      node.querySelector(".grail-chip");
+
+    visualChip.textContent =
+      listing.visual_score === null ||
+      listing.visual_score === undefined
+        ? ""
+        : `Visual ${Math.round(listing.visual_score)}`;
+    semanticChip.textContent =
+      listing.semantic_score === null ||
+      listing.semantic_score === undefined
+        ? ""
+        : `Semântico ${Math.round(listing.semantic_score)}`;
+    grailChip.textContent =
+      listing.grail_score === null ||
+      listing.grail_score === undefined
+        ? ""
+        : `Grail ${Math.round(listing.grail_score)}`;
 
     const updateStatus = async (status) => {
       try {

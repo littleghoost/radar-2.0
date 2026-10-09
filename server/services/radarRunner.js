@@ -635,17 +635,97 @@ function createRadarRunner({
         })
         .slice(0, 60);
 
-      const visualEnabled = Boolean(radar.visual_enabled && radar.reference_features_json);
-      const referenceFeatures = visualEnabled
-        ? JSON.parse(radar.reference_features_json)
-        : null;
-      const minVisualSimilarity = Number(radar.min_visual_similarity ?? 0.45);
-      const visualWeight = Number(radar.visual_weight ?? 70);
-      const semanticEnabled = Boolean(radar.semantic_enabled && radar.reference_embedding_json);
-      const referenceEmbedding = semanticEnabled
-        ? JSON.parse(radar.reference_embedding_json)
-        : null;
-      const semanticWeight = Number(radar.semantic_weight ?? 70);
+      const visualReferenceRows = await all(
+        `SELECT
+           features_json,
+           embedding_json,
+           is_primary
+         FROM visual_references
+         WHERE radar_id = ?
+           AND COALESCE(is_enabled, 1) = 1
+         ORDER BY is_primary DESC,
+                  datetime(created_at) DESC,
+                  id DESC
+         LIMIT 12`,
+        [radar.id],
+      ).catch(() => []);
+
+      const referenceFeatures = [];
+      const referenceEmbeddings = [];
+
+      for (const reference of visualReferenceRows) {
+        if (reference.features_json) {
+          try {
+            const parsed = JSON.parse(
+              reference.features_json,
+            );
+            if (
+              parsed &&
+              typeof parsed === "object"
+            ) {
+              referenceFeatures.push(parsed);
+            }
+          } catch {}
+        }
+
+        if (reference.embedding_json) {
+          try {
+            const parsed = JSON.parse(
+              reference.embedding_json,
+            );
+            if (
+              Array.isArray(parsed) &&
+              parsed.length
+            ) {
+              referenceEmbeddings.push(parsed);
+            }
+          } catch {}
+        }
+      }
+
+      if (
+        !referenceFeatures.length &&
+        radar.reference_features_json
+      ) {
+        try {
+          referenceFeatures.push(
+            JSON.parse(
+              radar.reference_features_json,
+            ),
+          );
+        } catch {}
+      }
+
+      if (
+        !referenceEmbeddings.length &&
+        radar.reference_embedding_json
+      ) {
+        try {
+          referenceEmbeddings.push(
+            JSON.parse(
+              radar.reference_embedding_json,
+            ),
+          );
+        } catch {}
+      }
+
+      const visualEnabled = Boolean(
+        radar.visual_enabled &&
+          referenceFeatures.length,
+      );
+      const minVisualSimilarity = Number(
+        radar.min_visual_similarity ?? 0.45,
+      );
+      const visualWeight = Number(
+        radar.visual_weight ?? 70,
+      );
+      const semanticEnabled = Boolean(
+        radar.semantic_enabled &&
+          referenceEmbeddings.length,
+      );
+      const semanticWeight = Number(
+        radar.semantic_weight ?? 70,
+      );
       const feedbackRows = await all(
         `SELECT l.status, l.image_embedding_json
          FROM listings l
@@ -676,7 +756,15 @@ function createRadarRunner({
           if (imageBuffer) {
             try {
               candidateFeatures = await extractVisualFeatures(imageBuffer);
-              visualScore = visualSimilarity(referenceFeatures, candidateFeatures);
+              visualScore = Math.max(
+                ...referenceFeatures.map(
+                  (reference) =>
+                    visualSimilarity(
+                      reference,
+                      candidateFeatures,
+                    ),
+                ),
+              );
             } catch {
               visualScore = 0;
             }
@@ -689,7 +777,15 @@ function createRadarRunner({
           if (imageBuffer) {
             try {
               candidateEmbedding = await embedImage(imageBuffer);
-              semanticScore = semanticSimilarity(referenceEmbedding, candidateEmbedding);
+              semanticScore = Math.max(
+                ...referenceEmbeddings.map(
+                  (reference) =>
+                    semanticSimilarity(
+                      reference,
+                      candidateEmbedding,
+                    ),
+                ),
+              );
             } catch {
               semanticScore = 0;
             }
@@ -824,11 +920,11 @@ function createRadarRunner({
               (radar_id, title, platform, url, image_url, current_price, currency,
                shipping_price, shipping_currency, shipping_type, item_country, status, notes,
                source_key, external_id, availability_status, availability_detail, last_seen_at, last_checked_at,
-               visual_score, semantic_score, hybrid_score, preference_score, grail_score,
+               visual_score, semantic_score, hybrid_score, preference_score, grail_score, ranking_score,
                rule_score, rule_tier, rule_rejected, rule_reason_json,
                image_features_json, image_embedding_json)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?, ?, 'available', 'found_in_search',
-                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               radar.id,
               item.title,
@@ -849,6 +945,7 @@ function createRadarRunner({
               item.hybrid_score,
               item.preference_score,
               item.grail_score,
+              item.ranking_score,
               item.rule_score,
               item.rule_tier,
               item.rule_rejected,
@@ -912,7 +1009,7 @@ function createRadarRunner({
                last_seen_at = CURRENT_TIMESTAMP, last_checked_at = CURRENT_TIMESTAMP,
                unavailable_since = NULL,
                visual_score = ?, semantic_score = ?, hybrid_score = ?,
-               preference_score = ?, grail_score = ?,
+               preference_score = ?, grail_score = ?, ranking_score = ?,
                rule_score = ?, rule_tier = ?, rule_rejected = ?, rule_reason_json = ?,
                image_features_json = COALESCE(?, image_features_json),
                image_embedding_json = COALESCE(?, image_embedding_json), updated_at = CURRENT_TIMESTAMP
@@ -936,6 +1033,7 @@ function createRadarRunner({
             item.hybrid_score,
             item.preference_score,
             item.grail_score,
+            item.ranking_score,
             item.rule_score,
             item.rule_tier,
             item.rule_rejected,
@@ -1104,7 +1202,19 @@ function createRadarRunner({
             if (source.source === 'mercadolivre' && source.status === 403) {
               return 'Mercado Livre bloqueou busca geral (403)';
             }
-            if (source.skipped) return `${source.source} não configurado`;
+            if (
+              source.source === 'olx' &&
+              source.skipped &&
+              [
+                'pending_homologation',
+                'integration_not_enabled',
+              ].includes(source.reason)
+            ) {
+              return 'OLX via Bridge (integração oficial pendente)';
+            }
+            if (source.skipped) {
+              return `${source.source} não configurado`;
+            }
             return `${source.source} indisponível`;
           })
           .join('; ');

@@ -187,8 +187,134 @@ function radarCriteriaConfig(radar = {}) {
   };
 }
 
+function automaticCategoryGuard(radar = {}, listing = {}) {
+  const category = normalizeText(radar.category || "");
+  const title = normalizeText(listing.title || "");
+
+  if (!title) {
+    return {
+      rejected: false,
+      penalty: 0,
+      reasons: [],
+    };
+  }
+
+  if (
+    category.includes("camera") ||
+    category.includes("filmadora")
+  ) {
+    const hardAccessoryPatterns = [
+      /\bdcra[- ]?[a-z0-9]+\b/,
+      /\bdocking station\b/,
+      /\bcamcorder station\b/,
+      /\bhandycam station\b/,
+      /\bstation dock\b/,
+      /\bdock(?:ing)?\b.*\bfor\b/,
+      /\bbase de carregamento\b/,
+      /\bservice manual\b/,
+      /\bmanual de servico\b/,
+    ];
+
+    const accessoryForPatterns = [
+      /\bcharger\b.*\bfor\b/,
+      /\bbattery\b.*\bfor\b/,
+      /\bcase\b.*\bfor\b/,
+      /\bcable\b.*\bfor\b/,
+      /\bac adapter\b.*\bfor\b/,
+      /\bpower supply\b.*\bfor\b/,
+      /\breplacement\b.*\bfor\b/,
+      /\bcarregador\b.*\bpara\b/,
+      /\bbateria\b.*\bpara\b/,
+      /\bcabo\b.*\bpara\b/,
+      /\badaptador\b.*\bpara\b/,
+    ];
+
+    if (
+      hardAccessoryPatterns.some((pattern) =>
+        pattern.test(title),
+      ) ||
+      accessoryForPatterns.some((pattern) =>
+        pattern.test(title),
+      )
+    ) {
+      return {
+        rejected: true,
+        penalty: 100,
+        reasons: [
+          "acessório de câmera identificado automaticamente",
+        ],
+      };
+    }
+
+    const softAccessoryTerms = [
+      "charger",
+      "charging",
+      "battery",
+      "case",
+      "remote",
+      "cable",
+      "adapter",
+      "tripod",
+      "lens",
+      "fisheye",
+      "dock",
+      "carregador",
+      "bateria",
+      "cabo",
+      "adaptador",
+      "controle remoto",
+    ];
+
+    const cameraSignals = [
+      "camera",
+      "camcorder",
+      "filmadora",
+      "record",
+      "recording",
+      "playback",
+      "tested working",
+      "works",
+      "nightshot",
+      "hdd",
+      "minidv",
+      "video8",
+      "hi8",
+    ];
+
+    const softHits = softAccessoryTerms.filter(
+      (term) => title.includes(term),
+    );
+    const hasCameraSignal = cameraSignals.some(
+      (term) => title.includes(term),
+    );
+
+    if (softHits.length && !hasCameraSignal) {
+      return {
+        rejected: false,
+        penalty: Math.min(
+          35,
+          18 + softHits.length * 6,
+        ),
+        reasons: [
+          `possível acessório: ${softHits.join(", ")}`,
+        ],
+      };
+    }
+  }
+
+  return {
+    rejected: false,
+    penalty: 0,
+    reasons: [],
+  };
+}
+
 function evaluateRadarCriteria(radar = {}, listing = {}) {
   const config = radarCriteriaConfig(radar);
+  const automaticGuard = automaticCategoryGuard(
+    radar,
+    listing,
+  );
   const text = [
     listing.title,
     listing.platform,
@@ -230,10 +356,18 @@ function evaluateRadarCriteria(radar = {}, listing = {}) {
     config.priorityTerms.length > 0 ||
     config.penalizedTerms.length > 0 ||
     config.requiredTerms.length > 0 ||
-    config.excludeTerms.length > 0;
+    config.excludeTerms.length > 0 ||
+    automaticGuard.penalty > 0 ||
+    automaticGuard.rejected;
 
-  const reasons = [];
+  const reasons = [
+    ...automaticGuard.reasons,
+  ];
   let score = Math.round(query.fit * 45);
+
+  if (automaticGuard.penalty > 0) {
+    score -= automaticGuard.penalty;
+  }
 
   if (query.hits > 0) {
     reasons.push(
@@ -320,6 +454,7 @@ function evaluateRadarCriteria(radar = {}, listing = {}) {
   }
 
   const rejected =
+    automaticGuard.rejected ||
     matchedExclude.length > 0 ||
     !requiredSatisfied;
 
@@ -403,6 +538,7 @@ module.exports = {
   parseTerms,
   termsJson,
   radarCriteriaConfig,
+  automaticCategoryGuard,
   evaluateRadarCriteria,
   blendCriteriaScore,
 };

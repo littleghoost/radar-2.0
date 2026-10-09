@@ -451,10 +451,12 @@ async function loadVisualReferenceHistory(radarId) {
       });
       card.appendChild(image);
 
-      if (reference.is_primary) {
+      if (reference.is_primary || reference.is_enabled !== false) {
         const badge = document.createElement("span");
         badge.className = "visual-reference-primary";
-        badge.textContent = "ATIVA";
+        badge.textContent = reference.is_primary
+          ? "PRINCIPAL"
+          : "ATIVA";
         card.appendChild(badge);
       }
 
@@ -479,7 +481,7 @@ async function loadVisualReferenceHistory(radarId) {
         const activate = document.createElement("button");
         activate.type = "button";
         activate.className = "visual-reference-activate";
-        activate.textContent = "Ativar";
+        activate.textContent = "Tornar principal";
         activate.addEventListener("click", async () => {
           activate.disabled = true;
           try {
@@ -1701,7 +1703,14 @@ async function loadListings() {
       }
 
       if (sort === "grail_desc") {
-        return numeric(b.grail_score) - numeric(a.grail_score);
+        return (
+          numeric(
+            b.ranking_score ?? b.grail_score,
+          ) -
+          numeric(
+            a.ranking_score ?? a.grail_score,
+          )
+        );
       }
 
       if (sort === "score_desc") {

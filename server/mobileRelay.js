@@ -284,6 +284,16 @@ function sanitizeSnapshot(body) {
             : Number(listing.current_price),
         currency: String(listing.currency || "BRL").slice(0, 12),
         status: String(listing.status || "novo").slice(0, 40),
+        visual_score:
+          listing.visual_score === null ||
+          listing.visual_score === undefined
+            ? null
+            : Number(listing.visual_score),
+        semantic_score:
+          listing.semantic_score === null ||
+          listing.semantic_score === undefined
+            ? null
+            : Number(listing.semantic_score),
         grail_score:
           listing.grail_score === null ||
           listing.grail_score === undefined
@@ -294,11 +304,22 @@ function sanitizeSnapshot(body) {
           listing.hybrid_score === undefined
             ? null
             : Number(listing.hybrid_score),
+        ranking_score:
+          listing.ranking_score === null ||
+          listing.ranking_score === undefined
+            ? null
+            : Number(listing.ranking_score),
         rule_score:
           listing.rule_score === null ||
           listing.rule_score === undefined
             ? null
             : Number(listing.rule_score),
+        rule_tier: String(
+          listing.rule_tier || "",
+        ).slice(0, 32),
+        rule_rejected: Boolean(
+          listing.rule_rejected,
+        ),
         updated_at: listing.updated_at || null,
       }))
     : [];
@@ -364,6 +385,10 @@ function sanitizeSnapshot(body) {
               ) && thumbnail.length <= 30000
                 ? thumbnail
                 : null,
+            is_enabled:
+              reference.is_enabled === undefined
+                ? true
+                : Boolean(reference.is_enabled),
             is_primary: Boolean(
               reference.is_primary,
             ),

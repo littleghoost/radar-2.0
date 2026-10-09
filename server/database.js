@@ -156,6 +156,10 @@ db.serialize(() => {
       height INTEGER,
       file_size INTEGER,
       thumbnail_data_url TEXT,
+      features_json TEXT,
+      embedding_json TEXT,
+      semantic_model TEXT,
+      is_enabled INTEGER DEFAULT 1,
       is_primary INTEGER DEFAULT 0,
       source TEXT DEFAULT 'mobile',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -163,6 +167,41 @@ db.serialize(() => {
       FOREIGN KEY (radar_id) REFERENCES radars(id) ON DELETE SET NULL
     )
   `);
+
+  db.all(
+    "PRAGMA table_info(visual_references)",
+    (err, columns) => {
+      if (err) {
+        console.error(err);
+        return;
+      }
+
+      const names = new Set(
+        columns.map((column) => column.name),
+      );
+
+      if (!names.has("features_json")) {
+        db.run(
+          "ALTER TABLE visual_references ADD COLUMN features_json TEXT",
+        );
+      }
+      if (!names.has("embedding_json")) {
+        db.run(
+          "ALTER TABLE visual_references ADD COLUMN embedding_json TEXT",
+        );
+      }
+      if (!names.has("semantic_model")) {
+        db.run(
+          "ALTER TABLE visual_references ADD COLUMN semantic_model TEXT",
+        );
+      }
+      if (!names.has("is_enabled")) {
+        db.run(
+          "ALTER TABLE visual_references ADD COLUMN is_enabled INTEGER DEFAULT 1",
+        );
+      }
+    },
+  );
 
   db.run(
     "CREATE INDEX IF NOT EXISTS idx_visual_references_radar ON visual_references(radar_id, created_at DESC)",
@@ -351,6 +390,7 @@ db.serialize(() => {
       image_embedding_json TEXT,
       preference_score REAL,
       grail_score REAL,
+      ranking_score REAL,
       rule_score REAL,
       rule_tier TEXT,
       rule_rejected INTEGER DEFAULT 0,
@@ -375,7 +415,8 @@ db.serialize(() => {
         return;
       }
 
-      const hasCurrency = columns.some((column) => column.name === "currency");
+      db.serialize(() => {
+        const hasCurrency = columns.some((column) => column.name === "currency");
       if (!hasCurrency) {
         db.run("ALTER TABLE listings ADD COLUMN currency TEXT DEFAULT 'BRL'");
       }
@@ -399,6 +440,9 @@ db.serialize(() => {
       }
       if (!columns.some((column) => column.name === "grail_score")) {
         db.run("ALTER TABLE listings ADD COLUMN grail_score REAL");
+      }
+      if (!columns.some((column) => column.name === "ranking_score")) {
+        db.run("ALTER TABLE listings ADD COLUMN ranking_score REAL");
       }
       if (!columns.some((column) => column.name === "rule_score")) {
         db.run("ALTER TABLE listings ADD COLUMN rule_score REAL");
@@ -446,20 +490,21 @@ db.serialize(() => {
         db.run("ALTER TABLE listings ADD COLUMN unavailable_since DATETIME");
       }
 
-      db.run(
-        `CREATE UNIQUE INDEX IF NOT EXISTS idx_listings_source_external
-         ON listings(source_key, external_id)
-         WHERE source_key IS NOT NULL
-           AND external_id IS NOT NULL`,
-        (indexErr) => {
-          if (indexErr) {
-            console.error(
-              "Falha ao criar índice único de anúncios:",
-              indexErr.message,
-            );
-          }
-        },
-      );
+        db.run(
+          `CREATE UNIQUE INDEX IF NOT EXISTS idx_listings_source_external
+           ON listings(source_key, external_id)
+           WHERE source_key IS NOT NULL
+             AND external_id IS NOT NULL`,
+          (indexErr) => {
+            if (indexErr) {
+              console.error(
+                "Falha ao criar índice único de anúncios:",
+                indexErr.message,
+              );
+            }
+          },
+        );
+      });
     },
   );
 
@@ -546,21 +591,22 @@ db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS desktop_settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
-      autostart_enabled INTEGER DEFAULT 0,
+      autostart_enabled INTEGER DEFAULT 1,
       background_enabled INTEGER DEFAULT 1,
       poll_interval_minutes INTEGER DEFAULT 5,
       notify_new_listings INTEGER DEFAULT 1,
       notify_price_drops INTEGER DEFAULT 1,
       notify_unavailable INTEGER DEFAULT 1,
       notify_errors INTEGER DEFAULT 1,
-      start_minimized INTEGER DEFAULT 0,
+      start_minimized INTEGER DEFAULT 1,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   db.run(`
-    INSERT OR IGNORE INTO desktop_settings (id)
-    VALUES (1)
+    INSERT OR IGNORE INTO desktop_settings
+      (id, autostart_enabled, start_minimized)
+    VALUES (1, 1, 1)
   `);
 
   db.all(

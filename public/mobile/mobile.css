@@ -62,6 +62,10 @@ h3{font-size:16px}
 .listing-meta{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:9px}
 .listing-price{font-size:14px}
 .listing-score{font-size:10px;color:var(--muted)}
+.listing-score-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.listing-score-row .score-chip{padding:4px 6px;border-radius:999px;background:#20262e;color:var(--muted);font-size:8px;font-weight:800}
+.listing-score-row .score-chip:empty{display:none}
+.listing-score-row .grail-chip{color:var(--accent);background:rgba(115,247,162,.08)}
 .listing-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:0 9px 9px}
 .status-button{padding:9px 4px;font-size:10px}
 .status-button.interesting{background:rgba(115,247,162,.1);color:var(--accent)}
