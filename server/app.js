@@ -47,6 +47,42 @@ const VISUAL_REFERENCE_DIR =
 fs.mkdirSync(IMAGE_DIR, { recursive: true });
 fs.mkdirSync(VISUAL_REFERENCE_DIR, { recursive: true });
 
+function resolveStoredFilePath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return raw;
+
+  if (process.platform === "win32") {
+    const wslPath = raw.match(
+      /^\/mnt\/([a-zA-Z])(?:\/(.*))?$/,
+    );
+
+    if (wslPath) {
+      const drive = wslPath[1].toUpperCase();
+      const rest = String(
+        wslPath[2] || "",
+      ).replace(/\//g, "\\");
+      return `${drive}:\\${rest}`;
+    }
+  } else {
+    const windowsPath = raw.match(
+      /^([a-zA-Z]):[\\/](.*)$/,
+    );
+
+    if (
+      windowsPath &&
+      fs.existsSync("/mnt")
+    ) {
+      const drive = windowsPath[1].toLowerCase();
+      const rest = String(
+        windowsPath[2] || "",
+      ).replace(/\\/g, "/");
+      return `/mnt/${drive}/${rest}`;
+    }
+  }
+
+  return raw;
+}
+
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false }));
 
@@ -2001,7 +2037,13 @@ app.get("/api/radars/:id/reference-image", async (req, res) => {
   try {
     const radar = await get("SELECT reference_image_path FROM radars WHERE id = ?", [req.params.id]);
     if (!radar?.reference_image_path) return res.status(404).end();
-    res.sendFile(path.resolve(radar.reference_image_path));
+    res.sendFile(
+      path.resolve(
+        resolveStoredFilePath(
+          radar.reference_image_path,
+        ),
+      ),
+    );
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2011,7 +2053,11 @@ app.delete("/api/radars/:id/reference-image", async (req, res) => {
   try {
     const radar = await get("SELECT reference_image_path FROM radars WHERE id = ?", [req.params.id]);
     if (radar?.reference_image_path) {
-      await fsp.unlink(radar.reference_image_path).catch(() => {});
+      await fsp.unlink(
+        resolveStoredFilePath(
+          radar.reference_image_path,
+        ),
+      ).catch(() => {});
     }
     await run(
       "UPDATE radars SET reference_image_path = NULL, reference_features_json = NULL, reference_embedding_json = NULL, semantic_model = NULL, visual_enabled = 0 WHERE id = ?",
@@ -2439,7 +2485,9 @@ app.delete(
       }
 
       for (const imagePath of visualPaths) {
-        await fsp.unlink(imagePath).catch(() => {});
+        await fsp.unlink(
+          resolveStoredFilePath(imagePath),
+        ).catch(() => {});
       }
 
       await run(
@@ -5774,7 +5822,11 @@ app.get("/api/visual-references/:id/image", async (req, res) => {
     }
 
     res.sendFile(
-      path.resolve(reference.image_path),
+      path.resolve(
+        resolveStoredFilePath(
+          reference.image_path,
+        ),
+      ),
     );
   } catch (err) {
     res.status(500).json({
@@ -5797,7 +5849,9 @@ app.post("/api/visual-references/:id/activate", async (req, res) => {
     }
 
     const bytes = await fsp.readFile(
-      reference.image_path,
+      resolveStoredFilePath(
+        reference.image_path,
+      ),
     );
     const features =
       await extractVisualFeatures(bytes);
@@ -5885,7 +5939,11 @@ app.delete("/api/visual-references/:id", async (req, res) => {
       "DELETE FROM visual_references WHERE id = ?",
       [reference.id],
     );
-    await fsp.unlink(reference.image_path).catch(() => {});
+    await fsp.unlink(
+      resolveStoredFilePath(
+        reference.image_path,
+      ),
+    ).catch(() => {});
 
     if (reference.is_primary && reference.radar_id) {
       const fallback = await get(
@@ -5900,7 +5958,9 @@ app.delete("/api/visual-references/:id", async (req, res) => {
       if (fallback?.image_path) {
         try {
           const bytes = await fsp.readFile(
-            fallback.image_path,
+            resolveStoredFilePath(
+              fallback.image_path,
+            ),
           );
           const features =
             await extractVisualFeatures(bytes);
