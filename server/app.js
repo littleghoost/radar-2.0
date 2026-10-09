@@ -1479,6 +1479,44 @@ async function autoAssignListing(listing, radars) {
 
       if (criteria?.rejected) return false;
 
+      const radarCategory = String(
+        candidate.radar.category || "",
+      ).toLowerCase();
+      const radarTarget = [
+        candidate.radar.name,
+        candidate.radar.query,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      if (
+        (
+          radarCategory.includes("camera") ||
+          radarCategory.includes("filmadora")
+        ) &&
+        radarTarget.includes("hdd")
+      ) {
+        const storageSignals = new Set([
+          "hdd",
+          "hard disk",
+          "dcr-sr",
+          "hdr-sr",
+          "hdr-xr",
+        ]);
+        const hasStorageSignal =
+          criteria.matchedPriority.some(
+            (term) =>
+              storageSignals.has(
+                String(term || "").toLowerCase(),
+              ),
+          );
+
+        if (!hasStorageSignal) {
+          return false;
+        }
+      }
+
       if (criteria?.hasCustomRules) {
         return (
           criteria.matchedPriority.length > 0 ||
