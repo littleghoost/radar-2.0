@@ -31,6 +31,9 @@ const {
   getFxRates,
   estimateBrazilImportCost,
 } = require("./services/internationalCost");
+const {
+  resolveStoredFilePath,
+} = require("./services/storedFilePath");
 
 const app = express();
 
@@ -46,42 +49,6 @@ const VISUAL_REFERENCE_DIR =
   path.join(DATA_ROOT, "visual-references");
 fs.mkdirSync(IMAGE_DIR, { recursive: true });
 fs.mkdirSync(VISUAL_REFERENCE_DIR, { recursive: true });
-
-function resolveStoredFilePath(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return raw;
-
-  if (process.platform === "win32") {
-    const wslPath = raw.match(
-      /^\/mnt\/([a-zA-Z])(?:\/(.*))?$/,
-    );
-
-    if (wslPath) {
-      const drive = wslPath[1].toUpperCase();
-      const rest = String(
-        wslPath[2] || "",
-      ).replace(/\//g, "\\");
-      return `${drive}:\\${rest}`;
-    }
-  } else {
-    const windowsPath = raw.match(
-      /^([a-zA-Z]):[\\/](.*)$/,
-    );
-
-    if (
-      windowsPath &&
-      fs.existsSync("/mnt")
-    ) {
-      const drive = windowsPath[1].toLowerCase();
-      const rest = String(
-        windowsPath[2] || "",
-      ).replace(/\\/g, "/");
-      return `/mnt/${drive}/${rest}`;
-    }
-  }
-
-  return raw;
-}
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false }));

@@ -10,6 +10,9 @@ const {
 const {
   createSearchPlanner,
 } = require("./searchPlanner");
+const {
+  resolveStoredFilePath,
+} = require("./storedFilePath");
 
 
 async function mapWithConcurrency(items, limit, mapper) {
@@ -572,7 +575,11 @@ function createRadarRunner({
       let referenceImageBuffer = null;
       if (radar.reference_image_path) {
         try {
-          referenceImageBuffer = await fs.readFile(radar.reference_image_path);
+          referenceImageBuffer = await fs.readFile(
+            resolveStoredFilePath(
+              radar.reference_image_path,
+            ),
+          );
         } catch {
           referenceImageBuffer = null;
         }
