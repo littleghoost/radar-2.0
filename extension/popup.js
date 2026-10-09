@@ -139,6 +139,8 @@ async function loadAutoBrowseState() {
     lastAutoBrowseStatus: null,
     lastAutoBrowseDiagnostics: null,
     lastAutoBrowseSourceUrl: null,
+    lastAutoBrowseJobsTried: 0,
+    lastAutoBrowseEmptySkipped: 0,
   });
 
   const checkbox = $('#autoBrowseEnabled');
@@ -191,13 +193,18 @@ async function loadAutoBrowseState() {
         : '';
 
     const bridgeVersion = chrome.runtime.getManifest().version;
+    const attemptsText =
+      Number(stored.lastAutoBrowseJobsTried || 0) > 1 ||
+      Number(stored.lastAutoBrowseEmptySkipped || 0) > 0
+        ? ` • tentativas ${stored.lastAutoBrowseJobsTried || 0} • vazias puladas ${stored.lastAutoBrowseEmptySkipped || 0}`
+        : '';
 
     status.textContent =
       `Ligado [v${bridgeVersion}] • ${stored.lastAutoBrowseStatus || 'aguardando'} • ` +
       `${stored.lastAutoBrowseCount || 0} lidos • ` +
       `${stored.lastAutoBrowseImported || 0} novos • ` +
       `${stored.lastAutoBrowseUpdated || 0} atualizados • ` +
-      `fila ${queueCount} • ${time}${diagnosticText}`;
+      `fila ${queueCount} • ${time}${attemptsText}${diagnosticText}`;
     return;
   }
 

@@ -152,8 +152,72 @@ async function importAutoCapture(
   }
 }
 
-function autoBrowseSearchUrl(source, query) {
-  const clean = String(query || '').trim();
+function sourceOptimizedQuery(
+  source,
+  query,
+  radar = {},
+) {
+  let clean = String(query || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!clean) return '';
+
+  if (source === 'olx') {
+    const category = String(
+      radar.category || '',
+    ).toLowerCase();
+
+    if (
+      category === 'roupas' ||
+      category === 'clothing' ||
+      category === 'fashion'
+    ) {
+      clean = clean
+        .replace(
+          /\b(?:vintage|original|rare|raro|raridade)\b/gi,
+          ' ',
+        )
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    if (category === 'cameras') {
+      const model = clean.match(
+        /\b(?:DCR|HDR)-(?:SR|XR)[A-Z0-9-]*\b/i,
+      )?.[0];
+
+      if (model) {
+        clean = `Sony Handycam ${model.toUpperCase()}`;
+      } else if (
+        /\b(?:vis[aã]o noturna|night\s*shot|nightshot)\b/i.test(
+          clean,
+        )
+      ) {
+        clean = 'Sony Handycam NightShot';
+      } else if (
+        /\b(?:hard disk|hdd)\b/i.test(clean)
+      ) {
+        clean = 'Sony Handycam HDD';
+      }
+    }
+  }
+
+  return clean
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function autoBrowseSearchUrl(
+  source,
+  query,
+  radar = {},
+) {
+  const clean = sourceOptimizedQuery(
+    source,
+    query,
+    radar,
+  );
   const encoded = encodeURIComponent(clean);
 
   if (!clean) return null;
@@ -212,6 +276,7 @@ async function buildDueAutoBrowseJobs({
   });
 
   if (
+    !force &&
     Array.isArray(stored.autoBrowseQueue) &&
     stored.autoBrowseQueue.length
   ) {
@@ -259,18 +324,36 @@ async function buildDueAutoBrowseJobs({
           query.next_selected &&
           Boolean(query.enabled),
       )
-      .slice(0, 2);
+      .slice(0, force ? 4 : 2);
 
     if (!selected.length) continue;
 
     for (const query of selected) {
       for (const source of autoBrowseSourcesForRadar(radar)) {
+        const sourceQuery =
+          sourceOptimizedQuery(
+            source,
+            query.query_text,
+            radar,
+          );
         const url = autoBrowseSearchUrl(
           source,
-          query.query_text,
+          sourceQuery,
+          radar,
         );
 
         if (!url) continue;
+
+        const duplicate = jobs.some(
+          (job) =>
+            job.radar_id === radar.id &&
+            job.source === source &&
+            String(
+              job.source_query || job.query,
+            ).toLowerCase() ===
+              sourceQuery.toLowerCase(),
+        );
+        if (duplicate) continue;
 
         jobs.push({
           id:
@@ -279,6 +362,7 @@ async function buildDueAutoBrowseJobs({
           radar_name: radar.name,
           source,
           query: query.query_text,
+          source_query: sourceQuery,
           url,
           attempts: 0,
           created_at: new Date(now).toISOString(),
@@ -533,9 +617,32 @@ async function processAutoBrowseTick(
       ? stored.autoBrowseQueue
       : [];
 
-    if (!queue.length) {
+    // O clique manual representa “rode agora”. Filas antigas, sem
+    // source_query, são descartadas; uma fila nova desta versão continua
+    // de onde parou para não repetir as mesmas buscas vazias.
+    if (force) {
+      queue = queue.filter(
+        (job) => Boolean(job?.source_query),
+      );
+
+      const hasPreferredJobs =
+        !preferredSource ||
+        queue.some(
+          (job) =>
+            job.source === preferredSource,
+        );
+
+      if (
+        !queue.length ||
+        !hasPreferredJobs
+      ) {
+        queue = await buildDueAutoBrowseJobs({
+          force: true,
+        });
+      }
+    } else if (!queue.length) {
       queue = await buildDueAutoBrowseJobs({
-        force,
+        force: false,
       });
     }
 
@@ -556,61 +663,101 @@ async function processAutoBrowseTick(
       };
     }
 
-    let jobIndex = 0;
-    if (preferredSource) {
-      const preferredIndex =
-        queue.findIndex(
-          (candidate) =>
-            candidate.source ===
-            preferredSource,
-        );
-      if (preferredIndex >= 0) {
-        jobIndex = preferredIndex;
+    const maxJobs = force ? 4 : 2;
+    let jobsTried = 0;
+    let emptyJobsSkipped = 0;
+    let job = null;
+    let result = null;
+
+    while (
+      queue.length &&
+      jobsTried < maxJobs
+    ) {
+      let jobIndex = 0;
+
+      if (preferredSource) {
+        const preferredIndex =
+          queue.findIndex(
+            (candidate) =>
+              candidate.source ===
+              preferredSource,
+          );
+
+        if (preferredIndex >= 0) {
+          jobIndex = preferredIndex;
+        } else if (force) {
+          break;
+        }
       }
+
+      job = queue[jobIndex];
+      const queueWithoutJob = [
+        ...queue.slice(0, jobIndex),
+        ...queue.slice(jobIndex + 1),
+      ];
+
+      try {
+        result = await runAutoBrowseJob(job);
+        queue = queueWithoutJob;
+      } catch (error) {
+        const attempts =
+          Number(job.attempts || 0) + 1;
+
+        if (attempts <= 1 && !force) {
+          queue = [
+            ...queueWithoutJob,
+            {
+              ...job,
+              attempts,
+            },
+          ];
+        } else {
+          queue = queueWithoutJob;
+        }
+
+        result = {
+          ok: false,
+          error:
+            error?.message || String(error),
+          capture_count: 0,
+          imported: 0,
+          updated: 0,
+        };
+      }
+
+      jobsTried += 1;
+
+      if (
+        Number(result?.capture_count || 0) > 0 ||
+        result?.error
+      ) {
+        break;
+      }
+
+      emptyJobsSkipped += 1;
     }
 
-    const job = queue[jobIndex];
-    const queueWithoutJob = [
-      ...queue.slice(0, jobIndex),
-      ...queue.slice(jobIndex + 1),
-    ];
-    let result;
-
-    try {
-      result = await runAutoBrowseJob(job);
-      queue = queueWithoutJob;
-    } catch (error) {
-      const attempts =
-        Number(job.attempts || 0) + 1;
-
-      if (attempts <= 1) {
-        queue = [
-          ...queueWithoutJob,
-          {
-            ...job,
-            attempts,
-          },
-        ];
-      } else {
-        queue = queueWithoutJob;
-      }
-
+    if (!job || !result) {
       result = {
-        ok: false,
-        error:
-          error?.message || String(error),
+        ok: true,
         capture_count: 0,
         imported: 0,
         updated: 0,
       };
     }
 
+    const displayedQuery =
+      job?.source_query ||
+      job?.query ||
+      '';
+
     await chrome.storage.local.set({
       autoBrowseQueue: queue,
       lastAutoBrowseAt:
         new Date().toISOString(),
-      lastAutoBrowseSource: job.source,
-      lastAutoBrowseQuery: job.query,
+      lastAutoBrowseSource:
+        job?.source || preferredSource || null,
+      lastAutoBrowseQuery: displayedQuery,
       lastAutoBrowseCount:
         result.capture_count || 0,
       lastAutoBrowseImported:
@@ -624,10 +771,21 @@ async function processAutoBrowseTick(
       lastAutoBrowseDiagnostics:
         result.diagnostics || null,
       lastAutoBrowseSourceUrl:
-        result.source_url || job.url || null,
+        result.source_url || job?.url || null,
+      lastAutoBrowseJobsTried: jobsTried,
+      lastAutoBrowseEmptySkipped:
+        emptyJobsSkipped,
       lastAutoBrowseStatus:
         result.ok
-          ? `${job.source} • ${job.query}`
+          ? [
+              job?.source,
+              displayedQuery,
+              emptyJobsSkipped
+                ? `${emptyJobsSkipped} busca(s) vazia(s) pulada(s)`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(' • ')
           : null,
     });
 
@@ -635,6 +793,8 @@ async function processAutoBrowseTick(
       ok: result.ok,
       job,
       result,
+      jobs_tried: jobsTried,
+      empty_skipped: emptyJobsSkipped,
       remaining: queue.length,
     };
   } finally {
