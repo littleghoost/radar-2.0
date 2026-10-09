@@ -403,8 +403,18 @@
   function collectVisibleListings(limit = 100) {
     const platform = detectPlatform(location.hostname);
     const anchors = [...document.querySelectorAll('a[href]')];
+    const bodyText = String(
+      document.body?.innerText || '',
+    )
+      .replace(/\s+/g, ' ')
+      .trim();
+
     const diagnostics = {
       anchors: anchors.length,
+      noResults:
+        /nenhum an[uú]ncio foi encontrado/i.test(bodyText) ||
+        /0\s*-\s*0\s+de\s+0\s+resultados/i.test(bodyText) ||
+        /nenhum produto encontrado/i.test(bodyText),
       olxCards: document.querySelectorAll('[data-cy="l-card"], [data-testid="l-card"], article').length,
       images: document.querySelectorAll('img').length,
       priceTexts: [...document.querySelectorAll('body *')].filter((el) => /R\$\s*\d/.test(el.textContent || '')).length,
@@ -422,7 +432,7 @@
       const enjoeiItems = collectEnjoeiProductCards(limit, diagnostics);
       if (enjoeiItems.length) {
         return {
-          version: 8,
+          version: 9,
           source_url: location.href,
           platform,
           captured_at: new Date().toISOString(),
@@ -491,7 +501,7 @@
     }
 
     return {
-      version: 8,
+      version: 9,
       source_url: location.href,
       platform,
       captured_at: new Date().toISOString(),

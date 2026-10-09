@@ -47,6 +47,23 @@
           Desligado por padrão.
         </div>
 
+        <div
+          id="autoBrowseProgress"
+          class="browse-progress"
+          hidden
+        >
+          <div class="browse-progress-head">
+            <strong id="autoBrowseProgressMessage">
+              Preparando...
+            </strong>
+            <span id="autoBrowseProgressPercent">0%</span>
+          </div>
+          <div class="browse-progress-track">
+            <span id="autoBrowseProgressBar"></span>
+          </div>
+          <small id="autoBrowseProgressDetail"></small>
+        </div>
+
         <button id="runAutoBrowseNow" class="secondary" disabled>
           Rodar próxima busca agora
         </button>

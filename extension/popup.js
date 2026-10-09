@@ -141,11 +141,24 @@ async function loadAutoBrowseState() {
     lastAutoBrowseSourceUrl: null,
     lastAutoBrowseJobsTried: 0,
     lastAutoBrowseEmptySkipped: 0,
+    autoBrowseProgressRunning: false,
+    autoBrowseProgressPercent: 0,
+    autoBrowseProgressMessage: '',
+    autoBrowseProgressDetail: '',
+    autoBrowseProgressFound: 0,
+    autoBrowseProgressTried: 0,
+    autoBrowseProgressTotal: 0,
+    autoBrowseProgressEmpty: 0,
   });
 
   const checkbox = $('#autoBrowseEnabled');
   const status = $('#autoBrowseStatus');
   const runButton = $('#runAutoBrowseNow');
+  const progress = $('#autoBrowseProgress');
+  const progressBar = $('#autoBrowseProgressBar');
+  const progressPercent = $('#autoBrowseProgressPercent');
+  const progressMessage = $('#autoBrowseProgressMessage');
+  const progressDetail = $('#autoBrowseProgressDetail');
 
   if (checkbox) {
     checkbox.checked =
@@ -154,7 +167,70 @@ async function loadAutoBrowseState() {
 
   if (runButton) {
     runButton.disabled =
-      !stored.autoBrowseEnabled;
+      !stored.autoBrowseEnabled ||
+      Boolean(stored.autoBrowseProgressRunning);
+    runButton.textContent =
+      stored.autoBrowseProgressRunning
+        ? 'Buscando em segundo plano...'
+        : 'Rodar próxima busca agora';
+  }
+
+  if (progress) {
+    const hasProgress =
+      stored.autoBrowseProgressRunning ||
+      Number(stored.autoBrowseProgressPercent || 0) > 0;
+
+    progress.hidden = !hasProgress;
+
+    if (hasProgress) {
+      const percent = Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            stored.autoBrowseProgressPercent || 0,
+          ),
+        ),
+      );
+
+      progressBar.style.width =
+        `${percent}%`;
+      progressPercent.textContent =
+        `${Math.round(percent)}%`;
+      progressMessage.textContent =
+        stored.autoBrowseProgressMessage ||
+        'Preparando...';
+
+      const counters = [];
+      if (
+        Number(stored.autoBrowseProgressTotal || 0) > 0
+      ) {
+        counters.push(
+          `${stored.autoBrowseProgressTried || 0}/${stored.autoBrowseProgressTotal || 0} buscas`,
+        );
+      }
+      if (
+        Number(stored.autoBrowseProgressEmpty || 0) > 0
+      ) {
+        counters.push(
+          `${stored.autoBrowseProgressEmpty} vazia(s)`,
+        );
+      }
+      if (
+        Number(stored.autoBrowseProgressFound || 0) > 0
+      ) {
+        counters.push(
+          `${stored.autoBrowseProgressFound} anúncio(s)`,
+        );
+      }
+
+      progressDetail.textContent = [
+        stored.autoBrowseProgressDetail,
+        ...counters,
+      ]
+        .filter(Boolean)
+        .join(' • ');
+    }
   }
 
   if (!status) return;
@@ -317,6 +393,14 @@ $('#autoBrowseEnabled')?.addEventListener(
         : {
             autoBrowseQueue: [],
             lastAutoBrowseRemaining: 0,
+            autoBrowseProgressRunning: false,
+            autoBrowseProgressPercent: 0,
+            autoBrowseProgressMessage: '',
+            autoBrowseProgressDetail: '',
+            autoBrowseProgressFound: 0,
+            autoBrowseProgressTried: 0,
+            autoBrowseProgressTotal: 0,
+            autoBrowseProgressEmpty: 0,
           }),
     });
 
@@ -369,11 +453,17 @@ $('#runAutoBrowseNow')?.addEventListener(
         );
       }
     } catch (error) {
+      const message =
+        error?.message || String(error);
       await chrome.storage.local.set({
         lastAutoBrowseAt:
           new Date().toISOString(),
-        lastAutoBrowseError:
-          error?.message || String(error),
+        lastAutoBrowseError: message,
+        autoBrowseProgressRunning: false,
+        autoBrowseProgressPercent: 100,
+        autoBrowseProgressMessage:
+          'Busca interrompida',
+        autoBrowseProgressDetail: message,
       });
     } finally {
       button.textContent = original;
@@ -386,6 +476,25 @@ $('#radarSelect').addEventListener('change', async () => {
   const radarId = $('#radarSelect').value || null;
   await chrome.storage.local.set({ lastRadarId: radarId });
 });
+
+chrome.storage.onChanged.addListener(
+  (changes, areaName) => {
+    if (areaName !== 'local') return;
+
+    const keys = Object.keys(changes);
+    if (
+      keys.some(
+        (key) =>
+          key.startsWith('autoBrowseProgress') ||
+          key.startsWith('lastAutoBrowse') ||
+          key === 'autoBrowseQueue' ||
+          key === 'autoBrowseEnabled',
+      )
+    ) {
+      loadAutoBrowseState().catch(() => {});
+    }
+  },
+);
 
 activeTab().then((tab) => {
   try { $('#pageHost').textContent = new URL(tab.url).hostname; } catch { $('#pageHost').textContent = 'aba atual'; }

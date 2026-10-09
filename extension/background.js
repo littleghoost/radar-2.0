@@ -62,6 +62,41 @@ async function ensureAutoBrowseAlarm() {
   }
 }
 
+async function setAutoBrowseProgress({
+  running = false,
+  percent = 0,
+  message = '',
+  detail = '',
+  found = 0,
+  tried = 0,
+  total = 0,
+  empty = 0,
+} = {}) {
+  await chrome.storage.local.set({
+    autoBrowseProgressRunning: Boolean(running),
+    autoBrowseProgressPercent: Math.max(
+      0,
+      Math.min(100, Math.round(Number(percent) || 0)),
+    ),
+    autoBrowseProgressMessage: String(
+      message || '',
+    ).slice(0, 180),
+    autoBrowseProgressDetail: String(
+      detail || '',
+    ).slice(0, 240),
+    autoBrowseProgressFound:
+      Math.max(0, Number(found) || 0),
+    autoBrowseProgressTried:
+      Math.max(0, Number(tried) || 0),
+    autoBrowseProgressTotal:
+      Math.max(0, Number(total) || 0),
+    autoBrowseProgressEmpty:
+      Math.max(0, Number(empty) || 0),
+    autoBrowseProgressUpdatedAt:
+      new Date().toISOString(),
+  });
+}
+
 async function notifyAutoCapture(result) {
   const parts = [];
 
@@ -456,6 +491,12 @@ async function collectFromAutoBrowseTab(
         if (lastCapture.items?.length) {
           return lastCapture;
         }
+
+        if (
+          lastCapture.diagnostics?.noResults
+        ) {
+          return lastCapture;
+        }
       } else {
         lastError = new Error(
           response?.error ||
@@ -484,29 +525,16 @@ async function collectFromAutoBrowseTab(
 }
 
 async function runAutoBrowseJob(job) {
-  const needsActiveTab = job.source === 'olx';
-  const previousTabs = needsActiveTab
-    ? await chrome.tabs.query({
-        active: true,
-        lastFocusedWindow: true,
-      })
-    : [];
-  const previousTab = previousTabs[0] || null;
-
+  // A busca roda em aba de fundo para não roubar o foco do usuário.
+  // O collector recebe mensagens diretamente, então não depende do
+  // Auto-Capture visível da página.
   const tab = await chrome.tabs.create({
     url: job.url,
-    active: needsActiveTab,
+    active: false,
   });
 
   try {
     await waitForTabComplete(tab);
-
-    if (needsActiveTab) {
-      await chrome.tabs.update(tab.id, {
-        active: true,
-      });
-      await delay(2200);
-    }
 
     const capture =
       await collectFromAutoBrowseTab(
@@ -537,24 +565,6 @@ async function runAutoBrowseJob(job) {
       source_url: capture?.source_url || job.url,
     };
   } finally {
-    if (
-      needsActiveTab &&
-      previousTab?.id
-    ) {
-      await chrome.tabs
-        .update(previousTab.id, {
-          active: true,
-        })
-        .catch(() => {});
-      if (previousTab.windowId) {
-        await chrome.windows
-          .update(previousTab.windowId, {
-            focused: true,
-          })
-          .catch(() => {});
-      }
-    }
-
     if (tab?.id) {
       await chrome.tabs.remove(tab.id).catch(() => {});
     }
@@ -591,6 +601,12 @@ async function processAutoBrowseTick(
         lastAutoBrowseAt: new Date().toISOString(),
         lastAutoBrowseError: 'Radar Desktop offline. Fila preservada.',
       });
+      await setAutoBrowseProgress({
+        running: false,
+        percent: 100,
+        message: 'Radar Desktop offline',
+        detail: 'Fila preservada para a próxima tentativa.',
+      });
       return {
         ok: false,
         skipped: true,
@@ -604,6 +620,12 @@ async function processAutoBrowseTick(
     });
 
     if (!stored.autoBrowseEnabled) {
+      await setAutoBrowseProgress({
+        running: false,
+        percent: 0,
+        message: '',
+        detail: '',
+      });
       return {
         ok: true,
         skipped: true,
@@ -647,13 +669,20 @@ async function processAutoBrowseTick(
     }
 
     if (!queue.length) {
+      const emptyMessage = force
+        ? 'Nenhuma busca habilitada disponível.'
+        : 'Nenhuma busca agendada está vencida.';
+
       await chrome.storage.local.set({
         lastAutoBrowseAt:
           new Date().toISOString(),
-        lastAutoBrowseStatus: force
-          ? 'Nenhuma busca habilitada disponível.'
-          : 'Nenhuma busca agendada está vencida.',
+        lastAutoBrowseStatus: emptyMessage,
         lastAutoBrowseError: null,
+      });
+      await setAutoBrowseProgress({
+        running: false,
+        percent: 100,
+        message: emptyMessage,
       });
 
       return {
@@ -664,6 +693,28 @@ async function processAutoBrowseTick(
     }
 
     const maxJobs = force ? 4 : 2;
+    const availableJobs = preferredSource
+      ? queue.filter(
+          (candidate) =>
+            candidate.source ===
+            preferredSource,
+        ).length
+      : queue.length;
+    const progressTotal = Math.max(
+      1,
+      Math.min(maxJobs, availableJobs || maxJobs),
+    );
+
+    await setAutoBrowseProgress({
+      running: true,
+      percent: 2,
+      message: 'Preparando buscas...',
+      detail: preferredSource
+        ? `Fonte: ${preferredSource}`
+        : 'Search Planner',
+      total: progressTotal,
+    });
+
     let jobsTried = 0;
     let emptyJobsSkipped = 0;
     let job = null;
@@ -695,6 +746,25 @@ async function processAutoBrowseTick(
         ...queue.slice(0, jobIndex),
         ...queue.slice(jobIndex + 1),
       ];
+      const currentQuery =
+        job.source_query ||
+        job.query ||
+        '';
+
+      await setAutoBrowseProgress({
+        running: true,
+        percent: Math.max(
+          5,
+          Math.round(
+            (jobsTried / progressTotal) * 90,
+          ),
+        ),
+        message: `Buscando: ${currentQuery}`,
+        detail: `${job.source} • tentativa ${jobsTried + 1} de ${progressTotal}`,
+        tried: jobsTried,
+        total: progressTotal,
+        empty: emptyJobsSkipped,
+      });
 
       try {
         result = await runAutoBrowseJob(job);
@@ -727,14 +797,71 @@ async function processAutoBrowseTick(
 
       jobsTried += 1;
 
-      if (
-        Number(result?.capture_count || 0) > 0 ||
-        result?.error
-      ) {
+      const captureCount = Number(
+        result?.capture_count || 0,
+      );
+
+      if (captureCount > 0) {
+        await setAutoBrowseProgress({
+          running: true,
+          percent: 96,
+          message: `${captureCount} anúncio(s) encontrado(s)`,
+          detail: `${job.source} • ${currentQuery}`,
+          found: captureCount,
+          tried: jobsTried,
+          total: progressTotal,
+          empty: emptyJobsSkipped,
+        });
         break;
       }
 
+      if (result?.error) {
+        await setAutoBrowseProgress({
+          running: true,
+          percent: Math.min(
+            92,
+            Math.round(
+              (jobsTried / progressTotal) * 90,
+            ),
+          ),
+          message: force
+            ? 'Falha nesta busca — pulando'
+            : 'Falha nesta busca',
+          detail: result.error,
+          tried: jobsTried,
+          total: progressTotal,
+          empty: emptyJobsSkipped,
+        });
+
+        if (!force) {
+          break;
+        }
+
+        emptyJobsSkipped += 1;
+        await delay(350);
+        continue;
+      }
+
       emptyJobsSkipped += 1;
+
+      await setAutoBrowseProgress({
+        running: true,
+        percent: Math.min(
+          92,
+          Math.round(
+            (jobsTried / progressTotal) * 90,
+          ),
+        ),
+        message: result?.diagnostics?.noResults
+          ? '0 resultados — pulando para a próxima'
+          : 'Nenhum anúncio detectado — tentando a próxima',
+        detail: `${job.source} • ${currentQuery}`,
+        tried: jobsTried,
+        total: progressTotal,
+        empty: emptyJobsSkipped,
+      });
+
+      await delay(350);
     }
 
     if (!job || !result) {
@@ -750,6 +877,29 @@ async function processAutoBrowseTick(
       job?.source_query ||
       job?.query ||
       '';
+
+    const finalFound = Number(
+      result?.capture_count || 0,
+    );
+    const finalMessage = result?.error
+      ? 'Busca interrompida por erro'
+      : finalFound > 0
+        ? `Concluído: ${finalFound} anúncio(s) encontrado(s)`
+        : `Concluído: nenhum anúncio nas ${jobsTried} busca(s)`;
+
+    await setAutoBrowseProgress({
+      running: false,
+      percent: 100,
+      message: finalMessage,
+      detail:
+        !finalFound && emptyJobsSkipped
+          ? `${emptyJobsSkipped} busca(s) sem resultado`
+          : displayedQuery,
+      found: finalFound,
+      tried: jobsTried,
+      total: progressTotal,
+      empty: emptyJobsSkipped,
+    });
 
     await chrome.storage.local.set({
       autoBrowseQueue: queue,
