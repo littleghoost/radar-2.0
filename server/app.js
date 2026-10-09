@@ -5207,6 +5207,8 @@ app.post("/api/mobile/sync-now", async (_req, res) => {
       mobileDesktopSync.syncSnapshot(),
       mobileDesktopSync.pollCommands(),
     ]);
+    const pushes =
+      await mobileDesktopSync.dispatchSmartAlerts();
 
     res.json({
       ok: true,
@@ -5214,6 +5216,10 @@ app.post("/api/mobile/sync-now", async (_req, res) => {
       commands_processed: Array.isArray(commands)
         ? commands.length
         : 0,
+      pushes_processed: Array.isArray(pushes)
+        ? pushes.length
+        : 0,
+      pushes,
     });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });

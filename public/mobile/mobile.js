@@ -221,6 +221,166 @@ async function queueRelayCommand(type, commandPayload) {
   );
 }
 
+function base64UrlToUint8Array(value) {
+  const padding = "=".repeat(
+    (4 - (value.length % 4)) % 4,
+  );
+  const base64 = (value + padding)
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  const raw = atob(base64);
+  return Uint8Array.from(
+    [...raw].map((char) => char.charCodeAt(0)),
+  );
+}
+
+function pushSupported() {
+  return Boolean(
+    "serviceWorker" in navigator &&
+      "PushManager" in window &&
+      "Notification" in window,
+  );
+}
+
+async function currentPushSubscription() {
+  if (!pushSupported()) return null;
+  const registration =
+    await navigator.serviceWorker.ready;
+  return registration.pushManager.getSubscription();
+}
+
+async function updateNotificationUi() {
+  const button = $("#notificationButton");
+  const label = $("#notificationStatus");
+  if (!button || !label) return;
+
+  if (state.mode !== "relay") {
+    button.disabled = true;
+    label.textContent = "Disponível no Relay";
+    return;
+  }
+
+  if (!pushSupported()) {
+    button.disabled = true;
+    label.textContent = "Não suportado neste navegador";
+    button.textContent = "Notificações indisponíveis";
+    return;
+  }
+
+  if (Notification.permission === "denied") {
+    button.disabled = true;
+    label.textContent = "Bloqueadas pelo navegador";
+    button.textContent = "Permissão bloqueada";
+    return;
+  }
+
+  try {
+    const subscription =
+      await currentPushSubscription();
+    const active = Boolean(subscription);
+
+    button.disabled = false;
+    button.classList.toggle("active", active);
+    button.textContent = active
+      ? "Desativar notificações"
+      : "Ativar notificações";
+    label.textContent = active
+      ? "Ativas"
+      : Notification.permission === "granted"
+        ? "Desativadas"
+        : "Permissão pendente";
+  } catch {
+    button.disabled = false;
+    label.textContent = "Não foi possível verificar";
+  }
+}
+
+async function enablePushNotifications() {
+  if (!pushSupported()) {
+    throw new Error(
+      "Este navegador não oferece notificações push.",
+    );
+  }
+
+  let permission = Notification.permission;
+  if (permission === "default") {
+    permission =
+      await Notification.requestPermission();
+  }
+
+  if (permission !== "granted") {
+    throw new Error(
+      "Permissão de notificações não concedida.",
+    );
+  }
+
+  const registration =
+    await navigator.serviceWorker.ready;
+  let subscription =
+    await registration.pushManager.getSubscription();
+
+  if (!subscription) {
+    const keys = await relayApi(
+      "/bridge/mobile/device/push-key",
+    );
+
+    subscription =
+      await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey:
+          base64UrlToUint8Array(
+            keys.public_key,
+          ),
+      });
+  }
+
+  await relayApi(
+    "/bridge/mobile/device/push-subscription",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        subscription:
+          subscription.toJSON(),
+      }),
+    },
+  );
+
+  const test = await relayApi(
+    "/bridge/mobile/device/push-test",
+    {
+      method: "POST",
+      body: "{}",
+    },
+  );
+
+  if (!Number(test.delivered || 0)) {
+    throw new Error(
+      "A inscrição foi salva, mas o push de teste não foi entregue.",
+    );
+  }
+
+  return subscription;
+}
+
+async function disablePushNotifications() {
+  const subscription =
+    await currentPushSubscription();
+
+  if (!subscription) return;
+
+  await relayApi(
+    "/bridge/mobile/device/push-subscription",
+    {
+      method: "DELETE",
+      body: JSON.stringify({
+        endpoint: subscription.endpoint,
+      }),
+    },
+  ).catch(() => {});
+
+  await subscription.unsubscribe();
+}
+
 function renderConnectionPanels() {
   const relay = state.mode === "relay";
   $("#relayPanel").hidden = !relay;
@@ -231,6 +391,8 @@ function renderConnectionPanels() {
       state.relayStatus?.desktop_label ||
       "Radar Desktop";
   }
+
+  updateNotificationUi().catch(() => {});
 }
 
 function renderImportRadars() {
@@ -663,6 +825,33 @@ $("#saveConnectionButton").addEventListener(
 
     toast("Endereço salvo.");
     await refresh();
+  },
+);
+
+$("#notificationButton").addEventListener(
+  "click",
+  async () => {
+    const button = $("#notificationButton");
+    button.disabled = true;
+
+    try {
+      const subscription =
+        await currentPushSubscription();
+
+      if (subscription) {
+        await disablePushNotifications();
+        toast("Notificações desativadas.");
+      } else {
+        await enablePushNotifications();
+        toast(
+          "Notificações ativadas. O teste foi enviado.",
+        );
+      }
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      await updateNotificationUi();
+    }
   },
 );
 

@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const webpush = require("web-push");
 
 const PAIRING_TTL_MINUTES = 10;
 const MAX_SNAPSHOT_BYTES = 512 * 1024;
@@ -126,6 +127,43 @@ function initializeMobileRelay(db) {
         completed_at DATETIME
       )
     `);
+
+
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS mobile_relay_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS mobile_push_subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id TEXT NOT NULL,
+        endpoint TEXT NOT NULL UNIQUE,
+        subscription_json TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS mobile_push_deliveries (
+        desktop_id TEXT NOT NULL,
+        event_key TEXT NOT NULL,
+        kind TEXT,
+        title TEXT,
+        delivered_count INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (desktop_id, event_key)
+      )
+    `);
+
+    db.run(
+      "CREATE INDEX IF NOT EXISTS idx_mobile_push_device ON mobile_push_subscriptions(device_id)",
+    );
 
     db.run(
       "CREATE INDEX IF NOT EXISTS idx_mobile_commands_desktop_status ON mobile_commands(desktop_id, status, created_at)",
@@ -385,8 +423,129 @@ function resolvePublicUrl(req) {
   return `${protocol}://${host}`;
 }
 
+function parseSubscription(input) {
+  const subscription =
+    input && typeof input === "object" ? input : {};
+  const endpoint = String(subscription.endpoint || "").trim();
+  const p256dh = String(subscription.keys?.p256dh || "").trim();
+  const auth = String(subscription.keys?.auth || "").trim();
+
+  let parsed;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    return null;
+  }
+
+  if (
+    parsed.protocol !== "https:" ||
+    endpoint.length > 3000 ||
+    p256dh.length < 16 ||
+    auth.length < 8
+  ) {
+    return null;
+  }
+
+  return {
+    endpoint,
+    expirationTime:
+      subscription.expirationTime === null ||
+      subscription.expirationTime === undefined
+        ? null
+        : Number(subscription.expirationTime),
+    keys: { p256dh, auth },
+  };
+}
+
 function registerMobileRelay(app, db) {
   initializeMobileRelay(db);
+
+  async function getVapidKeys() {
+    const existing = await dbGet(
+      db,
+      "SELECT value FROM mobile_relay_settings WHERE key = 'vapid_keys'",
+    );
+
+    if (existing?.value) {
+      try {
+        const parsed = JSON.parse(existing.value);
+        if (parsed.publicKey && parsed.privateKey) {
+          return parsed;
+        }
+      } catch {
+        // Regenera abaixo se o valor persistido estiver inválido.
+      }
+    }
+
+    const generated = webpush.generateVAPIDKeys();
+    await dbRun(
+      db,
+      `INSERT OR IGNORE INTO mobile_relay_settings
+        (key, value, updated_at)
+       VALUES ('vapid_keys', ?, CURRENT_TIMESTAMP)`,
+      [JSON.stringify(generated)],
+    );
+
+    const saved = await dbGet(
+      db,
+      "SELECT value FROM mobile_relay_settings WHERE key = 'vapid_keys'",
+    );
+
+    if (!saved?.value) {
+      throw new Error("Não foi possível persistir as chaves push.");
+    }
+
+    return JSON.parse(saved.value);
+  }
+
+  async function sendPushToSubscriptions(subscriptions, payload) {
+    if (!subscriptions.length) {
+      return { delivered: 0, expired: 0, failed: 0 };
+    }
+
+    const keys = await getVapidKeys();
+    webpush.setVapidDetails(
+      process.env.VAPID_SUBJECT || "mailto:radar2@example.com",
+      keys.publicKey,
+      keys.privateKey,
+    );
+
+    let delivered = 0;
+    let expired = 0;
+    let failed = 0;
+
+    for (const row of subscriptions) {
+      try {
+        const subscription = JSON.parse(row.subscription_json);
+        await webpush.sendNotification(
+          subscription,
+          JSON.stringify(payload),
+          {
+            TTL: 3600,
+            urgency:
+              payload.kind === "high_score_new_listing"
+                ? "high"
+                : "normal",
+          },
+        );
+        delivered += 1;
+      } catch (error) {
+        const statusCode = Number(error?.statusCode || 0);
+        if (statusCode === 404 || statusCode === 410) {
+          expired += 1;
+          await dbRun(
+            db,
+            "DELETE FROM mobile_push_subscriptions WHERE id = ?",
+            [row.id],
+          ).catch(() => {});
+        } else {
+          failed += 1;
+        }
+      }
+    }
+
+    return { delivered, expired, failed };
+  }
 
   const registerLimiter = createMemoryRateLimiter({
     windowMs: 60_000,
@@ -791,6 +950,12 @@ function registerMobileRelay(app, db) {
 
         await dbRun(
           db,
+          "DELETE FROM mobile_push_subscriptions WHERE device_id = ?",
+          [req.params.id],
+        ).catch(() => {});
+
+        await dbRun(
+          db,
           `UPDATE mobile_commands
            SET status = 'cancelled',
                completed_at = CURRENT_TIMESTAMP,
@@ -838,6 +1003,219 @@ function registerMobileRelay(app, db) {
           ok: true,
           bytes: size,
           synced_at: snapshot.synced_at,
+        });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  app.get(
+    "/bridge/mobile/device/push-key",
+    requireDevice,
+    async (_req, res) => {
+      try {
+        const keys = await getVapidKeys();
+        res.json({
+          public_key: keys.publicKey,
+        });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  app.post(
+    "/bridge/mobile/device/push-subscription",
+    requireDevice,
+    async (req, res) => {
+      try {
+        const subscription = parseSubscription(
+          req.body?.subscription || req.body,
+        );
+
+        if (!subscription) {
+          return res.status(400).json({
+            error: "Inscrição push inválida.",
+          });
+        }
+
+        await dbRun(
+          db,
+          `INSERT INTO mobile_push_subscriptions
+            (device_id, endpoint, subscription_json, updated_at)
+           VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(endpoint) DO UPDATE SET
+             device_id = excluded.device_id,
+             subscription_json = excluded.subscription_json,
+             updated_at = CURRENT_TIMESTAMP`,
+          [
+            req.mobileDevice.id,
+            subscription.endpoint,
+            JSON.stringify(subscription),
+          ],
+        );
+
+        res.status(201).json({ ok: true });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  app.delete(
+    "/bridge/mobile/device/push-subscription",
+    requireDevice,
+    async (req, res) => {
+      try {
+        const endpoint = String(req.body?.endpoint || "").trim();
+        if (!endpoint) {
+          return res.status(400).json({
+            error: "Endpoint push ausente.",
+          });
+        }
+
+        await dbRun(
+          db,
+          `DELETE FROM mobile_push_subscriptions
+           WHERE device_id = ? AND endpoint = ?`,
+          [req.mobileDevice.id, endpoint],
+        );
+
+        res.json({ ok: true });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  app.post(
+    "/bridge/mobile/device/push-test",
+    requireDevice,
+    async (req, res) => {
+      try {
+        const subscriptions = await dbAll(
+          db,
+          `SELECT id, subscription_json
+           FROM mobile_push_subscriptions
+           WHERE device_id = ?`,
+          [req.mobileDevice.id],
+        );
+
+        const result = await sendPushToSubscriptions(
+          subscriptions,
+          {
+            kind: "test",
+            title: "Radar 2.0 conectado",
+            body: "As notificações estão funcionando no seu celular.",
+            url: "/mobile/",
+            tag: "radar-push-test",
+          },
+        );
+
+        res.json({ ok: true, ...result });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  app.post(
+    "/bridge/mobile/desktop/push",
+    requireDesktop,
+    async (req, res) => {
+      try {
+        const eventKey = String(req.body?.event_key || "")
+          .trim()
+          .slice(0, 160);
+        const kind = String(req.body?.kind || "")
+          .trim()
+          .slice(0, 80);
+
+        if (
+          !eventKey ||
+          ![
+            "high_score_new_listing",
+            "significant_price_drop",
+          ].includes(kind)
+        ) {
+          return res.status(400).json({
+            error: "Evento push inválido.",
+          });
+        }
+
+        const title = String(req.body?.title || "Radar 2.0")
+          .replace(/[\r\n\t]/g, " ")
+          .trim()
+          .slice(0, 180);
+        const body = String(req.body?.body || "")
+          .replace(/[\r\n\t]/g, " ")
+          .trim()
+          .slice(0, 500);
+        const url = String(req.body?.url || "/mobile/")
+          .trim()
+          .slice(0, 1800);
+
+        const inserted = await dbRun(
+          db,
+          `INSERT OR IGNORE INTO mobile_push_deliveries
+            (desktop_id, event_key, kind, title)
+           VALUES (?, ?, ?, ?)`,
+          [
+            req.mobileDesktop.id,
+            eventKey,
+            kind,
+            title,
+          ],
+        );
+
+        if (!inserted.changes) {
+          return res.json({
+            ok: true,
+            duplicate: true,
+            delivered: 0,
+          });
+        }
+
+        const subscriptions = await dbAll(
+          db,
+          `SELECT s.id, s.subscription_json
+           FROM mobile_push_subscriptions s
+           JOIN mobile_devices d ON d.id = s.device_id
+           WHERE d.desktop_id = ?
+             AND d.revoked_at IS NULL`,
+          [req.mobileDesktop.id],
+        );
+
+        const result = await sendPushToSubscriptions(
+          subscriptions,
+          {
+            kind,
+            title,
+            body,
+            url,
+            listing_id: req.body?.listing_id || null,
+            radar_id: req.body?.radar_id || null,
+            tag: `radar-${kind}-${req.body?.listing_id || eventKey}`,
+          },
+        );
+
+        await dbRun(
+          db,
+          `UPDATE mobile_push_deliveries
+           SET delivered_count = ?
+           WHERE desktop_id = ? AND event_key = ?`,
+          [
+            result.delivered,
+            req.mobileDesktop.id,
+            eventKey,
+          ],
+        );
+
+        res.json({
+          ok: true,
+          duplicate: false,
+          ...result,
         });
       } catch (error) {
         res.status(500).json({ error: error.message });
@@ -1112,6 +1490,11 @@ function registerMobileRelay(app, db) {
            WHERE id = ?`,
           [req.mobileDevice.id],
         );
+        await dbRun(
+          db,
+          "DELETE FROM mobile_push_subscriptions WHERE device_id = ?",
+          [req.mobileDevice.id],
+        ).catch(() => {});
         res.json({ ok: true });
       } catch (error) {
         res.status(500).json({ error: error.message });

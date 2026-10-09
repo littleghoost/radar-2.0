@@ -5,6 +5,7 @@ const DEFAULT_CLOUD_URL =
 const DESKTOP_ID_KEY = "mobile_relay_desktop_id";
 const DESKTOP_SECRET_KEY = "mobile_relay_desktop_key";
 const LAST_SNAPSHOT_KEY = "mobile_relay_last_snapshot_at";
+const LAST_PUSH_EVENT_KEY = "mobile_relay_last_push_event_id";
 
 function dbGet(db, sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -638,6 +639,119 @@ function createMobileDesktopSync({
     );
   }
 
+  async function dispatchSmartAlerts() {
+    const cursorRaw = await getSetting(
+      db,
+      LAST_PUSH_EVENT_KEY,
+    );
+
+    if (cursorRaw === null) {
+      const latest = await dbGet(
+        db,
+        `SELECT COALESCE(MAX(id), 0) AS id
+         FROM activity_events
+         WHERE type = 'smart_alert'`,
+      );
+
+      await setSetting(
+        db,
+        LAST_PUSH_EVENT_KEY,
+        Number(latest?.id || 0),
+      );
+
+      return [];
+    }
+
+    let cursor = Math.max(
+      0,
+      Number(cursorRaw) || 0,
+    );
+
+    const events = await dbAll(
+      db,
+      `SELECT
+         id,
+         radar_id,
+         listing_id,
+         title,
+         detail,
+         metadata_json,
+         created_at
+       FROM activity_events
+       WHERE type = 'smart_alert'
+         AND id > ?
+       ORDER BY id ASC
+       LIMIT 30`,
+      [cursor],
+    );
+
+    const delivered = [];
+
+    for (const event of events) {
+      let metadata = {};
+      try {
+        metadata = event.metadata_json
+          ? JSON.parse(event.metadata_json)
+          : {};
+      } catch {
+        metadata = {};
+      }
+
+      const kind = String(metadata.kind || "");
+      if (
+        ![
+          "high_score_new_listing",
+          "significant_price_drop",
+        ].includes(kind)
+      ) {
+        cursor = event.id;
+        await setSetting(
+          db,
+          LAST_PUSH_EVENT_KEY,
+          cursor,
+        );
+        continue;
+      }
+
+      const result = await relayRequest(
+        "/bridge/mobile/desktop/push",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            event_key: `activity:${event.id}`,
+            kind,
+            title:
+              event.title ||
+              (kind === "high_score_new_listing"
+                ? "Novo grail no Radar"
+                : "Queda de preço no Radar"),
+            body: event.detail || "",
+            url: metadata.url || "/mobile/",
+            listing_id: event.listing_id || null,
+            radar_id: event.radar_id || null,
+          }),
+        },
+      );
+
+      cursor = event.id;
+      await setSetting(
+        db,
+        LAST_PUSH_EVENT_KEY,
+        cursor,
+      );
+
+      delivered.push({
+        event_id: event.id,
+        kind,
+        delivered:
+          Number(result?.delivered) || 0,
+        duplicate: Boolean(result?.duplicate),
+      });
+    }
+
+    return delivered;
+  }
+
   async function pollCommands() {
     if (busyCommands) return [];
     busyCommands = true;
@@ -744,13 +858,16 @@ function createMobileDesktopSync({
 
     started = true;
 
-    const commandLoop = () => {
-      pollCommands().catch((error) => {
+    const commandLoop = async () => {
+      try {
+        await pollCommands();
+        await dispatchSmartAlerts();
+      } catch (error) {
         console.error(
-          "Mobile relay: falha ao buscar comandos:",
+          "Mobile relay: falha no loop remoto:",
           error.message,
         );
-      });
+      }
     };
 
     const snapshotLoop = () => {
@@ -797,6 +914,7 @@ function createMobileDesktopSync({
     revokeDevice,
     syncSnapshot,
     pollCommands,
+    dispatchSmartAlerts,
     buildSnapshot,
     importUrl,
   };

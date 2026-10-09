@@ -103,3 +103,7 @@ h3{font-size:16px}
 .quick-add input,.quick-add select{width:100%;min-width:0;border-radius:13px;border:1px solid var(--line);background:#0e1216;color:var(--text);padding:12px}
 .quick-add .primary{width:auto;margin:0;white-space:nowrap;padding-inline:16px}
 @media(max-width:620px){.quick-add-fields{grid-template-columns:1fr}.quick-add .primary{width:100%}}
+
+.notification-button{margin-top:12px;background:rgba(115,247,162,.1);color:var(--accent)}
+.notification-button.active{background:#20262e;color:var(--text)}
+.notification-button:disabled{opacity:.55;cursor:default}
