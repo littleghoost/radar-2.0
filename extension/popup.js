@@ -326,9 +326,31 @@ $('#runAutoBrowseNow')?.addEventListener(
     button.textContent = 'Rodando...';
 
     try {
+      let preferredSource = null;
+      try {
+        const tab = await activeTab();
+        const host = new URL(
+          tab.url || '',
+        ).hostname.toLowerCase();
+
+        if (host.includes('olx')) {
+          preferredSource = 'olx';
+        } else if (host.includes('enjoei')) {
+          preferredSource = 'enjoei';
+        } else if (
+          host.includes('mercadolivre') ||
+          host.includes('mercadolibre')
+        ) {
+          preferredSource = 'mercadolivre';
+        } else if (host.includes('depop')) {
+          preferredSource = 'depop';
+        }
+      } catch {}
+
       const result =
         await chrome.runtime.sendMessage({
           type: 'radar-auto-browse-now',
+          preferred_source: preferredSource,
         });
 
       if (!result?.ok && !result?.skipped) {

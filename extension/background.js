@@ -333,16 +333,25 @@ function delay(ms) {
   );
 }
 
-async function collectFromAutoBrowseTab(tabId) {
-  // Marketplaces renderizam os cards depois do evento load. Em vez de
-  // assumir que a primeira resposta vazia significa “sem resultados”,
-  // damos tempo para a listagem hidratar e repetimos a leitura.
-  await delay(1800);
+async function collectFromAutoBrowseTab(
+  tabId,
+  source = '',
+) {
+  // Marketplaces renderizam os cards depois do evento load. A OLX, em
+  // particular, hidrata os resultados de forma mais confiável quando a
+  // aba está ativa; por isso ela recebe uma espera inicial maior.
+  await delay(source === 'olx' ? 4200 : 1800);
 
   let lastError = null;
   let lastCapture = null;
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  const maxAttempts = source === 'olx' ? 8 : 6;
+
+  for (
+    let attempt = 0;
+    attempt < maxAttempts;
+    attempt += 1
+  ) {
     try {
       const response = await chrome.tabs.sendMessage(
         tabId,
@@ -368,8 +377,12 @@ async function collectFromAutoBrowseTab(tabId) {
       lastError = error;
     }
 
-    // Backoff curto: até ~13 s extras para páginas client-side.
-    await delay(1400 + attempt * 300);
+    // Backoff curto para páginas client-side. A OLX ganha
+    // alguns segundos extras porque carrega os cards após a hidratação.
+    await delay(
+      (source === 'olx' ? 1800 : 1400) +
+        attempt * 300,
+    );
   }
 
   // Uma captura vazia válida é diferente de falha do collector.
@@ -382,15 +395,35 @@ async function collectFromAutoBrowseTab(tabId) {
 }
 
 async function runAutoBrowseJob(job) {
+  const needsActiveTab = job.source === 'olx';
+  const previousTabs = needsActiveTab
+    ? await chrome.tabs.query({
+        active: true,
+        lastFocusedWindow: true,
+      })
+    : [];
+  const previousTab = previousTabs[0] || null;
+
   const tab = await chrome.tabs.create({
     url: job.url,
-    active: false,
+    active: needsActiveTab,
   });
 
   try {
     await waitForTabComplete(tab);
+
+    if (needsActiveTab) {
+      await chrome.tabs.update(tab.id, {
+        active: true,
+      });
+      await delay(2200);
+    }
+
     const capture =
-      await collectFromAutoBrowseTab(tab.id);
+      await collectFromAutoBrowseTab(
+        tab.id,
+        job.source,
+      );
 
     const result = await importAutoCapture(
       capture,
@@ -415,6 +448,24 @@ async function runAutoBrowseJob(job) {
       source_url: capture?.source_url || job.url,
     };
   } finally {
+    if (
+      needsActiveTab &&
+      previousTab?.id
+    ) {
+      await chrome.tabs
+        .update(previousTab.id, {
+          active: true,
+        })
+        .catch(() => {});
+      if (previousTab.windowId) {
+        await chrome.windows
+          .update(previousTab.windowId, {
+            focused: true,
+          })
+          .catch(() => {});
+      }
+    }
+
     if (tab?.id) {
       await chrome.tabs.remove(tab.id).catch(() => {});
     }
@@ -423,7 +474,9 @@ async function runAutoBrowseJob(job) {
 
 let autoBrowseRunning = false;
 
-async function processAutoBrowseTick() {
+async function processAutoBrowseTick(
+  preferredSource = null,
+) {
   if (autoBrowseRunning) {
     return {
       ok: true,
@@ -492,26 +545,43 @@ async function processAutoBrowseTick() {
       };
     }
 
-    const job = queue[0];
+    let jobIndex = 0;
+    if (preferredSource) {
+      const preferredIndex =
+        queue.findIndex(
+          (candidate) =>
+            candidate.source ===
+            preferredSource,
+        );
+      if (preferredIndex >= 0) {
+        jobIndex = preferredIndex;
+      }
+    }
+
+    const job = queue[jobIndex];
+    const queueWithoutJob = [
+      ...queue.slice(0, jobIndex),
+      ...queue.slice(jobIndex + 1),
+    ];
     let result;
 
     try {
       result = await runAutoBrowseJob(job);
-      queue = queue.slice(1);
+      queue = queueWithoutJob;
     } catch (error) {
       const attempts =
         Number(job.attempts || 0) + 1;
 
       if (attempts <= 1) {
         queue = [
-          ...queue.slice(1),
+          ...queueWithoutJob,
           {
             ...job,
             attempts,
           },
         ];
       } else {
-        queue = queue.slice(1);
+        queue = queueWithoutJob;
       }
 
       result = {
@@ -601,7 +671,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === 'radar-auto-browse-now') {
-    processAutoBrowseTick()
+    processAutoBrowseTick(
+      message?.preferred_source || null,
+    )
       .then(sendResponse)
       .catch((error) =>
         sendResponse({
