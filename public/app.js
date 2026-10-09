@@ -374,6 +374,12 @@ function resetRadarFormForCreate() {
       '<div class="empty">Salve o radar para gerar o plano de busca.</div>';
   }
   if (manualQuery) manualQuery.value = "";
+
+  const visualHistory = $("#visualReferenceHistory");
+  if (visualHistory) {
+    visualHistory.hidden = true;
+    visualHistory.innerHTML = "";
+  }
 }
 
 function openNewRadarModal() {
@@ -393,6 +399,144 @@ $("#radarReferenceImage")?.addEventListener("change", (event) => {
   const label = $("#radarReferenceLabel");
   if (label) label.textContent = file ? file.name : "Escolher imagem";
 });
+
+async function loadVisualReferenceHistory(radarId) {
+  const host = $("#visualReferenceHistory");
+  if (!host) return;
+
+  if (!radarId) {
+    host.hidden = true;
+    host.innerHTML = "";
+    return;
+  }
+
+  host.hidden = false;
+  host.innerHTML =
+    '<div class="empty">Carregando referências...</div>';
+
+  try {
+    const references = await api(
+      `/api/visual-references?radar_id=${encodeURIComponent(
+        radarId,
+      )}`,
+    );
+
+    host.innerHTML = "";
+
+    if (!Array.isArray(references) || !references.length) {
+      host.innerHTML =
+        '<div class="empty">Nenhuma referência visual salva neste radar.</div>';
+      return;
+    }
+
+    for (const reference of references.slice(0, 9)) {
+      const card = document.createElement("article");
+      card.className = "visual-reference-item";
+
+      const image = document.createElement("img");
+      image.alt =
+        reference.label || "Referência visual";
+      image.loading = "lazy";
+      image.src =
+        reference.thumbnail_data_url ||
+        `/api/visual-references/${reference.id}/image`;
+      image.addEventListener("error", () => {
+        const placeholder =
+          document.createElement("div");
+        placeholder.className =
+          "visual-reference-placeholder";
+        placeholder.textContent =
+          "Imagem não disponível";
+        image.replaceWith(placeholder);
+      });
+      card.appendChild(image);
+
+      if (reference.is_primary) {
+        const badge = document.createElement("span");
+        badge.className = "visual-reference-primary";
+        badge.textContent = "ATIVA";
+        card.appendChild(badge);
+      }
+
+      const info = document.createElement("div");
+      info.className = "visual-reference-item-info";
+
+      const title = document.createElement("strong");
+      title.textContent =
+        reference.label || "Referência visual";
+
+      const meta = document.createElement("small");
+      meta.textContent = [
+        reference.width && reference.height
+          ? `${reference.width}×${reference.height}`
+          : null,
+        reference.source || null,
+      ]
+        .filter(Boolean)
+        .join(" • ");
+
+      if (!reference.is_primary) {
+        const activate = document.createElement("button");
+        activate.type = "button";
+        activate.className = "visual-reference-activate";
+        activate.textContent = "Ativar";
+        activate.addEventListener("click", async () => {
+          activate.disabled = true;
+          try {
+            await api(
+              `/api/visual-references/${reference.id}/activate`,
+              {
+                method: "POST",
+                body: "{}",
+              },
+            );
+            await loadRadars();
+            await loadVisualReferenceHistory(radarId);
+          } catch (err) {
+            activate.disabled = false;
+            alert(errorMessage(err));
+          }
+        });
+        info.append(title, meta, activate);
+      } else {
+        info.append(title, meta);
+      }
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "visual-reference-remove";
+      remove.textContent = "Remover";
+      remove.addEventListener("click", async () => {
+        const confirmed = confirm(
+          `Remover a referência "${reference.label || "visual"}"?`,
+        );
+        if (!confirmed) return;
+
+        remove.disabled = true;
+        try {
+          await api(
+            `/api/visual-references/${reference.id}`,
+            { method: "DELETE" },
+          );
+          await loadRadars();
+          await loadVisualReferenceHistory(radarId);
+        } catch (err) {
+          remove.disabled = false;
+          alert(errorMessage(err));
+        }
+      });
+
+      info.append(remove);
+      card.appendChild(info);
+      host.appendChild(card);
+    }
+  } catch (err) {
+    host.innerHTML =
+      `<div class="empty">${escapeHtml(
+        errorMessage(err),
+      )}</div>`;
+  }
+}
 
 document.querySelectorAll(".close-modal").forEach((button) => {
   button.addEventListener(
@@ -1398,6 +1542,7 @@ async function editRadar(id) {
 
   radarModal.showModal();
   loadSearchPlan(radar.id);
+  loadVisualReferenceHistory(radar.id);
 }
 
 /* =========================

@@ -743,6 +743,96 @@ label textarea {
   display: none;
 }
 
+.visual-reference-history {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.visual-reference-history[hidden] {
+  display: none;
+}
+
+.visual-reference-item {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border, rgba(255,255,255,.1));
+  border-radius: 14px;
+  background: rgba(255,255,255,.025);
+}
+
+.visual-reference-item img,
+.visual-reference-placeholder {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  background: rgba(255,255,255,.035);
+}
+
+.visual-reference-placeholder {
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  text-align: center;
+  font-size: 11px;
+  opacity: .55;
+}
+
+.visual-reference-item-info {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+}
+
+.visual-reference-item-info strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+.visual-reference-item-info small {
+  font-size: 10px;
+}
+
+.visual-reference-primary {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.72);
+  color: #74ffa4;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.visual-reference-activate,
+.visual-reference-remove {
+  margin-top: 3px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  border: 0;
+  cursor: pointer;
+}
+
+.visual-reference-activate {
+  background: rgba(115,247,162,.11);
+  color: #74ffa4;
+}
+
+.visual-reference-remove {
+  background: rgba(255,95,110,.12);
+  color: #ff9ca6;
+}
+
+@media (max-width: 720px) {
+  .visual-reference-history {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .score-row {
   display: flex;
   flex-wrap: wrap;

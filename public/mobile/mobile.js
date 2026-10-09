@@ -41,6 +41,8 @@ const state = {
   radars: [],
   listings: [],
   activity: [],
+  visualReferences: [],
+  pendingVisual: null,
   online: false,
   relayStatus: null,
   snapshotSyncedAt: null,
@@ -187,6 +189,11 @@ function applySnapshot(snapshot) {
     : [];
   state.activity = Array.isArray(safe.activity)
     ? safe.activity
+    : [];
+  state.visualReferences = Array.isArray(
+    safe.visual_references,
+  )
+    ? safe.visual_references
     : [];
   state.snapshotSyncedAt =
     safe.synced_at ||
@@ -444,28 +451,296 @@ function renderConnectionPanels() {
   updateNotificationUi().catch(() => {});
 }
 
+function visualRadarName(radarId) {
+  return (
+    state.radars.find(
+      (radar) => Number(radar.id) === Number(radarId),
+    )?.name || "Radar"
+  );
+}
+
+function dataUrlBytes(dataUrl) {
+  const encoded = String(dataUrl || "").split(",")[1] || "";
+  const padding = (encoded.match(/=*$/)?.[0] || "").length;
+  return Math.max(
+    0,
+    Math.floor((encoded.length * 3) / 4) - padding,
+  );
+}
+
+function loadImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      resolve({ image, url });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(
+        new Error(
+          "Não consegui abrir essa imagem. Tente JPG ou PNG.",
+        ),
+      );
+    };
+    image.src = url;
+  });
+}
+
+function renderCanvasDataUrl(
+  image,
+  maxDimension,
+  quality,
+) {
+  const sourceWidth =
+    image.naturalWidth || image.width;
+  const sourceHeight =
+    image.naturalHeight || image.height;
+
+  if (!sourceWidth || !sourceHeight) {
+    throw new Error("Imagem sem dimensões válidas.");
+  }
+
+  const scale = Math.min(
+    1,
+    maxDimension /
+      Math.max(sourceWidth, sourceHeight),
+  );
+  const width = Math.max(
+    1,
+    Math.round(sourceWidth * scale),
+  );
+  const height = Math.max(
+    1,
+    Math.round(sourceHeight * scale),
+  );
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d", {
+    alpha: false,
+  });
+  if (!context) {
+    throw new Error(
+      "O navegador não conseguiu preparar a imagem.",
+    );
+  }
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(
+    image,
+    0,
+    0,
+    width,
+    height,
+  );
+
+  return {
+    dataUrl: canvas.toDataURL(
+      "image/jpeg",
+      quality,
+    ),
+    width,
+    height,
+  };
+}
+
+async function compressVisualFile(file) {
+  if (!file || !file.type.startsWith("image/")) {
+    throw new Error("Escolha uma imagem válida.");
+  }
+
+  if (file.size > 20 * 1024 * 1024) {
+    throw new Error(
+      "A imagem original é grande demais. Use uma foto de até 20 MB.",
+    );
+  }
+
+  const loaded = await loadImageFile(file);
+  try {
+    let dimension = 1100;
+    let quality = 0.82;
+    let main = renderCanvasDataUrl(
+      loaded.image,
+      dimension,
+      quality,
+    );
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      if (dataUrlBytes(main.dataUrl) <= 420 * 1024) {
+        break;
+      }
+
+      if (quality > 0.58) {
+        quality -= 0.08;
+      } else {
+        dimension = Math.max(
+          620,
+          Math.round(dimension * 0.82),
+        );
+      }
+
+      main = renderCanvasDataUrl(
+        loaded.image,
+        dimension,
+        quality,
+      );
+    }
+
+    const bytes = dataUrlBytes(main.dataUrl);
+    if (bytes > 480 * 1024) {
+      throw new Error(
+        "Não consegui comprimir essa imagem o suficiente. Tente outra foto.",
+      );
+    }
+
+    const thumb = renderCanvasDataUrl(
+      loaded.image,
+      160,
+      0.62,
+    );
+
+    return {
+      fileName: file.name || "referencia.jpg",
+      mime_type: "image/jpeg",
+      image_base64:
+        main.dataUrl.split(",")[1] || "",
+      thumbnail_data_url: thumb.dataUrl,
+      preview_data_url: main.dataUrl,
+      width: main.width,
+      height: main.height,
+      bytes,
+    };
+  } finally {
+    URL.revokeObjectURL(loaded.url);
+  }
+}
+
+function clearVisualSelection() {
+  state.pendingVisual = null;
+  const input = $("#visualImageInput");
+  if (input) input.value = "";
+  $("#visualPreview").hidden = true;
+  $("#visualPreviewImage").removeAttribute("src");
+  $("#visualReferenceButton").disabled = true;
+}
+
+function renderVisualReferences() {
+  const host = $("#visualReferenceList");
+  if (!host) return;
+
+  const refs = state.visualReferences
+    .slice()
+    .sort((left, right) => {
+      if (Boolean(left.is_primary) !== Boolean(right.is_primary)) {
+        return left.is_primary ? -1 : 1;
+      }
+      return Number(right.id || 0) - Number(left.id || 0);
+    })
+    .slice(0, 8);
+
+  host.innerHTML = "";
+
+  if (!refs.length) {
+    host.innerHTML =
+      '<div class="empty">Nenhuma referência visual sincronizada ainda.</div>';
+    return;
+  }
+
+  for (const reference of refs) {
+    const card = document.createElement("article");
+    card.className = "visual-ref";
+
+    if (reference.thumbnail_data_url) {
+      const image = document.createElement("img");
+      image.src = reference.thumbnail_data_url;
+      image.alt =
+        reference.label || "Referência visual";
+      card.appendChild(image);
+    } else {
+      const placeholder =
+        document.createElement("div");
+      placeholder.className =
+        "visual-placeholder";
+      placeholder.textContent =
+        "Referência sem miniatura";
+      card.appendChild(placeholder);
+    }
+
+    if (reference.is_primary) {
+      const badge =
+        document.createElement("span");
+      badge.className = "visual-primary";
+      badge.textContent = "ATIVA";
+      card.appendChild(badge);
+    }
+
+    const info = document.createElement("div");
+    info.className = "visual-ref-info";
+
+    const title = document.createElement("strong");
+    title.textContent =
+      reference.label || "Referência visual";
+
+    const meta = document.createElement("small");
+    meta.textContent = visualRadarName(
+      reference.radar_id,
+    );
+
+    info.append(title, meta);
+    card.appendChild(info);
+    host.appendChild(card);
+  }
+}
+
 function renderImportRadars() {
-  const select = $("#importRadarSelect");
-  if (!select) return;
+  const fill = (
+    select,
+    placeholder,
+    allowEmpty,
+  ) => {
+    if (!select) return;
 
-  const current = select.value;
-  select.innerHTML = '<option value="">Sem radar</option>';
+    const current = select.value;
+    select.innerHTML = "";
 
-  for (const radar of state.radars) {
-    const option = document.createElement("option");
-    option.value = String(radar.id);
-    option.textContent = radar.name;
-    select.appendChild(option);
-  }
+    const first = document.createElement("option");
+    first.value = "";
+    first.textContent = placeholder;
+    if (!allowEmpty) first.disabled = true;
+    select.appendChild(first);
 
-  if (
-    current &&
-    [...select.options].some(
-      (option) => option.value === current,
-    )
-  ) {
-    select.value = current;
-  }
+    for (const radar of state.radars) {
+      const option = document.createElement("option");
+      option.value = String(radar.id);
+      option.textContent = radar.name;
+      select.appendChild(option);
+    }
+
+    if (
+      current &&
+      [...select.options].some(
+        (option) => option.value === current,
+      )
+    ) {
+      select.value = current;
+    }
+  };
+
+  fill(
+    $("#importRadarSelect"),
+    "Sem radar",
+    true,
+  );
+  fill(
+    $("#visualRadarSelect"),
+    "Escolha um radar",
+    false,
+  );
 }
 
 function renderRadars() {
@@ -653,10 +928,14 @@ async function refreshLocal() {
   try {
     await api("/api/health");
 
-    const [radars, listings] = await Promise.all([
-      api("/api/radars"),
-      api("/api/listings"),
-    ]);
+    const [radars, listings, visualReferences] =
+      await Promise.all([
+        api("/api/radars"),
+        api("/api/listings"),
+        api("/api/visual-references").catch(
+          () => [],
+        ),
+      ]);
 
     state.radars = Array.isArray(radars)
       ? radars
@@ -665,6 +944,10 @@ async function refreshLocal() {
       ? listings
       : [];
     state.activity = [];
+    state.visualReferences =
+      Array.isArray(visualReferences)
+        ? visualReferences
+        : [];
 
     setConnection(
       true,
@@ -765,9 +1048,140 @@ async function refresh() {
   renderConnectionPanels();
   renderStats();
   renderImportRadars();
+  renderVisualReferences();
   renderRadars();
   renderListings();
 }
+
+$("#visualImageInput").addEventListener(
+  "change",
+  async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      clearVisualSelection();
+      return;
+    }
+
+    const button = $("#visualReferenceButton");
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = "Preparando imagem…";
+
+    try {
+      const prepared =
+        await compressVisualFile(file);
+      state.pendingVisual = prepared;
+
+      $("#visualPreviewImage").src =
+        prepared.preview_data_url;
+      $("#visualPreviewName").textContent =
+        prepared.fileName;
+      $("#visualPreviewMeta").textContent =
+        `${prepared.width}×${prepared.height} • ${Math.max(
+          1,
+          Math.round(prepared.bytes / 1024),
+        )} KB após compressão`;
+      $("#visualPreview").hidden = false;
+
+      button.disabled =
+        !$("#visualRadarSelect").value;
+      toast("Imagem pronta para enviar.");
+    } catch (error) {
+      clearVisualSelection();
+      toast(error.message);
+    } finally {
+      button.textContent = original;
+    }
+  },
+);
+
+$("#visualRadarSelect").addEventListener(
+  "change",
+  () => {
+    $("#visualReferenceButton").disabled =
+      !state.pendingVisual ||
+      !$("#visualRadarSelect").value;
+  },
+);
+
+$("#visualReferenceButton").addEventListener(
+  "click",
+  async () => {
+    const radarId = Number(
+      $("#visualRadarSelect").value,
+    );
+    const prepared = state.pendingVisual;
+    const button = $("#visualReferenceButton");
+
+    if (
+      !Number.isInteger(radarId) ||
+      radarId <= 0
+    ) {
+      toast("Escolha o radar que vai usar essa imagem.");
+      return;
+    }
+
+    if (!prepared) {
+      toast("Escolha uma imagem primeiro.");
+      return;
+    }
+
+    const payload = {
+      radar_id: radarId,
+      label:
+        $("#visualLabelInput").value.trim(),
+      mime_type: prepared.mime_type,
+      image_base64: prepared.image_base64,
+      thumbnail_data_url:
+        prepared.thumbnail_data_url,
+    };
+
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = "Enviando referência…";
+
+    try {
+      if (state.mode === "relay") {
+        await queueRelayCommand(
+          "import_visual_reference",
+          payload,
+        );
+
+        toast(
+          state.online
+            ? "Imagem enviada. O Desktop vai ativar a referência."
+            : "Notebook offline. A imagem ficou na fila.",
+        );
+
+        if (state.online) {
+          setTimeout(() => {
+            refresh().catch(() => {});
+          }, 3500);
+        }
+      } else {
+        await api(
+          "/api/mobile/import-visual-reference",
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+          },
+        );
+        toast(
+          "Referência visual ativada no Radar.",
+        );
+        await refresh();
+      }
+
+      $("#visualLabelInput").value = "";
+      clearVisualSelection();
+    } catch (error) {
+      toast(error.message);
+      button.disabled = false;
+    } finally {
+      button.textContent = original;
+    }
+  },
+);
 
 $("#importUrlButton").addEventListener(
   "click",
@@ -970,6 +1384,8 @@ $("#unlinkButton").addEventListener(
     state.radars = [];
     state.listings = [];
     state.activity = [];
+    state.visualReferences = [];
+    state.pendingVisual = null;
     state.relayStatus = null;
 
     toast("Celular desvinculado.");

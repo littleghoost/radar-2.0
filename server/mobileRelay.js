@@ -8,6 +8,7 @@ const COMMAND_TYPES = new Set([
   "run_radar",
   "update_listing_status",
   "import_url",
+  "import_visual_reference",
 ]);
 const LISTING_STATUSES = new Set([
   "novo",
@@ -320,6 +321,63 @@ function sanitizeSnapshot(body) {
       }))
     : [];
 
+  const visualReferences = Array.isArray(
+    input.visual_references,
+  )
+    ? input.visual_references
+        .slice(0, 10)
+        .map((reference) => {
+          const thumbnail = String(
+            reference.thumbnail_data_url || "",
+          ).trim();
+
+          return {
+            id: Number(reference.id) || null,
+            radar_id:
+              reference.radar_id === null ||
+              reference.radar_id === undefined
+                ? null
+                : Number(reference.radar_id),
+            label: String(reference.label || "")
+              .slice(0, 120),
+            mime_type: String(
+              reference.mime_type || "image/jpeg",
+            ).slice(0, 40),
+            width:
+              reference.width === null ||
+              reference.width === undefined
+                ? null
+                : Number(reference.width),
+            height:
+              reference.height === null ||
+              reference.height === undefined
+                ? null
+                : Number(reference.height),
+            file_size:
+              reference.file_size === null ||
+              reference.file_size === undefined
+                ? null
+                : Number(reference.file_size),
+            thumbnail_data_url:
+              /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/i.test(
+                thumbnail,
+              ) && thumbnail.length <= 30000
+                ? thumbnail
+                : null,
+            is_primary: Boolean(
+              reference.is_primary,
+            ),
+            source: String(
+              reference.source || "",
+            ).slice(0, 40),
+            created_at:
+              reference.created_at || null,
+            updated_at:
+              reference.updated_at || null,
+          };
+        })
+    : [];
+
   return {
     version: 1,
     synced_at: new Date().toISOString(),
@@ -350,6 +408,7 @@ function sanitizeSnapshot(body) {
     radars,
     listings,
     activity,
+    visual_references: visualReferences,
   };
 }
 
@@ -404,6 +463,87 @@ function validateCommand(type, payload) {
           Number(data.radar_id) > 0
             ? Number(data.radar_id)
             : null,
+      },
+    };
+  }
+
+  if (type === "import_visual_reference") {
+    const radarId = Number(data.radar_id);
+    const mimeType = String(
+      data.mime_type || "image/jpeg",
+    )
+      .toLowerCase()
+      .trim();
+    const imageBase64 = String(
+      data.image_base64 || "",
+    ).trim();
+    const thumbnailDataUrl = String(
+      data.thumbnail_data_url || "",
+    ).trim();
+    const label = String(data.label || "")
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 120);
+
+    if (
+      !Number.isInteger(radarId) ||
+      radarId <= 0
+    ) {
+      return {
+        ok: false,
+        error: "Radar inválido.",
+      };
+    }
+
+    if (
+      !["image/jpeg", "image/png"].includes(
+        mimeType,
+      )
+    ) {
+      return {
+        ok: false,
+        error: "Formato visual inválido.",
+      };
+    }
+
+    if (
+      !imageBase64 ||
+      imageBase64.length > 700000 ||
+      !/^[A-Za-z0-9+/=\s]+$/.test(
+        imageBase64,
+      )
+    ) {
+      return {
+        ok: false,
+        error: "Imagem visual inválida ou grande demais.",
+      };
+    }
+
+    if (
+      thumbnailDataUrl &&
+      (
+        thumbnailDataUrl.length > 80000 ||
+        !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/i.test(
+          thumbnailDataUrl,
+        )
+      )
+    ) {
+      return {
+        ok: false,
+        error: "Miniatura visual inválida.",
+      };
+    }
+
+    return {
+      ok: true,
+      payload: {
+        radar_id: radarId,
+        label,
+        mime_type: mimeType,
+        image_base64: imageBase64,
+        thumbnail_data_url:
+          thumbnailDataUrl || null,
       },
     };
   }

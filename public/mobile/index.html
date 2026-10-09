@@ -55,6 +55,41 @@
         </div>
       </section>
 
+      <section class="section visual-upload card" id="visualUploadCard">
+        <div>
+          <span class="eyebrow">RADAR POR IMAGEM</span>
+          <h2>Referência visual</h2>
+          <p>Envie uma foto-base para o Radar usar na comparação visual dos próximos anúncios.</p>
+        </div>
+
+        <div class="visual-upload-grid">
+          <select id="visualRadarSelect" aria-label="Escolher radar visual">
+            <option value="">Escolha um radar</option>
+          </select>
+          <input id="visualLabelInput" maxlength="120" placeholder="Nome opcional da referência">
+        </div>
+
+        <label class="visual-picker" for="visualImageInput">
+          <input id="visualImageInput" type="file" accept="image/*" hidden>
+          <span class="visual-picker-title">Escolher foto</span>
+          <small>Galeria ou câmera • o celular comprime antes de enviar</small>
+        </label>
+
+        <div class="visual-preview" id="visualPreview" hidden>
+          <img id="visualPreviewImage" alt="Prévia da referência visual">
+          <div>
+            <strong id="visualPreviewName">Imagem selecionada</strong>
+            <small id="visualPreviewMeta"></small>
+          </div>
+        </div>
+
+        <button class="primary" id="visualReferenceButton" type="button" disabled>
+          Salvar referência visual
+        </button>
+
+        <div class="visual-history" id="visualReferenceList"></div>
+      </section>
+
       <section class="section">
         <div class="section-heading">
           <div>

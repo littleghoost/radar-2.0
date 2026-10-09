@@ -140,6 +140,7 @@ function sourceKeyForPlatform(platform) {
 function createMobileDesktopSync({
   db,
   radarRunner,
+  importVisualReference,
   cloudUrl = DEFAULT_CLOUD_URL,
 }) {
   const baseUrl = String(cloudUrl || "")
@@ -236,7 +237,7 @@ function createMobileDesktopSync({
   }
 
   async function buildSnapshot() {
-    const [radars, listings, activity] =
+    const [radars, listings, activity, visualReferences] =
       await Promise.all([
         dbAll(
           db,
@@ -280,6 +281,27 @@ function createMobileDesktopSync({
            FROM activity_events
            ORDER BY id DESC
            LIMIT 80`,
+        ).catch(() => []),
+        dbAll(
+          db,
+          `SELECT
+             id,
+             radar_id,
+             label,
+             mime_type,
+             width,
+             height,
+             file_size,
+             thumbnail_data_url,
+             is_primary,
+             source,
+             created_at,
+             updated_at
+           FROM visual_references
+           ORDER BY is_primary DESC,
+                    datetime(created_at) DESC,
+                    id DESC
+           LIMIT 60`,
         ).catch(() => []),
       ]);
 
@@ -325,6 +347,7 @@ function createMobileDesktopSync({
       radars: radarRows,
       listings,
       activity,
+      visual_references: visualReferences,
     };
   }
 
@@ -616,6 +639,22 @@ function createMobileDesktopSync({
       return {
         ok: true,
         result: await importUrl(payload),
+      };
+    }
+
+    if (type === "import_visual_reference") {
+      if (typeof importVisualReference !== "function") {
+        throw new Error(
+          "Importação visual indisponível neste Desktop.",
+        );
+      }
+
+      return {
+        ok: true,
+        result: await importVisualReference({
+          ...payload,
+          source: "mobile_relay",
+        }),
       };
     }
 

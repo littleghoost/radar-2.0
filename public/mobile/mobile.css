@@ -115,3 +115,27 @@ h3{font-size:16px}
 .pref-toggle strong{font-size:12px}
 .pref-toggle small{font-size:10px;color:var(--muted);line-height:1.35}
 .pref-toggle input{width:20px;height:20px;accent-color:var(--accent)}
+
+.visual-upload{padding:18px}
+.visual-upload p{color:var(--muted);font-size:12px;line-height:1.5;margin-top:7px}
+.visual-upload-grid{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:8px;margin-top:14px}
+.visual-upload select,.visual-upload input{width:100%;min-width:0;border-radius:13px;border:1px solid var(--line);background:#0e1216;color:var(--text);padding:12px}
+.visual-picker{display:grid;gap:4px;margin-top:10px;padding:16px;border:1px dashed rgba(115,247,162,.35);border-radius:15px;background:rgba(115,247,162,.04);text-align:center;cursor:pointer}
+.visual-picker-title{font-size:13px;font-weight:900;color:var(--accent)}
+.visual-picker small{font-size:10px;color:var(--muted)}
+.visual-preview{display:flex;align-items:center;gap:12px;margin-top:10px;padding:10px;border-radius:15px;background:#0e1216;border:1px solid var(--line)}
+.visual-preview img{width:72px;height:72px;object-fit:cover;border-radius:12px;background:#20252c}
+.visual-preview div{min-width:0;display:grid;gap:4px}
+.visual-preview strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.visual-preview small{font-size:10px;color:var(--muted)}
+.visual-upload .primary{margin-top:10px}
+.visual-upload .primary:disabled{opacity:.45;cursor:default}
+.visual-history{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:14px}
+.visual-ref{position:relative;overflow:hidden;border-radius:14px;background:#0e1216;border:1px solid var(--line)}
+.visual-ref img{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;background:#20252c}
+.visual-ref-info{padding:8px;display:grid;gap:3px}
+.visual-ref-info strong{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.visual-ref-info small{font-size:9px;color:var(--muted)}
+.visual-primary{position:absolute;top:6px;left:6px;padding:4px 6px;border-radius:999px;background:rgba(11,13,16,.82);color:var(--accent);font-size:8px;font-weight:900}
+.visual-placeholder{display:grid;place-items:center;width:100%;aspect-ratio:1/1;color:var(--muted);font-size:10px;text-align:center;padding:10px;background:#161b21}
+@media(max-width:620px){.visual-upload-grid{grid-template-columns:1fr}.visual-history{grid-template-columns:repeat(2,minmax(0,1fr))}}

@@ -142,6 +142,33 @@ db.serialize(() => {
   );
 
   /* =========================
+     REFERÊNCIAS VISUAIS
+  ========================= */
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS visual_references (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      radar_id INTEGER,
+      label TEXT,
+      image_path TEXT NOT NULL,
+      mime_type TEXT,
+      width INTEGER,
+      height INTEGER,
+      file_size INTEGER,
+      thumbnail_data_url TEXT,
+      is_primary INTEGER DEFAULT 0,
+      source TEXT DEFAULT 'mobile',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (radar_id) REFERENCES radars(id) ON DELETE SET NULL
+    )
+  `);
+
+  db.run(
+    "CREATE INDEX IF NOT EXISTS idx_visual_references_radar ON visual_references(radar_id, created_at DESC)",
+  );
+
+  /* =========================
      CONEXÕES
   ========================= */
 

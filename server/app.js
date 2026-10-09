@@ -35,10 +35,19 @@ const {
 const app = express();
 
 const PORT = process.env.PORT || 3000;
-const IMAGE_DIR = process.env.IMAGE_DIR || path.join(process.env.DB_PATH ? path.dirname(process.env.DB_PATH) : path.join(__dirname, "..", "data"), "reference-images");
+const DATA_ROOT = process.env.DB_PATH
+  ? path.dirname(process.env.DB_PATH)
+  : path.join(__dirname, "..", "data");
+const IMAGE_DIR =
+  process.env.IMAGE_DIR ||
+  path.join(DATA_ROOT, "reference-images");
+const VISUAL_REFERENCE_DIR =
+  process.env.VISUAL_REFERENCE_DIR ||
+  path.join(DATA_ROOT, "visual-references");
 fs.mkdirSync(IMAGE_DIR, { recursive: true });
+fs.mkdirSync(VISUAL_REFERENCE_DIR, { recursive: true });
 
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false }));
 
 registerMobileRelay(app, db);
@@ -505,9 +514,263 @@ const radarRunner = createRadarRunner({
   getInternationalCostSettings,
 });
 
+function decodeVisualReferencePayload(payload = {}) {
+  const radarId = Number(payload.radar_id);
+  if (!Number.isInteger(radarId) || radarId <= 0) {
+    throw new Error("Radar inválido.");
+  }
+
+  const mimeType = String(payload.mime_type || "image/jpeg")
+    .toLowerCase()
+    .trim();
+
+  if (!["image/jpeg", "image/png"].includes(mimeType)) {
+    throw new Error("Formato não suportado. Use JPEG ou PNG.");
+  }
+
+  const source = String(
+    payload.source || "mobile",
+  ).toLowerCase();
+  const mobileSource = source.startsWith("mobile");
+  const maxBytes = mobileSource
+    ? 500 * 1024
+    : 8 * 1024 * 1024;
+  const maxEncoded = mobileSource
+    ? 700000
+    : 12 * 1024 * 1024;
+
+  let encoded = String(payload.image_base64 || "").trim();
+  const dataUrlMatch = encoded.match(
+    /^data:(image\/(?:jpeg|png));base64,(.+)$/i,
+  );
+  if (dataUrlMatch) encoded = dataUrlMatch[2];
+
+  if (
+    !encoded ||
+    encoded.length > maxEncoded ||
+    !/^[A-Za-z0-9+/=\s]+$/.test(encoded)
+  ) {
+    throw new Error(
+      mobileSource
+        ? "Imagem ausente ou maior que o limite do Radar Mobile."
+        : "Imagem ausente ou maior que 8 MB.",
+    );
+  }
+
+  const imageBuffer = Buffer.from(
+    encoded.replace(/\s+/g, ""),
+    "base64",
+  );
+
+  if (!imageBuffer.length || imageBuffer.length > maxBytes) {
+    throw new Error(
+      mobileSource
+        ? "A imagem precisa ter no máximo 500 KB após compressão."
+        : "A imagem precisa ter no máximo 8 MB.",
+    );
+  }
+
+  const isPng =
+    imageBuffer.length >= 8 &&
+    imageBuffer.subarray(0, 8).equals(
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    );
+  const isJpeg =
+    imageBuffer.length >= 2 &&
+    imageBuffer[0] === 0xff &&
+    imageBuffer[1] === 0xd8;
+
+  if (
+    (mimeType === "image/png" && !isPng) ||
+    (mimeType === "image/jpeg" && !isJpeg)
+  ) {
+    throw new Error("O conteúdo da imagem não corresponde ao formato informado.");
+  }
+
+  const label = String(payload.label || "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+
+  const thumbnailDataUrl = String(
+    payload.thumbnail_data_url || "",
+  ).trim();
+
+  if (
+    thumbnailDataUrl &&
+    (
+      !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/i.test(thumbnailDataUrl) ||
+      thumbnailDataUrl.length > 80000
+    )
+  ) {
+    throw new Error("Miniatura inválida.");
+  }
+
+  return {
+    radarId,
+    mimeType,
+    imageBuffer,
+    label,
+    thumbnailDataUrl: thumbnailDataUrl || null,
+  };
+}
+
+async function importVisualReference(payload = {}) {
+  const parsed = decodeVisualReferencePayload(payload);
+  const radar = await get(
+    "SELECT * FROM radars WHERE id = ?",
+    [parsed.radarId],
+  );
+  if (!radar) throw new Error("Radar não encontrado.");
+
+  const features = await extractVisualFeatures(parsed.imageBuffer);
+
+  let embedding = null;
+  let semanticError = null;
+  if (radar.semantic_enabled) {
+    try {
+      embedding = await embedImage(parsed.imageBuffer);
+    } catch (error) {
+      semanticError = error?.message || String(error);
+    }
+  }
+
+  const ext = parsed.mimeType === "image/png" ? ".png" : ".jpg";
+  const token = crypto.randomBytes(6).toString("hex");
+  const filePath = path.join(
+    VISUAL_REFERENCE_DIR,
+    `radar-${radar.id}-${Date.now()}-${token}${ext}`,
+  );
+
+  await fsp.writeFile(filePath, parsed.imageBuffer);
+
+  try {
+    if (radar.reference_image_path) {
+      const legacy = await get(
+        `SELECT id
+         FROM visual_references
+         WHERE radar_id = ? AND image_path = ?
+         LIMIT 1`,
+        [radar.id, radar.reference_image_path],
+      );
+
+      if (!legacy) {
+        await run(
+          `INSERT INTO visual_references (
+             radar_id, label, image_path, mime_type,
+             width, height, file_size, thumbnail_data_url,
+             is_primary, source
+           ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 'legacy')`,
+          [
+            radar.id,
+            "Referência anterior",
+            radar.reference_image_path,
+            path.extname(radar.reference_image_path).toLowerCase() === ".png"
+              ? "image/png"
+              : "image/jpeg",
+          ],
+        ).catch(() => {});
+      }
+    }
+
+    await run(
+      `UPDATE visual_references
+       SET is_primary = 0,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE radar_id = ?`,
+      [radar.id],
+    );
+
+    const inserted = await run(
+      `INSERT INTO visual_references (
+         radar_id, label, image_path, mime_type,
+         width, height, file_size, thumbnail_data_url,
+         is_primary, source
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+      [
+        radar.id,
+        parsed.label ||
+          `Referência ${new Date().toLocaleDateString("pt-BR")}`,
+        filePath,
+        parsed.mimeType,
+        features.width,
+        features.height,
+        parsed.imageBuffer.length,
+        parsed.thumbnailDataUrl,
+        String(payload.source || "mobile").slice(0, 40),
+      ],
+    );
+
+    await run(
+      `UPDATE radars
+       SET reference_image_path = ?,
+           reference_features_json = ?,
+           visual_enabled = 1,
+           reference_embedding_json = ?,
+           semantic_model = ?
+       WHERE id = ?`,
+      [
+        filePath,
+        JSON.stringify(features),
+        embedding ? JSON.stringify(embedding) : null,
+        embedding ? MODEL_ID : null,
+        radar.id,
+      ],
+    );
+
+    await run(
+      `INSERT INTO activity_events
+        (radar_id, type, title, detail, metadata_json)
+       VALUES (?, 'mobile_action', ?, ?, ?)`,
+      [
+        radar.id,
+        "Referência visual adicionada",
+        `${radar.name} • ${features.width}×${features.height}`,
+        JSON.stringify({
+          action: "import_visual_reference",
+          source: String(payload.source || "mobile").slice(0, 40),
+          reference_id: inserted.id,
+          semantic_ready: Boolean(embedding),
+        }),
+      ],
+    ).catch(() => {});
+
+    const reference = await get(
+      `SELECT
+         id, radar_id, label, mime_type, width, height,
+         file_size, thumbnail_data_url, is_primary,
+         source, created_at, updated_at
+       FROM visual_references
+       WHERE id = ?`,
+      [inserted.id],
+    );
+
+    return {
+      reference,
+      visual: {
+        enabled: true,
+        width: features.width,
+        height: features.height,
+        average_rgb: features.average_rgb,
+      },
+      semantic: {
+        enabled: Boolean(radar.semantic_enabled),
+        ready: Boolean(embedding),
+        model: embedding ? MODEL_ID : null,
+        error: semanticError,
+      },
+    };
+  } catch (error) {
+    await fsp.unlink(filePath).catch(() => {});
+    throw error;
+  }
+}
+
 const mobileDesktopSync = createMobileDesktopSync({
   db,
   radarRunner,
+  importVisualReference,
 });
 
 async function scoreListingForRadar({
@@ -1441,48 +1704,36 @@ app.put(
         return res.status(400).json({ error: "Envie uma imagem válida." });
       }
 
-      const contentType = req.headers["content-type"] || "image/jpeg";
-      const ext = contentType.includes("png") ? ".png" : contentType.includes("webp") ? ".webp" : ".jpg";
-      const filePath = path.join(IMAGE_DIR, `radar-${radar.id}${ext}`);
-      await fsp.writeFile(filePath, req.body);
-      const features = await extractVisualFeatures(req.body);
-      let embedding = null;
-      let semanticError = null;
-      if (radar.semantic_enabled) {
-        try {
-          embedding = await embedImage(req.body);
-        } catch (error) {
-          semanticError = error?.message || String(error);
-        }
-      }
+      const contentType = String(
+        req.headers["content-type"] || "image/jpeg",
+      ).toLowerCase();
+      const mimeType = contentType.includes("png")
+        ? "image/png"
+        : "image/jpeg";
 
-      await run(
-        `UPDATE radars
-         SET reference_image_path = ?, reference_features_json = ?, visual_enabled = 1,
-             reference_embedding_json = ?, semantic_model = ?
-         WHERE id = ?`,
-        [filePath, JSON.stringify(features), embedding ? JSON.stringify(embedding) : null, embedding ? MODEL_ID : null, radar.id],
-      );
+      const result = await importVisualReference({
+        radar_id: radar.id,
+        label: "Referência enviada pelo Desktop",
+        mime_type: mimeType,
+        image_base64: req.body.toString("base64"),
+        source: "desktop",
+      });
+
+      await mobileDesktopSync.syncSnapshot().catch(() => {});
 
       res.json({
         ok: true,
         radar_id: radar.id,
         visual_enabled: true,
+        reference_id: result.reference?.id || null,
         reference_image_url: `/api/radars/${radar.id}/reference-image`,
-        features: {
-          width: features.width,
-          height: features.height,
-          average_rgb: features.average_rgb,
-        },
-        semantic: {
-          enabled: Boolean(radar.semantic_enabled),
-          ready: Boolean(embedding),
-          model: embedding ? MODEL_ID : null,
-          error: semanticError,
-        },
+        features: result.visual,
+        semantic: result.semantic,
       });
     } catch (err) {
-      res.status(400).json({ error: `Não consegui analisar a imagem: ${err.message}` });
+      res.status(400).json({
+        error: `Não consegui analisar a imagem: ${err.message}`,
+      });
     }
   },
 );
@@ -1958,9 +2209,28 @@ app.delete(
         [req.params.id],
       );
 
+      const visualReferences = await all(
+        "SELECT image_path FROM visual_references WHERE radar_id = ?",
+        [req.params.id],
+      ).catch(() => []);
+
+      const visualPaths = new Set(
+        visualReferences
+          .map((reference) => reference.image_path)
+          .filter(Boolean),
+      );
       if (radar.reference_image_path) {
-        await fsp.unlink(radar.reference_image_path).catch(() => {});
+        visualPaths.add(radar.reference_image_path);
       }
+
+      for (const imagePath of visualPaths) {
+        await fsp.unlink(imagePath).catch(() => {});
+      }
+
+      await run(
+        "DELETE FROM visual_references WHERE radar_id = ?",
+        [req.params.id],
+      ).catch(() => {});
 
       await run(
         "DELETE FROM radar_search_queries WHERE radar_id = ?",
@@ -5192,6 +5462,263 @@ app.post("/api/mobile/import-url", async (req, res) => {
     });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post("/api/mobile/import-visual-reference", async (req, res) => {
+  try {
+    if (process.env.RADAR_DESKTOP !== "1") {
+      return res.status(409).json({
+        error: "Referência visual mobile só está disponível no Radar Desktop.",
+      });
+    }
+
+    const result = await importVisualReference({
+      ...req.body,
+      source: "mobile_local",
+    });
+
+    await mobileDesktopSync.syncSnapshot().catch(() => {});
+
+    res.status(201).json({
+      ok: true,
+      ...result,
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err.message,
+    });
+  }
+});
+
+app.get("/api/visual-references", async (req, res) => {
+  try {
+    const radarId = Number(req.query.radar_id);
+    const params = [];
+    let where = "";
+
+    if (Number.isInteger(radarId) && radarId > 0) {
+      where = "WHERE radar_id = ?";
+      params.push(radarId);
+    }
+
+    const rows = await all(
+      `SELECT
+         id, radar_id, label, mime_type, width, height,
+         file_size, thumbnail_data_url, is_primary,
+         source, created_at, updated_at
+       FROM visual_references
+       ${where}
+       ORDER BY is_primary DESC,
+                datetime(created_at) DESC,
+                id DESC
+       LIMIT 100`,
+      params,
+    );
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+    });
+  }
+});
+
+app.get("/api/visual-references/:id/image", async (req, res) => {
+  try {
+    const reference = await get(
+      `SELECT image_path
+       FROM visual_references
+       WHERE id = ?`,
+      [req.params.id],
+    );
+
+    if (!reference?.image_path) {
+      return res.status(404).end();
+    }
+
+    res.sendFile(
+      path.resolve(reference.image_path),
+    );
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+    });
+  }
+});
+
+app.post("/api/visual-references/:id/activate", async (req, res) => {
+  try {
+    const reference = await get(
+      "SELECT * FROM visual_references WHERE id = ?",
+      [req.params.id],
+    );
+
+    if (!reference?.radar_id || !reference.image_path) {
+      return res.status(404).json({
+        error: "Referência visual não encontrada.",
+      });
+    }
+
+    const bytes = await fsp.readFile(
+      reference.image_path,
+    );
+    const features =
+      await extractVisualFeatures(bytes);
+    const radar = await get(
+      "SELECT semantic_enabled FROM radars WHERE id = ?",
+      [reference.radar_id],
+    );
+
+    let embedding = null;
+    if (radar?.semantic_enabled) {
+      embedding = await embedImage(bytes).catch(
+        () => null,
+      );
+    }
+
+    await run(
+      "UPDATE visual_references SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = CURRENT_TIMESTAMP WHERE radar_id = ?",
+      [reference.id, reference.radar_id],
+    );
+
+    await run(
+      `UPDATE radars
+       SET reference_image_path = ?,
+           reference_features_json = ?,
+           reference_embedding_json = ?,
+           semantic_model = ?,
+           visual_enabled = 1
+       WHERE id = ?`,
+      [
+        reference.image_path,
+        JSON.stringify(features),
+        embedding
+          ? JSON.stringify(embedding)
+          : null,
+        embedding ? MODEL_ID : null,
+        reference.radar_id,
+      ],
+    );
+
+    await mobileDesktopSync.syncSnapshot().catch(() => {});
+
+    res.json({
+      ok: true,
+      reference_id: reference.id,
+      radar_id: reference.radar_id,
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+    });
+  }
+});
+
+app.delete("/api/visual-references/:id", async (req, res) => {
+  try {
+    const reference = await get(
+      "SELECT * FROM visual_references WHERE id = ?",
+      [req.params.id],
+    );
+
+    if (!reference) {
+      return res.status(404).json({
+        error: "Referência visual não encontrada.",
+      });
+    }
+
+    await run(
+      "DELETE FROM visual_references WHERE id = ?",
+      [reference.id],
+    );
+    await fsp.unlink(reference.image_path).catch(() => {});
+
+    if (reference.is_primary && reference.radar_id) {
+      const fallback = await get(
+        `SELECT *
+         FROM visual_references
+         WHERE radar_id = ?
+         ORDER BY datetime(created_at) DESC, id DESC
+         LIMIT 1`,
+        [reference.radar_id],
+      );
+
+      if (fallback?.image_path) {
+        try {
+          const bytes = await fsp.readFile(
+            fallback.image_path,
+          );
+          const features =
+            await extractVisualFeatures(bytes);
+          let embedding = null;
+          const radar = await get(
+            "SELECT semantic_enabled FROM radars WHERE id = ?",
+            [reference.radar_id],
+          );
+
+          if (radar?.semantic_enabled) {
+            embedding = await embedImage(bytes).catch(
+              () => null,
+            );
+          }
+
+          await run(
+            "UPDATE visual_references SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE radar_id = ?",
+            [fallback.id, reference.radar_id],
+          );
+
+          await run(
+            `UPDATE radars
+             SET reference_image_path = ?,
+                 reference_features_json = ?,
+                 reference_embedding_json = ?,
+                 semantic_model = ?,
+                 visual_enabled = 1
+             WHERE id = ?`,
+            [
+              fallback.image_path,
+              JSON.stringify(features),
+              embedding
+                ? JSON.stringify(embedding)
+                : null,
+              embedding ? MODEL_ID : null,
+              reference.radar_id,
+            ],
+          );
+        } catch {
+          await run(
+            `UPDATE radars
+             SET reference_image_path = NULL,
+                 reference_features_json = NULL,
+                 reference_embedding_json = NULL,
+                 semantic_model = NULL,
+                 visual_enabled = 0
+             WHERE id = ?`,
+            [reference.radar_id],
+          );
+        }
+      } else {
+        await run(
+          `UPDATE radars
+           SET reference_image_path = NULL,
+               reference_features_json = NULL,
+               reference_embedding_json = NULL,
+               semantic_model = NULL,
+               visual_enabled = 0
+           WHERE id = ?`,
+          [reference.radar_id],
+        );
+      }
+    }
+
+    await mobileDesktopSync.syncSnapshot().catch(() => {});
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+    });
   }
 });
 
