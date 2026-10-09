@@ -278,17 +278,7 @@
     } catch { return false; }
   }
 
-  function slugifyEnjoeiTitle(value) {
-    return String(value || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 120);
-  }
-
-  function enjoeiProductUrlFromCard(card, title = '') {
+  function enjoeiProductUrlFromCard(card) {
     const links = [
       ...(card.matches?.('a[href]') ? [card] : []),
       ...card.querySelectorAll('a[href]'),
@@ -314,14 +304,6 @@
       return cleanUrl(
         absoluteUrl(embedded[1]),
       );
-    }
-
-    const idMatch = html.match(
-      /(?:product[-_]?id|productId)[^0-9]{0,30}(\d{6,})/i,
-    );
-    const slug = slugifyEnjoeiTitle(title);
-    if (idMatch?.[1] && slug) {
-      return `https://www.enjoei.com.br/p/${slug}-${idMatch[1]}`;
     }
 
     return null;
@@ -378,7 +360,6 @@
 
       const url = enjoeiProductUrlFromCard(
         card,
-        title,
       );
       if (
         !url ||
