@@ -203,7 +203,9 @@ function autoBrowseSourcesForRadar(radar = {}) {
   return ['olx', 'enjoei', 'mercadolivre', 'depop'];
 }
 
-async function buildDueAutoBrowseJobs() {
+async function buildDueAutoBrowseJobs({
+  force = false,
+} = {}) {
   const stored = await chrome.storage.local.get({
     autoBrowseQueue: [],
     autoBrowseLastEnqueuedByRadar: {},
@@ -236,6 +238,7 @@ async function buildDueAutoBrowseJobs() {
     );
 
     if (
+      !force &&
       Number.isFinite(lastAt) &&
       now - lastAt < intervalMinutes * 60_000
     ) {
@@ -287,8 +290,10 @@ async function buildDueAutoBrowseJobs() {
       if (jobs.length >= 24) break;
     }
 
-    lastMap[String(radar.id)] =
-      new Date(now).toISOString();
+    if (!force) {
+      lastMap[String(radar.id)] =
+        new Date(now).toISOString();
+    }
 
     if (jobs.length >= 24) break;
   }
@@ -476,6 +481,9 @@ let autoBrowseRunning = false;
 
 async function processAutoBrowseTick(
   preferredSource = null,
+  {
+    force = false,
+  } = {},
 ) {
   if (autoBrowseRunning) {
     return {
@@ -526,15 +534,18 @@ async function processAutoBrowseTick(
       : [];
 
     if (!queue.length) {
-      queue = await buildDueAutoBrowseJobs();
+      queue = await buildDueAutoBrowseJobs({
+        force,
+      });
     }
 
     if (!queue.length) {
       await chrome.storage.local.set({
         lastAutoBrowseAt:
           new Date().toISOString(),
-        lastAutoBrowseStatus:
-          'Nenhuma busca agendada está vencida.',
+        lastAutoBrowseStatus: force
+          ? 'Nenhuma busca habilitada disponível.'
+          : 'Nenhuma busca agendada está vencida.',
         lastAutoBrowseError: null,
       });
 
@@ -673,6 +684,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'radar-auto-browse-now') {
     processAutoBrowseTick(
       message?.preferred_source || null,
+      {
+        force: Boolean(message?.force),
+      },
     )
       .then(sendResponse)
       .catch((error) =>

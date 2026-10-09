@@ -351,6 +351,7 @@ $('#runAutoBrowseNow')?.addEventListener(
         await chrome.runtime.sendMessage({
           type: 'radar-auto-browse-now',
           preferred_source: preferredSource,
+          force: true,
         });
 
       if (!result?.ok && !result?.skipped) {
