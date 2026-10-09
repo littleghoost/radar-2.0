@@ -159,6 +159,7 @@ async function loadAutoBrowseState() {
   const progressPercent = $('#autoBrowseProgressPercent');
   const progressMessage = $('#autoBrowseProgressMessage');
   const progressDetail = $('#autoBrowseProgressDetail');
+  const cancelButton = $('#cancelAutoBrowse');
 
   if (checkbox) {
     checkbox.checked =
@@ -173,6 +174,11 @@ async function loadAutoBrowseState() {
       stored.autoBrowseProgressRunning
         ? 'Buscando em segundo plano...'
         : 'Rodar próxima busca agora';
+  }
+
+  if (cancelButton) {
+    cancelButton.hidden =
+      !stored.autoBrowseProgressRunning;
   }
 
   if (progress) {
@@ -467,6 +473,23 @@ $('#runAutoBrowseNow')?.addEventListener(
       });
     } finally {
       button.textContent = original;
+      await loadAutoBrowseState();
+    }
+  },
+);
+
+$('#cancelAutoBrowse')?.addEventListener(
+  'click',
+  async () => {
+    const button = $('#cancelAutoBrowse');
+    button.disabled = true;
+    button.textContent = 'Cancelando...';
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'radar-auto-browse-cancel',
+      });
+    } finally {
       await loadAutoBrowseState();
     }
   },

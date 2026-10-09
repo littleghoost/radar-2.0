@@ -524,14 +524,72 @@ async function collectFromAutoBrowseTab(
     new Error('Não consegui coletar a busca.');
 }
 
+let currentAutoBrowseWorker = null;
+
+async function createAutoBrowseWorker(url) {
+  try {
+    const workerWindow =
+      await chrome.windows.create({
+        url,
+        type: 'popup',
+        focused: false,
+        state: 'minimized',
+      });
+
+    const tabs = await chrome.tabs.query({
+      windowId: workerWindow.id,
+    });
+    const tab = tabs[0];
+
+    if (!tab?.id) {
+      throw new Error(
+        'Janela de trabalho criada sem aba.',
+      );
+    }
+
+    return {
+      mode: 'minimized_window',
+      windowId: workerWindow.id,
+      tab,
+    };
+  } catch {
+    // Fallback compatível com navegadores Chromium que restrinjam
+    // janelas minimizadas criadas por extensão.
+    const tab = await chrome.tabs.create({
+      url,
+      active: false,
+    });
+
+    return {
+      mode: 'background_tab',
+      windowId: null,
+      tab,
+    };
+  }
+}
+
+async function closeAutoBrowseWorker(worker) {
+  if (!worker) return;
+
+  if (worker.windowId) {
+    await chrome.windows
+      .remove(worker.windowId)
+      .catch(() => {});
+    return;
+  }
+
+  if (worker.tab?.id) {
+    await chrome.tabs
+      .remove(worker.tab.id)
+      .catch(() => {});
+  }
+}
+
 async function runAutoBrowseJob(job) {
-  // A busca roda em aba de fundo para não roubar o foco do usuário.
-  // O collector recebe mensagens diretamente, então não depende do
-  // Auto-Capture visível da página.
-  const tab = await chrome.tabs.create({
-    url: job.url,
-    active: false,
-  });
+  const worker =
+    await createAutoBrowseWorker(job.url);
+  currentAutoBrowseWorker = worker;
+  const tab = worker.tab;
 
   try {
     await waitForTabComplete(tab);
@@ -565,13 +623,17 @@ async function runAutoBrowseJob(job) {
       source_url: capture?.source_url || job.url,
     };
   } finally {
-    if (tab?.id) {
-      await chrome.tabs.remove(tab.id).catch(() => {});
+    await closeAutoBrowseWorker(worker);
+    if (
+      currentAutoBrowseWorker === worker
+    ) {
+      currentAutoBrowseWorker = null;
     }
   }
 }
 
 let autoBrowseRunning = false;
+let autoBrowseCancelRequested = false;
 
 async function processAutoBrowseTick(
   preferredSource = null,
@@ -588,6 +650,7 @@ async function processAutoBrowseTick(
   }
 
   autoBrowseRunning = true;
+  autoBrowseCancelRequested = false;
 
   try {
     await ensureDefaults();
@@ -717,6 +780,10 @@ async function processAutoBrowseTick(
 
     let jobsTried = 0;
     let emptyJobsSkipped = 0;
+    let totalFound = 0;
+    let totalImported = 0;
+    let totalUpdated = 0;
+    let totalAssigned = 0;
     let job = null;
     let result = null;
 
@@ -800,6 +867,20 @@ async function processAutoBrowseTick(
       const captureCount = Number(
         result?.capture_count || 0,
       );
+      totalFound += captureCount;
+      totalImported += Number(
+        result?.imported || 0,
+      );
+      totalUpdated += Number(
+        result?.updated || 0,
+      );
+      totalAssigned += Number(
+        result?.auto_assigned || 0,
+      );
+
+      if (autoBrowseCancelRequested) {
+        break;
+      }
 
       if (captureCount > 0) {
         await setAutoBrowseProgress({
@@ -878,23 +959,41 @@ async function processAutoBrowseTick(
       job?.query ||
       '';
 
-    const finalFound = Number(
-      result?.capture_count || 0,
-    );
-    const finalMessage = result?.error
-      ? 'Busca interrompida por erro'
-      : finalFound > 0
-        ? `Concluído: ${finalFound} anúncio(s) encontrado(s)`
-        : `Concluído: nenhum anúncio nas ${jobsTried} busca(s)`;
+    const finalFound = totalFound;
+    const finalMessage = autoBrowseCancelRequested
+      ? 'Busca cancelada'
+      : result?.error
+        ? 'Busca interrompida por erro'
+        : finalFound > 0
+          ? `Concluído: ${finalFound} anúncio(s) em ${jobsTried} busca(s)`
+          : `Concluído: nenhum anúncio nas ${jobsTried} busca(s)`;
 
     await setAutoBrowseProgress({
       running: false,
       percent: 100,
       message: finalMessage,
-      detail:
-        !finalFound && emptyJobsSkipped
-          ? `${emptyJobsSkipped} busca(s) sem resultado`
-          : displayedQuery,
+      detail: [
+        emptyJobsSkipped
+          ? `${emptyJobsSkipped} vazia(s)`
+          : null,
+        totalImported
+          ? `${totalImported} novo(s)`
+          : null,
+        totalUpdated
+          ? `${totalUpdated} atualizado(s)`
+          : null,
+        totalAssigned
+          ? `${totalAssigned} organizado(s)`
+          : null,
+        !emptyJobsSkipped &&
+        !totalImported &&
+        !totalUpdated &&
+        !totalAssigned
+          ? displayedQuery
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' • '),
       found: finalFound,
       tried: jobsTried,
       total: progressTotal,
@@ -908,16 +1007,15 @@ async function processAutoBrowseTick(
       lastAutoBrowseSource:
         job?.source || preferredSource || null,
       lastAutoBrowseQuery: displayedQuery,
-      lastAutoBrowseCount:
-        result.capture_count || 0,
-      lastAutoBrowseImported:
-        result.imported || 0,
-      lastAutoBrowseUpdated:
-        result.updated || 0,
+      lastAutoBrowseCount: totalFound,
+      lastAutoBrowseImported: totalImported,
+      lastAutoBrowseUpdated: totalUpdated,
       lastAutoBrowseRemaining:
         queue.length,
       lastAutoBrowseError:
-        result.error || null,
+        autoBrowseCancelRequested
+          ? null
+          : result.error || null,
       lastAutoBrowseDiagnostics:
         result.diagnostics || null,
       lastAutoBrowseSourceUrl:
@@ -940,7 +1038,10 @@ async function processAutoBrowseTick(
     });
 
     return {
-      ok: result.ok,
+      ok: autoBrowseCancelRequested
+        ? true
+        : result.ok,
+      cancelled: autoBrowseCancelRequested,
       job,
       result,
       jobs_tried: jobsTried,
@@ -949,6 +1050,8 @@ async function processAutoBrowseTick(
     };
   } finally {
     autoBrowseRunning = false;
+    autoBrowseCancelRequested = false;
+    currentAutoBrowseWorker = null;
   }
 }
 
@@ -987,6 +1090,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             error.message || String(error),
         }),
       );
+
+    return true;
+  }
+
+  if (message?.type === 'radar-auto-browse-cancel') {
+    autoBrowseCancelRequested = true;
+
+    const worker = currentAutoBrowseWorker;
+    closeAutoBrowseWorker(worker)
+      .catch(() => {})
+      .finally(async () => {
+        if (
+          currentAutoBrowseWorker === worker
+        ) {
+          currentAutoBrowseWorker = null;
+        }
+
+        await setAutoBrowseProgress({
+          running: false,
+          percent: 100,
+          message: 'Cancelando busca...',
+          detail: 'A fila restante foi preservada.',
+        });
+
+        sendResponse({
+          ok: true,
+          cancelled: true,
+        });
+      });
 
     return true;
   }

@@ -115,3 +115,12 @@ footer { display: flex; justify-content: space-between; gap: 10px; font-size: 10
   line-height: 1.35;
   opacity: .7;
 }
+
+.progress-cancel {
+  min-height: 30px;
+  margin-top: 2px;
+  background: transparent;
+  color: #f3f4f6;
+  border-color: rgba(255,255,255,.12);
+  font-size: 10px;
+}
