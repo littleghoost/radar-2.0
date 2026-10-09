@@ -105,6 +105,24 @@
             <span>Notificações</span>
             <strong id="notificationStatus">Verificando…</strong>
           </div>
+
+          <div class="notification-prefs" id="notificationPrefs" hidden>
+            <label class="pref-toggle">
+              <span>
+                <strong>Grails fortes</strong>
+                <small>Novos achados acima do score configurado.</small>
+              </span>
+              <input id="notifyGrailsToggle" type="checkbox" checked>
+            </label>
+            <label class="pref-toggle">
+              <span>
+                <strong>Quedas de preço</strong>
+                <small>Reduções relevantes conforme o radar.</small>
+              </span>
+              <input id="notifyPriceDropsToggle" type="checkbox" checked>
+            </label>
+          </div>
+
           <button class="ghost wide notification-button" id="notificationButton" type="button">Ativar notificações</button>
           <button class="ghost wide danger-ghost" id="unlinkButton" type="button">Desvincular este celular</button>
         </div>

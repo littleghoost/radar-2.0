@@ -249,6 +249,48 @@ async function currentPushSubscription() {
   return registration.pushManager.getSubscription();
 }
 
+async function loadNotificationPreferences() {
+  const box = $("#notificationPrefs");
+  if (!box || state.mode !== "relay") return;
+
+  try {
+    const prefs = await relayApi(
+      "/bridge/mobile/device/notification-preferences",
+    );
+
+    $("#notifyGrailsToggle").checked =
+      prefs.notify_grails !== false;
+    $("#notifyPriceDropsToggle").checked =
+      prefs.notify_price_drops !== false;
+
+    box.hidden = false;
+  } catch {
+    box.hidden = true;
+  }
+}
+
+async function saveNotificationPreferences() {
+  if (state.mode !== "relay") return;
+
+  const grails = Boolean(
+    $("#notifyGrailsToggle")?.checked,
+  );
+  const priceDrops = Boolean(
+    $("#notifyPriceDropsToggle")?.checked,
+  );
+
+  await relayApi(
+    "/bridge/mobile/device/notification-preferences",
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        notify_grails: grails,
+        notify_price_drops: priceDrops,
+      }),
+    },
+  );
+}
+
 async function updateNotificationUi() {
   const button = $("#notificationButton");
   const label = $("#notificationStatus");
@@ -289,6 +331,13 @@ async function updateNotificationUi() {
       : Notification.permission === "granted"
         ? "Desativadas"
         : "Permissão pendente";
+
+    if (active) {
+      await loadNotificationPreferences();
+    } else {
+      const box = $("#notificationPrefs");
+      if (box) box.hidden = true;
+    }
   } catch {
     button.disabled = false;
     label.textContent = "Não foi possível verificar";
@@ -825,6 +874,32 @@ $("#saveConnectionButton").addEventListener(
 
     toast("Endereço salvo.");
     await refresh();
+  },
+);
+
+$("#notifyGrailsToggle").addEventListener(
+  "change",
+  async () => {
+    try {
+      await saveNotificationPreferences();
+      toast("Preferência de grails salva.");
+    } catch (error) {
+      toast(error.message);
+      await loadNotificationPreferences();
+    }
+  },
+);
+
+$("#notifyPriceDropsToggle").addEventListener(
+  "change",
+  async () => {
+    try {
+      await saveNotificationPreferences();
+      toast("Preferência de preço salva.");
+    } catch (error) {
+      toast(error.message);
+      await loadNotificationPreferences();
+    }
   },
 );
 

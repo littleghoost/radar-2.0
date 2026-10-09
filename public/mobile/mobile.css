@@ -107,3 +107,11 @@ h3{font-size:16px}
 .notification-button{margin-top:12px;background:rgba(115,247,162,.1);color:var(--accent)}
 .notification-button.active{background:#20262e;color:var(--text)}
 .notification-button:disabled{opacity:.55;cursor:default}
+
+.notification-prefs{display:grid;gap:8px;margin-top:10px}
+.pref-toggle{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 0;border-top:1px solid var(--line)}
+.pref-toggle:first-child{border-top:0}
+.pref-toggle span{display:grid;gap:3px}
+.pref-toggle strong{font-size:12px}
+.pref-toggle small{font-size:10px;color:var(--muted);line-height:1.35}
+.pref-toggle input{width:20px;height:20px;accent-color:var(--accent)}

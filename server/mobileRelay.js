@@ -149,6 +149,16 @@ function initializeMobileRelay(db) {
       )
     `);
 
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS mobile_notification_preferences (
+        device_id TEXT PRIMARY KEY,
+        notify_grails INTEGER NOT NULL DEFAULT 1,
+        notify_price_drops INTEGER NOT NULL DEFAULT 1,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     db.run(`
       CREATE TABLE IF NOT EXISTS mobile_push_deliveries (
         desktop_id TEXT NOT NULL,
@@ -953,6 +963,11 @@ function registerMobileRelay(app, db) {
           "DELETE FROM mobile_push_subscriptions WHERE device_id = ?",
           [req.params.id],
         ).catch(() => {});
+        await dbRun(
+          db,
+          "DELETE FROM mobile_notification_preferences WHERE device_id = ?",
+          [req.params.id],
+        ).catch(() => {});
 
         await dbRun(
           db,
@@ -1018,6 +1033,95 @@ function registerMobileRelay(app, db) {
         const keys = await getVapidKeys();
         res.json({
           public_key: keys.publicKey,
+        });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  app.get(
+    "/bridge/mobile/device/notification-preferences",
+    requireDevice,
+    async (req, res) => {
+      try {
+        const row = await dbGet(
+          db,
+          `SELECT notify_grails, notify_price_drops, updated_at
+           FROM mobile_notification_preferences
+           WHERE device_id = ?`,
+          [req.mobileDevice.id],
+        );
+
+        res.json({
+          notify_grails:
+            row?.notify_grails === undefined
+              ? true
+              : Boolean(row.notify_grails),
+          notify_price_drops:
+            row?.notify_price_drops === undefined
+              ? true
+              : Boolean(row.notify_price_drops),
+          updated_at: row?.updated_at || null,
+        });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  app.put(
+    "/bridge/mobile/device/notification-preferences",
+    requireDevice,
+    async (req, res) => {
+      try {
+        const current = await dbGet(
+          db,
+          `SELECT notify_grails, notify_price_drops
+           FROM mobile_notification_preferences
+           WHERE device_id = ?`,
+          [req.mobileDevice.id],
+        );
+
+        const notifyGrails =
+          req.body?.notify_grails === undefined
+            ? current?.notify_grails === undefined
+              ? true
+              : Boolean(current.notify_grails)
+            : Boolean(req.body.notify_grails);
+
+        const notifyPriceDrops =
+          req.body?.notify_price_drops === undefined
+            ? current?.notify_price_drops === undefined
+              ? true
+              : Boolean(current.notify_price_drops)
+            : Boolean(req.body.notify_price_drops);
+
+        await dbRun(
+          db,
+          `INSERT INTO mobile_notification_preferences
+            (
+              device_id,
+              notify_grails,
+              notify_price_drops,
+              updated_at
+            )
+           VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(device_id) DO UPDATE SET
+             notify_grails = excluded.notify_grails,
+             notify_price_drops = excluded.notify_price_drops,
+             updated_at = CURRENT_TIMESTAMP`,
+          [
+            req.mobileDevice.id,
+            notifyGrails ? 1 : 0,
+            notifyPriceDrops ? 1 : 0,
+          ],
+        );
+
+        res.json({
+          ok: true,
+          notify_grails: notifyGrails,
+          notify_price_drops: notifyPriceDrops,
         });
       } catch (error) {
         res.status(500).json({ error: error.message });
@@ -1182,9 +1286,22 @@ function registerMobileRelay(app, db) {
           `SELECT s.id, s.subscription_json
            FROM mobile_push_subscriptions s
            JOIN mobile_devices d ON d.id = s.device_id
+           LEFT JOIN mobile_notification_preferences p
+             ON p.device_id = d.id
            WHERE d.desktop_id = ?
-             AND d.revoked_at IS NULL`,
-          [req.mobileDesktop.id],
+             AND d.revoked_at IS NULL
+             AND (
+               (? = 'high_score_new_listing'
+                 AND COALESCE(p.notify_grails, 1) = 1)
+               OR
+               (? = 'significant_price_drop'
+                 AND COALESCE(p.notify_price_drops, 1) = 1)
+             )`,
+          [
+            req.mobileDesktop.id,
+            kind,
+            kind,
+          ],
         );
 
         const result = await sendPushToSubscriptions(
@@ -1493,6 +1610,11 @@ function registerMobileRelay(app, db) {
         await dbRun(
           db,
           "DELETE FROM mobile_push_subscriptions WHERE device_id = ?",
+          [req.mobileDevice.id],
+        ).catch(() => {});
+        await dbRun(
+          db,
+          "DELETE FROM mobile_notification_preferences WHERE device_id = ?",
           [req.mobileDevice.id],
         ).catch(() => {});
         res.json({ ok: true });
