@@ -874,6 +874,16 @@ function createRadarRunner({
         (item) => !item.rule_rejected,
       );
 
+      let scheduledTriageSkipped = 0;
+      if (trigger === 'scheduled') {
+        scheduledTriageSkipped = results.filter(
+          (item) => item.rule_tier === 'triagem',
+        ).length;
+        results = results.filter(
+          (item) => item.rule_tier !== 'triagem',
+        );
+      }
+
       if (visualEnabled || semanticEnabled) {
         results = results
           .filter((item) => Math.max(Number(item.visual_score) || 0, Number(item.semantic_score) || 0) >= minVisualSimilarity * 100)
@@ -1165,12 +1175,39 @@ function createRadarRunner({
         );
       }
 
-      const activeSources = sourceSummary.filter((source) => source.ok).length;
-      const unavailableSources = sourceSummary.filter((source) => !source.ok);
+      const attemptedSources = sourceSummary.filter(
+        (source) => !source.skipped,
+      );
+      const activeSources = attemptedSources.filter(
+        (source) => source.ok,
+      ).length;
+      const unavailableSources = attemptedSources.filter(
+        (source) => !source.ok,
+      );
+      const skippedSources = sourceSummary.filter(
+        (source) => source.skipped,
+      );
       let message = `${results.length} anúncios selecionados de ${activeSources} fonte(s). ${added} novos, ${updated} atualizados, ${priceDrops} queda(s) de preço, ${unavailable} indisponível(is) e ${restored} restaurado(s).`;
 
       if (criteriaRejected > 0) {
-        message += `${criteriaRejected} resultado(s) barrado(s) pelos critérios do radar.`;
+        message += ` ${criteriaRejected} resultado(s) barrado(s) pelos critérios do radar.`;
+      }
+
+      if (scheduledTriageSkipped > 0) {
+        message += ` ${scheduledTriageSkipped} resultado(s) de triagem ignorado(s) no modo automático.`;
+      }
+
+      for (const source of skippedSources) {
+        if (
+          source.source === 'olx' &&
+          [
+            'pending_homologation',
+            'integration_not_enabled',
+          ].includes(source.reason)
+        ) {
+          message +=
+            ' OLX: coleta pela Bridge do navegador; API oficial aguardando homologação.';
+        }
       }
 
       if (catalogItems.length) {
@@ -1226,7 +1263,7 @@ function createRadarRunner({
          SET status = 'completed', sources_total = ?, sources_ok = ?, found_count = ?,
              added_count = ?, updated_count = ?, finished_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
-        [sourceSummary.length, activeSources, results.length, added, updated, runRecord.id],
+        [attemptedSources.length, activeSources, results.length, added, updated, runRecord.id],
       );
 
       await run(
@@ -1238,7 +1275,20 @@ function createRadarRunner({
           runRecord.id,
           `Radar executado: ${radar.name}`,
           message,
-          JSON.stringify({ sources: sourceSummary, added, updated, priceDrops, availabilityChecks, unavailable, restored, catalogAdded, catalogUpdated, criteriaRejected, trigger }),
+          JSON.stringify({
+            sources: sourceSummary,
+            added,
+            updated,
+            priceDrops,
+            availabilityChecks,
+            unavailable,
+            restored,
+            catalogAdded,
+            catalogUpdated,
+            criteriaRejected,
+            scheduledTriageSkipped,
+            trigger,
+          }),
         ],
       );
 
