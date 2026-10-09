@@ -42,6 +42,96 @@ function isForeignMarketplaceItem(item = {}) {
   return item.source === "ebay";
 }
 
+function catalogItemRelevantToRadar(radar = {}, product = {}) {
+  const category = String(
+    radar.category || "",
+  ).toLowerCase();
+  const title = String(
+    product.title || "",
+  )
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const domain = String(
+    product.domain_id || "",
+  ).toUpperCase();
+
+  if (!title) return false;
+
+  if (
+    category.includes("camera") ||
+    category.includes("filmadora")
+  ) {
+    const cameraSignal =
+      /\b(camera|camcorder|filmadora|handycam)\b/.test(
+        title,
+      ) ||
+      /\b(?:dcr|hdr)[-\s]?(?:sr|xr)[a-z0-9-]*\b/.test(
+        title,
+      );
+
+    const accessorySignal =
+      /TRIPOD|BATTER|CHARGER|CABLE|ADAPTER|ACCESSOR|CASE|BAG|LENS|MICROPHONE|LIGHT/.test(
+        domain,
+      ) ||
+      /\b(tripe|tripod|bateria|battery|carregador|charger|cabo|cable|adaptador|adapter|bolsa|case|bag|dock|station|lente|lens)\b/.test(
+        title,
+      );
+
+    if (!cameraSignal || accessorySignal) {
+      return false;
+    }
+
+    const radarTarget = [
+      radar.name,
+      radar.query,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    if (radarTarget.includes("hdd")) {
+      return (
+        /\b(hdd|hard disk)\b/.test(title) ||
+        /\b(?:dcr|hdr)[-\s]?(?:sr|xr)[a-z0-9-]*\b/.test(
+          title,
+        )
+      );
+    }
+
+    return true;
+  }
+
+  if (
+    category.includes("roupa") ||
+    category.includes("clothing") ||
+    category.includes("fashion")
+  ) {
+    const obviousNonClothing =
+      /\b(mochila|backpack|oculos|sunglasses|perfume|caneca|mug|toalha|towel|lampada|lamp|castical|candelabra|chaveiro|keychain|esmalte|nail polish|brinquedo|toy|estojo|pencil case|puff|pouf|guitarra|guitar|organizador|placemat|bone|hat|cap|cinto|belt|maio|swimsuit|canga|sarong)\b/.test(
+        title,
+      );
+
+    if (obviousNonClothing) {
+      return false;
+    }
+
+    const garmentSignal =
+      /\b(calca|pants|trousers|bermuda|shorts|jorts|camisa|camiseta|shirt|t-shirt|tee|moletom|hoodie|sweatshirt|jaqueta|jacket|casaco|coat|blusa|sweater|colete|vest|saia|skirt|vestido|dress|jeans|denim)\b/.test(
+        title,
+      );
+
+    const garmentDomain =
+      /PANTS|JEANS|SHORTS|T_SHIRTS|SHIRTS|SWEAT|HOOD|JACKETS|COATS|CLOTHING|APPAREL|SKIRTS|DRESSES/.test(
+        domain,
+      );
+
+    return garmentSignal || garmentDomain;
+  }
+
+  return true;
+}
+
 function createRadarRunner({
   get,
   all,
@@ -519,6 +609,9 @@ function createRadarRunner({
 
       for (const product of catalogItems) {
         if (!product.external_id || !product.title) continue;
+        if (!catalogItemRelevantToRadar(radar, product)) {
+          continue;
+        }
 
         const catalogDomain = String(product.domain_id || "").toUpperCase();
         const catalogTitle = String(product.title || "").toLowerCase();
@@ -1365,4 +1458,7 @@ function createRadarRunner({
   return { executeRadarById, runDueRadars };
 }
 
-module.exports = { createRadarRunner };
+module.exports = {
+  createRadarRunner,
+  catalogItemRelevantToRadar,
+};
