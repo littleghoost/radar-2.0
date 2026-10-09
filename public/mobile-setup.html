@@ -36,6 +36,8 @@
     .pair-url{display:flex;gap:8px}
     .pair-url input{min-width:0;flex:1;background:#090c0f;color:#f4f7fb;border:1px solid rgba(255,255,255,.08);border-radius:11px;padding:11px}
     .expires{font-size:11px;color:#8f9aa7;margin-top:9px}
+    .qr-wrap{display:grid;place-items:center;margin:14px 0;padding:14px;border-radius:16px;background:#fff}
+    .qr-wrap img{display:block;width:min(280px,100%);height:auto}
     .device-list{display:grid;gap:8px;margin-top:14px}
     .device{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px;border-radius:14px;background:#0e1216;border:1px solid rgba(255,255,255,.06)}
     .device strong{display:block;font-size:13px}
@@ -73,7 +75,11 @@
         <button id="pairButton" class="primary" type="button">Gerar novo pareamento</button>
 
         <div id="pairBox" class="pair-box" hidden>
-          <label>Link de uso único</label>
+          <label>Escaneie com a câmera do celular</label>
+          <div class="qr-wrap">
+            <img id="pairQr" alt="QR Code de pareamento do Radar Mobile">
+          </div>
+          <label>Ou use o link de uso único</label>
           <div class="pair-url">
             <input id="pairUrl" readonly>
             <button id="copyButton" class="ghost" type="button">Copiar</button>
@@ -81,7 +87,7 @@
           <div class="expires" id="pairExpiry">Expira em 10 minutos.</div>
         </div>
 
-        <p class="hint">Por enquanto você envia esse link para o celular. A próxima revisão desenha o mesmo link como QR Code local, sem mandar a chave de pareamento para serviços externos.</p>
+        <p class="hint">O QR é gerado localmente pelo Radar Desktop. O segredo de pareamento não é enviado para serviços externos.</p>
       </section>
 
       <section class="card">
@@ -190,6 +196,7 @@
         });
 
         $("#pairUrl").value = data.pair_url || "";
+        $("#pairQr").src = data.qr_data_url || "";
         $("#pairBox").hidden = false;
 
         let remaining = Number(data.expires_in_seconds) || 600;

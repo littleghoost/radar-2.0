@@ -96,3 +96,10 @@ h3{font-size:16px}
 .relay-status-row span{color:var(--muted)}
 .relay-status-row strong{font-size:12px;text-align:right}
 .danger-ghost{margin-top:12px;color:#ff98a2;background:rgba(255,111,125,.08)}
+
+.quick-add{padding:18px}
+.quick-add p{color:var(--muted);font-size:12px;line-height:1.5;margin-top:7px}
+.quick-add-fields{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(130px,.8fr) auto;gap:8px;margin-top:14px}
+.quick-add input,.quick-add select{width:100%;min-width:0;border-radius:13px;border:1px solid var(--line);background:#0e1216;color:var(--text);padding:12px}
+.quick-add .primary{width:auto;margin:0;white-space:nowrap;padding-inline:16px}
+@media(max-width:620px){.quick-add-fields{grid-template-columns:1fr}.quick-add .primary{width:100%}}

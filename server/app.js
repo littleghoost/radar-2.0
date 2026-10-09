@@ -1,6 +1,7 @@
 const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
+const QRCode = require("qrcode");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const { spawn } = require("child_process");
@@ -5107,7 +5108,16 @@ app.post("/api/mobile/pairing", async (_req, res) => {
     }
 
     const result = await mobileDesktopSync.createPairing();
-    res.status(201).json(result);
+    const qrDataUrl = await QRCode.toDataURL(result.pair_url, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 320,
+    });
+
+    res.status(201).json({
+      ...result,
+      qr_data_url: qrDataUrl,
+    });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -5156,6 +5166,30 @@ app.post("/api/mobile/devices/:id/revoke", async (req, res) => {
         String(req.params.id || ""),
       ),
     );
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post("/api/mobile/import-url", async (req, res) => {
+  try {
+    if (process.env.RADAR_DESKTOP !== "1") {
+      return res.status(409).json({
+        error: "Importação mobile só está disponível no Radar Desktop.",
+      });
+    }
+
+    const result = await mobileDesktopSync.importUrl({
+      url: req.body?.url,
+      radar_id: req.body?.radar_id ?? null,
+    });
+
+    await mobileDesktopSync.syncSnapshot().catch(() => {});
+
+    res.status(result.duplicate ? 200 : 201).json({
+      ok: true,
+      ...result,
+    });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

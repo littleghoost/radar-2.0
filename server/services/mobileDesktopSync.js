@@ -54,6 +54,88 @@ async function setSetting(db, key, value) {
   );
 }
 
+function platformForUrl(rawUrl) {
+  let host = "";
+  try {
+    host = new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "Link";
+  }
+
+  if (host.endsWith("olx.com.br")) return "OLX";
+  if (host.endsWith("enjoei.com.br")) return "Enjoei";
+  if (
+    host.endsWith("mercadolivre.com.br") ||
+    host.endsWith("mercadolibre.com")
+  ) {
+    return "Mercado Livre";
+  }
+  if (host.endsWith("depop.com")) return "Depop";
+  if (host === "ebay.com" || host.startsWith("ebay.") || host.includes(".ebay.")) return "eBay";
+  if (host.endsWith("facebook.com")) return "Facebook Marketplace";
+  if (host.endsWith("mercari.com")) return "Mercari";
+  if (host.endsWith("buyee.jp")) return "Buyee";
+
+  return host || "Link";
+}
+
+function titleFromUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    const parts = parsed.pathname
+      .split("/")
+      .filter(Boolean)
+      .map((part) => {
+        try {
+          return decodeURIComponent(part);
+        } catch {
+          return part;
+        }
+      });
+
+    let slug =
+      [...parts]
+        .reverse()
+        .find(
+          (part) =>
+            part &&
+            !/^\d+$/.test(part) &&
+            !/^(item|items|produto|product|products|listing|marketplace)$/i.test(part),
+        ) || "";
+
+    slug = slug
+      .replace(/[-_]+/g, " ")
+      .replace(/[0-9]{7,}/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (slug.length >= 4) {
+      return slug
+        .split(" ")
+        .slice(0, 24)
+        .join(" ")
+        .slice(0, 220);
+    }
+
+    return `Link salvo • ${parsed.hostname.replace(/^www\./, "")}`;
+  } catch {
+    return "Link salvo pelo Radar Mobile";
+  }
+}
+
+function sourceKeyForPlatform(platform) {
+  const value = String(platform || "").toLowerCase();
+  if (value.includes("olx")) return "olx";
+  if (value.includes("enjoei")) return "enjoei";
+  if (value.includes("mercado")) return "mercadolivre";
+  if (value.includes("depop")) return "depop";
+  if (value.includes("ebay")) return "ebay";
+  if (value.includes("facebook")) return "facebook";
+  if (value.includes("mercari")) return "mercari";
+  if (value.includes("buyee")) return "buyee";
+  return null;
+}
+
 function createMobileDesktopSync({
   db,
   radarRunner,
@@ -318,6 +400,124 @@ function createMobileDesktopSync({
     );
   }
 
+  async function importUrl(payload = {}) {
+    const rawUrl = String(payload.url || "").trim();
+    let parsed;
+
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      throw new Error("Link inválido.");
+    }
+
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error("Link precisa usar http ou https.");
+    }
+
+    parsed.hash = "";
+    const url = parsed.toString().slice(0, 1800);
+    const radarId =
+      payload.radar_id === null ||
+      payload.radar_id === undefined ||
+      payload.radar_id === ""
+        ? null
+        : Number(payload.radar_id);
+
+    if (
+      radarId !== null &&
+      (!Number.isInteger(radarId) || radarId <= 0)
+    ) {
+      throw new Error("Radar inválido.");
+    }
+
+    if (radarId !== null) {
+      const radar = await dbGet(
+        db,
+        "SELECT id FROM radars WHERE id = ?",
+        [radarId],
+      );
+
+      if (!radar) {
+        throw new Error("Radar não encontrado.");
+      }
+    }
+
+    const existing = await dbGet(
+      db,
+      "SELECT * FROM listings WHERE url = ? LIMIT 1",
+      [url],
+    );
+
+    if (existing) {
+      return {
+        duplicate: true,
+        listing: existing,
+      };
+    }
+
+    const platform = platformForUrl(url);
+    const title = titleFromUrl(url);
+    const sourceKey = sourceKeyForPlatform(platform);
+
+    const inserted = await dbRun(
+      db,
+      `INSERT INTO listings (
+         radar_id,
+         title,
+         platform,
+         url,
+         status,
+         notes,
+         source_key,
+         availability_status,
+         last_seen_at,
+         updated_at
+       ) VALUES (
+         ?, ?, ?, ?, 'novo',
+         'Adicionado pelo Radar Mobile',
+         ?, 'unknown',
+         CURRENT_TIMESTAMP,
+         CURRENT_TIMESTAMP
+       )`,
+      [
+        radarId,
+        title,
+        platform,
+        url,
+        sourceKey,
+      ],
+    );
+
+    const listing = await dbGet(
+      db,
+      "SELECT * FROM listings WHERE id = ?",
+      [inserted.id],
+    );
+
+    await dbRun(
+      db,
+      `INSERT INTO activity_events
+        (radar_id, listing_id, type, title, detail, metadata_json)
+       VALUES (?, ?, 'mobile_action', ?, ?, ?)`,
+      [
+        radarId,
+        listing.id,
+        "Link adicionado pelo celular",
+        `${platform} • ${title}`,
+        JSON.stringify({
+          source: "mobile_relay",
+          action: "import_url",
+          url,
+        }),
+      ],
+    ).catch(() => {});
+
+    return {
+      duplicate: false,
+      listing,
+    };
+  }
+
   async function executeCommand(command) {
     const type = String(command.type || "");
     const payload =
@@ -412,9 +612,10 @@ function createMobileDesktopSync({
     }
 
     if (type === "import_url") {
-      throw new Error(
-        "Importação por link será ativada na próxima revisão do Desktop.",
-      );
+      return {
+        ok: true,
+        result: await importUrl(payload),
+      };
     }
 
     throw new Error(
@@ -597,6 +798,7 @@ function createMobileDesktopSync({
     syncSnapshot,
     pollCommands,
     buildSnapshot,
+    importUrl,
   };
 }
 

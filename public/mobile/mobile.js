@@ -233,6 +233,30 @@ function renderConnectionPanels() {
   }
 }
 
+function renderImportRadars() {
+  const select = $("#importRadarSelect");
+  if (!select) return;
+
+  const current = select.value;
+  select.innerHTML = '<option value="">Sem radar</option>';
+
+  for (const radar of state.radars) {
+    const option = document.createElement("option");
+    option.value = String(radar.id);
+    option.textContent = radar.name;
+    select.appendChild(option);
+  }
+
+  if (
+    current &&
+    [...select.options].some(
+      (option) => option.value === current,
+    )
+  ) {
+    select.value = current;
+  }
+}
+
 function renderRadars() {
   const host = $("#radarsList");
   host.innerHTML = "";
@@ -529,9 +553,77 @@ async function refresh() {
 
   renderConnectionPanels();
   renderStats();
+  renderImportRadars();
   renderRadars();
   renderListings();
 }
+
+$("#importUrlButton").addEventListener(
+  "click",
+  async () => {
+    const input = $("#importUrlInput");
+    const button = $("#importUrlButton");
+    const rawUrl = input.value.trim();
+    const radarValue = $("#importRadarSelect").value;
+    const radarId = radarValue
+      ? Number(radarValue)
+      : null;
+
+    try {
+      const parsed = new URL(rawUrl);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        throw new Error("Use um link http:// ou https://");
+      }
+    } catch {
+      toast("Cole um link válido.");
+      return;
+    }
+
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = "Adicionando…";
+
+    try {
+      if (state.mode === "relay") {
+        await queueRelayCommand("import_url", {
+          url: rawUrl,
+          radar_id: radarId,
+        });
+
+        toast(
+          state.online
+            ? "Link enviado ao Desktop."
+            : "Notebook offline. Link ficou na fila.",
+        );
+      } else {
+        const result = await api(
+          "/api/mobile/import-url",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              url: rawUrl,
+              radar_id: radarId,
+            }),
+          },
+        );
+
+        toast(
+          result.duplicate
+            ? "Esse link já estava salvo."
+            : "Link adicionado ao Radar.",
+        );
+        await refresh();
+      }
+
+      input.value = "";
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  },
+);
 
 $("#refreshButton").addEventListener(
   "click",
