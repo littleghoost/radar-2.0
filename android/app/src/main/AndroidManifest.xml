@@ -10,11 +10,14 @@
     <action android:name="android.intent.action.MAIN"/>
     <category android:name="android.intent.category.LAUNCHER"/>
    </intent-filter>
-   <intent-filter>
+   <!-- Verified Android App Link: the HTTPS URL in the QR code. -->
+   <intent-filter android:autoVerify="true">
     <action android:name="android.intent.action.VIEW"/>
     <category android:name="android.intent.category.DEFAULT"/>
     <category android:name="android.intent.category.BROWSABLE"/>
-    <data android:scheme="radar2" android:host="pair"/>
+    <data android:scheme="https"
+      android:host="radar-2-0-littleghoost.fly.dev"
+      android:path="/mobile/pair.html"/>
    </intent-filter>
   </activity>
  </application>

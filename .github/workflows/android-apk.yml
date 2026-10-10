@@ -43,10 +43,21 @@ jobs:
         working-directory: android
         run: gradle --no-daemon assembleDebug
 
+      - name: Verify APK signature and export signing fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          SIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          "$SIGNER" verify --print-certs "$APK" | tee android/app/build/outputs/apk/debug/signing-fingerprint.txt
+          grep -q 'Signer #1 certificate SHA-256 digest:' android/app/build/outputs/apk/debug/signing-fingerprint.txt
+
       - name: Upload installable APK
         uses: actions/upload-artifact@v5
         with:
           name: radar-2-0-mobile-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/debug/signing-fingerprint.txt
           retention-days: 30
           if-no-files-found: error

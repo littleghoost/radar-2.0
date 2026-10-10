@@ -1,4 +1,4 @@
-const CACHE = "radar-mobile-v8";
+const CACHE = "radar-mobile-v9";
 const SHELL = ["./","./index.html","./pair.html","./mobile.css","./mobile.js","./manifest.webmanifest","./icon.svg"];
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));

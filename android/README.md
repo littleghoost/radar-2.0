@@ -36,3 +36,20 @@ e instale o APK 0.1.1. Isso limpa somente os dados de pareamento do aplicativo
 Android, não os radares/anúncios mantidos no Desktop. Gere um novo QR de uso
 único; não use QR já conectado pelo navegador. A versão futura de produção
 terá assinatura estável, para permitir atualizações normais.
+
+## Beta 0.1.2: QR direto para o APK (Android App Links)
+
+O QR contém um único link HTTPS oficial, sem página intermediária de opções.
+O manifest Android registra HTTPS /mobile/pair.html com autoVerify=true;
+a associação do domínio fica em /.well-known/assetlinks.json com o hash SHA-256
+da assinatura do APK. Com a associação verificada pelo Android, escanear o QR
+abre o aplicativo diretamente na tela Nome do aparelho / Conectar.
+
+O Android pode abrir o navegador se a associação não estiver validada, se o
+app não estiver instalado ou se o usuário tiver desativado a abertura
+de links compatíveis (Informações do app > Abrir por padrão).
+
+A beta de debug recebe um certificado temporário pelo CI. A associação
+assetlinks.json precisa corresponder a cada APK. A solução duradoura
+é configurar uma assinatura estável fora do repositório.
+Nunca versionar chaves privadas de assinatura.

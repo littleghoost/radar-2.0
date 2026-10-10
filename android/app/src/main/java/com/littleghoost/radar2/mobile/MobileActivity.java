@@ -128,8 +128,14 @@ public final class MobileActivity extends Activity {
                 return;
             }
             Uri data = intent.getData();
-            if (data != null && "radar2".equalsIgnoreCase(data.getScheme())
-                    && "pair".equalsIgnoreCase(data.getHost())) {
+            if (data != null
+                    && "https".equalsIgnoreCase(data.getScheme())
+                    && HOST.equalsIgnoreCase(data.getHost())
+                    && "/mobile/pair.html".equals(data.getPath())
+                    && data.getPort() == -1
+                    && data.getUserInfo() == null) {
+                // QR scanned by the Android camera invokes the verified HTTPS link.
+                // The URI fragment carries the short-lived one-use pairing token.
                 openPair(data);
                 return;
             }

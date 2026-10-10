@@ -19,19 +19,7 @@
         <input id="deviceLabel" maxlength="80" value="Meu celular" autocomplete="off">
       </label>
 
-      <a id="openAndroidApp" class="primary" href="#" hidden style="display:block;text-align:center;text-decoration:none">
-        Abrir no aplicativo Radar
-      </a>
-      <p id="androidPairHint" hidden>
-        O botão acima abre a versão beta atualizada no Android. Se não abrir,
-        copie o link abaixo, entre no aplicativo e cole em <strong>Conexão → Parear por link</strong>.
-      </p>
-      <button id="copyPairLink" class="ghost wide" type="button" hidden>Copiar link para o aplicativo</button>
-      <a id="legacyAndroidApp" href="#" hidden style="display:block;margin:12px 0;color:#73f7a2;font-size:12px">
-        Tentar abertura alternativa
-      </a>
-      <button id="pairButton" class="primary" type="button">Conectar pelo navegador</button>
-      <button id="cancelButton" class="ghost wide" type="button">Cancelar</button>
+      <button id="pairButton" class="primary" type="button">Conectar</button>
 
       <small id="pairHint">O código expira em poucos minutos e só pode ser usado uma vez.</small>
     </section>
@@ -53,54 +41,10 @@
 
     const validPair = /^[a-fA-F0-9]{32}$/.test(pairingId)
       && /^[A-Za-z0-9_-]{24,128}$/.test(pairingSecret);
-
-    if (validPair) {
-      // Chrome for Android handles intent:// links with an explicit app package.
-      // The app receives only two validated, short-lived, one-use token parts.
-      // A direct custom scheme remains available for non-Chrome Android browsers.
-      const launch = document.getElementById("openAndroidApp");
-      const fragment = new URLSearchParams({
-        id: pairingId,
-        secret: pairingSecret,
-      }).toString();
-      launch.href = "intent://pair#Intent;scheme=radar2;"
-        + "package=com.littleghoost.radar2.mobile;"
-        + "S.pairing_id=" + pairingId + ";"
-        + "S.pairing_secret=" + pairingSecret + ";end";
-      launch.hidden = false;
-
-      const alternative = document.getElementById("legacyAndroidApp");
-      alternative.href = "radar2://pair#" + fragment;
-      alternative.hidden = false;
-
-      document.getElementById("copyPairLink").hidden = false;
-      document.getElementById("androidPairHint").hidden = false;
-    } else {
-      fail("Este link de pareamento está incompleto.");
+    if (!validPair) {
+      message.textContent = "O QR está incompleto ou expirou. Gere outro no Radar Desktop.";
       button.disabled = true;
     }
-
-    document.getElementById("copyPairLink").addEventListener("click", async () => {
-      const copied = location.href;
-      const copyButton = document.getElementById("copyPairLink");
-      try {
-        await navigator.clipboard.writeText(copied);
-      } catch {
-        const input = document.createElement("textarea");
-        input.value = copied;
-        input.style.position = "fixed";
-        input.style.opacity = "0";
-        document.body.append(input);
-        input.select();
-        const ok = document.execCommand("copy");
-        input.remove();
-        if (!ok) {
-          copyButton.textContent = "Não foi possível copiar. Copie a URL da página.";
-          return;
-        }
-      }
-      copyButton.textContent = "Copiado! Cole no Radar Mobile → Conexão";
-    });
 
     button.addEventListener("click", async () => {
       button.disabled = true;
@@ -138,9 +82,6 @@
       }
     });
 
-    document.getElementById("cancelButton").addEventListener("click", () => {
-      location.replace("./");
-    });
   </script>
 </body>
 </html>
