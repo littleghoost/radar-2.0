@@ -181,3 +181,11 @@ absoluta de eliminação de condições de corrida no modo legado; a partir da
 O novo protocolo só está habilitado no backend local; o servidor Fly.io não
 aceita comandos de encerramento. A API Desktop escuta apenas no endereço
 `127.0.0.1` e a solicitação é autenticada por token por processo.
+
+### Retorno automático ao monitoramento
+
+Após o NSIS concluir e a versão instalada ser confirmada no registro do Windows,
+o script `-AutoInstall` tenta encontrar a instalação atual do Radar e iniciar
+`radar-2-0-desktop.exe --background` automaticamente, restaurando o processo
+local de monitoramento. Se não puder identificar o executável ou a abertura
+falhar, ele informa que a instalação ocorreu e orienta abrir pelo Menu Iniciar.

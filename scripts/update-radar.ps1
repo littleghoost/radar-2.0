@@ -275,7 +275,30 @@ try {
             throw "O instalador terminou, mas nao consegui confirmar a nova versao no registro do Windows. Verifique em Aplicativos instalados."
         }
         Write-Host "Radar 2.0 atualizado com sucesso: $latest"
-        Write-Host "Abra o Radar normalmente para continuar suas buscas."
+
+        # Restore background monitoring after the installer has finished.
+        $installedApp = @(
+            Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayName -eq "Radar 2.0" -and $_.DisplayVersion -eq $latest.ToString() } |
+                Select-Object -First 1
+        )
+        $exe = ""
+        if ($installedApp.Count -gt 0) {
+            $installDir = ([string]$installedApp[0].InstallLocation).Trim('"')
+            if (-not [string]::IsNullOrWhiteSpace($installDir)) {
+                $exe = Join-Path $installDir "radar-2-0-desktop.exe"
+            }
+        }
+        if ($exe -and (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            try {
+                Start-Process -FilePath $exe -ArgumentList "--background"
+                Write-Host "Radar iniciado novamente. Monitoramento em segundo plano restaurado."
+            } catch {
+                Write-Host "Atualizacao concluida, mas nao consegui reiniciar o Radar. Abra-o pelo Menu Iniciar."
+            }
+        } else {
+            Write-Host "Atualizacao concluida. Abra o Radar pelo Menu Iniciar."
+        }
     } else {
         Write-Host "Abrindo o instalador oficial. Siga as instrucoes do Windows..."
         Start-Process -FilePath $installer
