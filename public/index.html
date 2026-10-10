@@ -485,6 +485,19 @@
               <summary>O que mudou nesta versão</summary>
               <p id="desktopUpdateNotesText"></p>
             </details>
+            <div class="desktop-update-terminal" id="desktopPowerShellUpdate" hidden>
+              <div class="desktop-update-terminal-head">
+                <strong><span aria-hidden="true">›_</span> Atualizar pelo PowerShell</strong>
+                <span>Windows 10/11</span>
+              </div>
+              <p>Copie o comando, abra o PowerShell e cole. Ele baixa a última versão, confere a integridade e instala automaticamente.</p>
+              <label for="desktopPowerShellCommand">Comando para atualizar</label>
+              <textarea id="desktopPowerShellCommand" rows="3" spellcheck="false" readonly></textarea>
+              <button id="copyDesktopUpdateCommand" type="button" class="secondary">
+                Copiar comando de instalação
+              </button>
+              <small>Se o Radar estiver aberto, finalize buscas em andamento e escolha <strong>Sair do Radar</strong> no ícone da bandeja quando o comando pedir. A instalação será silenciosa após isso.</small>
+            </div>
             <div class="settings-actions">
               <button id="checkDesktopUpdate" type="button" class="secondary">
                 Verificar atualizações
@@ -494,7 +507,7 @@
               </button>
             </div>
             <small class="desktop-update-help">
-              O instalador abre no navegador. Feche o Radar pelo menu da bandeja antes de instalar;
+              O botão de download abre o instalador no navegador. O comando PowerShell permite instalar sem passar pelo assistente;
               seus radares e anúncios ficam salvos no banco de dados local.
             </small>
           </div>

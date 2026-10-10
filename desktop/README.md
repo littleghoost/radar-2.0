@@ -124,3 +124,23 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\update-radar.
 ```
 
 A atualização não apaga o banco local. Esse método é **assistido** (não silencioso): o Windows abrirá o instalador e o usuário confirmará a instalação. Para atualizações inteiramente automáticas, ainda será preciso implementar o updater Tauri com assinatura criptográfica.
+
+## Atualizar direto pelo PowerShell — v0.2.2
+
+Em **Perfil → Atualizações**, clique **Verificar atualizações**. Havendo uma versão oficial mais nova,
+o Radar exibe o comando do PowerShell e oferece **Copiar comando de instalação**.
+
+Cole o comando em uma janela de PowerShell (ele baixa o script oficial para um arquivo local
+e executa com `-AutoInstall`). Esse modo:
+
+1. Detecta a versão instalada e a mais recente do GitHub Releases.
+2. Baixa ou reutiliza o instalador e confere seu SHA-256.
+3. Se o Radar estiver aberto, espera por até dois minutos que o usuário encerre o app
+   pelo menu do tray (aguarde buscas em andamento, escolha **Sair do Radar**).
+4. Executa o instalador NSIS com `/S`, aguarda a conclusão e confirma a versão instalada no registro.
+5. Não força o encerramento do app nem altera o banco local.
+
+O usuário sempre inicia a atualização executando o comando. A instalação ocorre
+sem a interface tradicional do instalador; eventuais avisos do Windows/UAC ainda podem aparecer.
+Se não quiser instalar de imediato, use `-CheckOnly` ou `-DownloadOnly`.
+O comando deve ser obtido do repositório oficial; revise scripts externos antes de executá-los.

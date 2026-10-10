@@ -3545,6 +3545,13 @@ $("#internationalCostForm")?.addEventListener(
 let desktopReleaseDownloadUrl = null;
 let hasNotifiedDesktopUpdate = false;
 
+// Explicit command shown only after an official release has been verified.
+// Download the script as a file instead of executing a remote one-liner.
+const radarUpdatePowerShellCommand = [
+  'Invoke-WebRequest "https://raw.githubusercontent.com/littleghoost/radar-2.0/main/scripts/update-radar.ps1" -OutFile "$env:TEMP\\update-radar.ps1"',
+  'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\update-radar.ps1" -AutoInstall',
+].join("\n");
+
 function isOfficialWindowsReleaseLink(value) {
   try {
     const url = new URL(String(value || ""));
@@ -3565,7 +3572,9 @@ async function loadDesktopUpdateStatus(manual = false) {
   const notice = $("#updateNotice");
   const download = $("#downloadDesktopUpdate");
   const notes = $("#desktopUpdateNotes");
+  const terminal = $("#desktopPowerShellUpdate");
   desktopReleaseDownloadUrl = null;
+  if (terminal) terminal.hidden = true;
 
   if (button) button.disabled = true;
   if (badge) badge.textContent = "Verificando...";
@@ -3592,6 +3601,10 @@ async function loadDesktopUpdateStatus(manual = false) {
         `A versão ${update.latest.version} está pronta. Você está na ${update.installed_version}.`;
       if (notice) notice.hidden = false;
       download.hidden = false;
+      if (terminal) {
+        $("#desktopPowerShellCommand").value = radarUpdatePowerShellCommand;
+        terminal.hidden = false;
+      }
       if (update.latest.notes) {
         $("#desktopUpdateNotesText").textContent = update.latest.notes;
         notes.hidden = false;
@@ -3626,6 +3639,30 @@ async function loadDesktopUpdateStatus(manual = false) {
 
 $("#checkDesktopUpdate")?.addEventListener("click", () => {
   loadDesktopUpdateStatus(true);
+});
+
+$("#copyDesktopUpdateCommand")?.addEventListener("click", async () => {
+  if (!desktopReleaseDownloadUrl ||
+      !isOfficialWindowsReleaseLink(desktopReleaseDownloadUrl)) return;
+  const field = $("#desktopPowerShellCommand");
+  if (!field || $("#desktopPowerShellUpdate")?.hidden) return;
+
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+    await navigator.clipboard.writeText(field.value);
+    notify("Comando copiado! Cole no PowerShell.");
+  } catch {
+    field.focus();
+    field.select();
+    try {
+      if (!document.execCommand("copy")) {
+        throw new Error("Copy unavailable");
+      }
+      notify("Comando copiado! Cole no PowerShell.");
+    } catch {
+      notify("Selecione e copie o comando exibido para usar no PowerShell.", "error");
+    }
+  }
 });
 
 $("#downloadDesktopUpdate")?.addEventListener("click", async () => {

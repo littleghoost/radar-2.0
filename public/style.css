@@ -3202,3 +3202,57 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .radar-tab:focus-v
 .request-policy-row .request-policy-paused {
   color: #f8ce9c;
 }
+
+/* Command-guided PowerShell updater */
+#desktopPowerShellUpdate[hidden] { display: none !important; }
+.desktop-update-terminal {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid rgba(139, 183, 244, .22);
+  border-radius: 15px;
+  background: rgba(19, 30, 45, .52);
+  display: grid;
+  gap: 12px;
+}
+.desktop-update-terminal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.desktop-update-terminal-head strong {
+  font-size: .95rem;
+  color: var(--text);
+}
+.desktop-update-terminal-head strong span {
+  color: #92eac0;
+  margin-right: 6px;
+}
+.desktop-update-terminal-head > span {
+  color: var(--muted);
+  font-size: .76rem;
+}
+.desktop-update-terminal > p,
+.desktop-update-terminal > small {
+  color: var(--muted);
+  line-height: 1.55;
+  font-size: .8rem;
+  margin: 0;
+}
+.desktop-update-terminal > label { font-size: .8rem; font-weight: 650; }
+#desktopPowerShellCommand {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100px;
+  padding: 12px;
+  background: #090d13;
+  color: #c5f1dc;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 9px;
+  font: .78rem/1.65 Consolas, "Courier New", monospace;
+  overflow-wrap: anywhere;
+  resize: vertical;
+}
+#copyDesktopUpdateCommand { justify-self: start; }

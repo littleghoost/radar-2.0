@@ -1,6 +1,7 @@
 param(
     [switch]$CheckOnly,
     [switch]$DownloadOnly,
+    [switch]$AutoInstall,
     [switch]$Force
 )
 
@@ -125,14 +126,51 @@ try {
         Write-Host "O Radar esta rodando em segundo plano!"
         Write-Host "Clique com o botao direito no icone do Radar, perto do relogio do Windows,"
         Write-Host "e escolha 'Sair do Radar' antes de continuar."
-        [void](Read-Host "Depois de sair completamente, pressione Enter")
+        if ($AutoInstall) {
+            Write-Host "Aguardando o Radar fechar (ate 2 minutos). A instalacao continuara sozinha..."
+            for ($attempt = 0; $attempt -lt 120; $attempt++) {
+                if (@(Get-Process -Name "radar-2-0-desktop" -ErrorAction SilentlyContinue).Count -eq 0) {
+                    break
+                }
+                Start-Sleep -Seconds 1
+            }
+        } else {
+            [void](Read-Host "Depois de sair completamente, pressione Enter")
+        }
         if (@(Get-Process -Name "radar-2-0-desktop" -ErrorAction SilentlyContinue).Count -gt 0) {
             throw "O Radar ainda esta aberto. Instalador baixado, mas nao executado."
         }
     }
 
-    Write-Host "Abrindo o instalador oficial. Siga as instrucoes do Windows..."
-    Start-Process -FilePath $installer
+    if ($AutoInstall) {
+        # NSIS uses /S for a quiet installation. Explicit opt-in is required.
+        # Never kill the app: the user must close it from the tray first so
+        # any ongoing radar search can finish and the SQLite DB can close.
+        Write-Host "Instalando Radar $latest automaticamente (NSIS /S)..."
+        $process = Start-Process -FilePath $installer -ArgumentList "/S" -PassThru -Wait
+        if ($process.ExitCode -ne 0) {
+            throw "O instalador terminou com codigo $($process.ExitCode)."
+        }
+
+        # Some installers update the uninstall registry asynchronously.
+        $confirmed = $false
+        for ($attempt = 0; $attempt -lt 8; $attempt++) {
+            $current = Get-InstalledRadarVersion
+            if ($null -ne $current -and $current -ge $latest) {
+                $confirmed = $true
+                break
+            }
+            Start-Sleep -Seconds 1
+        }
+        if (-not $confirmed) {
+            throw "O instalador terminou, mas nao consegui confirmar a nova versao no registro do Windows. Verifique em Aplicativos instalados."
+        }
+        Write-Host "Radar 2.0 atualizado com sucesso: $latest"
+        Write-Host "Abra o Radar normalmente para continuar suas buscas."
+    } else {
+        Write-Host "Abrindo o instalador oficial. Siga as instrucoes do Windows..."
+        Start-Process -FilePath $installer
+    }
 } catch {
     Write-Error "Falha ao atualizar o Radar: $($_.Exception.Message)"
     exit 1
