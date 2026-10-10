@@ -2,7 +2,7 @@ const crypto = require("crypto");
 const webpush = require("web-push");
 
 const PAIRING_TTL_MINUTES = 10;
-const MAX_SNAPSHOT_BYTES = 512 * 1024;
+const MAX_SNAPSHOT_BYTES = 1024 * 1024;
 const ONLINE_WINDOW_SECONDS = 90;
 const COMMAND_TYPES = new Set([
   "run_radar",
@@ -267,7 +267,7 @@ function sanitizeSnapshot(body) {
     : [];
 
   const listings = Array.isArray(input.listings)
-    ? input.listings.slice(0, 250).map((listing) => ({
+    ? input.listings.slice(0, 1000).map((listing) => ({
         id: Number(listing.id) || null,
         radar_id:
           listing.radar_id === null || listing.radar_id === undefined

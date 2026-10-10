@@ -69,7 +69,7 @@ const VISUAL_REFERENCE_DIR =
 fs.mkdirSync(IMAGE_DIR, { recursive: true });
 fs.mkdirSync(VISUAL_REFERENCE_DIR, { recursive: true });
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: false }));
 
 registerMobileRelay(app, db);

@@ -203,3 +203,10 @@ Se uma busca agendada falhar, o Radar grava o erro e atualiza a próxima execuç
 para o intervalo configurado (mínimo de 1 hora). Isso evita novas tentativas a
 cada checagem de 5 minutos quando o marketplace responde 403/429.
 Testes automatizados cobrem radares ativos e desativados.
+
+## 0.2.6 — sincronização de todos os anúncios atuais
+
+Aumenta de 250 para 1.000 o limite de anúncios enviados ao Mobile. O
+relay valida e guarda o mesmo limite. Atualize tanto o Desktop quanto a
+nuvem; se apenas um dos lados estiver atualizado, a contagem seguirá 250.
+O Mobile renderiza os anúncios progressivamente em lotes de 60.

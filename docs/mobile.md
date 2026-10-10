@@ -132,3 +132,16 @@ enviados apenas por HTTPS à nuvem, não há abertura de portas domésticas.
 O APK debug não tem assinatura estável: usar como beta e não distribuir como
 versão final. Próxima fase para produção: assinatura Android persistente,
 notificações push nativas, tratamento offline e teste físico em celular.
+
+## Catálogo completo no celular (Desktop 0.2.6)
+
+O Desktop e o relay permitiam apenas 250 anúncios no snapshot. Os limites
+foram ampliados para 1.000 anúncios por sincronização, suficientes para os
+444 atuais. O tamanho máximo do snapshot é 1 MiB e o servidor aceita corpos
+JSON de até 2 MiB. A lista Mobile exibe 60 cards por vez e traz um botão
+"Mostrar mais anúncios" para acessar os demais sem travar o celular.
+Testes cobrem 444 anúncios e o limite de 1.000.
+
+Para catálogos que crescerem além de 1.000 anúncios, migrar o snapshot para
+sincronização incremental/paginada com checkpoints; a solução atual não deve
+ser interpretada como um espelho ilimitado da base local.

@@ -821,6 +821,8 @@ function renderRadars() {
   }
 }
 
+let mobileListingsVisibleLimit = 60;
+
 function renderListings() {
   const host = $("#listingsList");
   const filter = $("#statusFilter").value;
@@ -854,7 +856,7 @@ function renderListings() {
     return;
   }
 
-  for (const listing of listings.slice(0, 60)) {
+  for (const listing of listings.slice(0, mobileListingsVisibleLimit)) {
     const node = $("#listingTemplate").content
       .firstElementChild.cloneNode(true);
     const link = node.querySelector(".listing-link");
@@ -968,6 +970,19 @@ function renderListings() {
       );
 
     host.appendChild(node);
+  }
+
+  if (listings.length > mobileListingsVisibleLimit) {
+    const remaining = listings.length - mobileListingsVisibleLimit;
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "ghost wide mobile-load-more";
+    more.textContent = "Mostrar mais anúncios (" + remaining + " restantes)";
+    more.addEventListener("click", () => {
+      mobileListingsVisibleLimit += 60;
+      renderListings();
+    });
+    host.appendChild(more);
   }
 }
 
@@ -1302,10 +1317,10 @@ $("#refreshButton").addEventListener(
   refresh,
 );
 
-$("#statusFilter").addEventListener(
-  "change",
-  renderListings,
-);
+$("#statusFilter").addEventListener("change", () => {
+  mobileListingsVisibleLimit = 60;
+  renderListings();
+});
 
 $("#pairByLinkButton")?.addEventListener("click", () => {
   const typed = $("#pairLinkInput").value.trim();

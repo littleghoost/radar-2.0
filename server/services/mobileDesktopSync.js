@@ -277,7 +277,7 @@ function createMobileDesktopSync({
              updated_at
            FROM listings
            ORDER BY datetime(updated_at) DESC, id DESC
-           LIMIT 250`,
+           LIMIT 1000`,
         ),
         dbAll(
           db,
