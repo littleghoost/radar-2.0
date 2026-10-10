@@ -96,20 +96,52 @@ try {
         if (Test-Path -LiteralPath $installer) {
             Remove-Item -LiteralPath $installer -Force
         }
-        Write-Host "Baixando o instalador oficial..."
         $partial = "$installer.partial"
-        try {
-            Invoke-WebRequest -Uri $trustedUrl -OutFile $partial -TimeoutSec 180
-            $actualHash = (Get-FileHash -Path $partial -Algorithm SHA256).Hash
-            if ($actualHash -ne $expectedHash) {
-                throw "SHA-256 diferente do publicado no GitHub. Instalacao cancelada."
+        $curl = Get-Command "curl.exe" -ErrorAction SilentlyContinue
+        $partialFile = Get-Item -LiteralPath $partial -ErrorAction SilentlyContinue
+        if ($null -ne $partialFile -and [long]$partialFile.Length -ge [long]$asset.size) {
+            Remove-Item -LiteralPath $partial -Force
+            $partialFile = $null
+        }
+
+        if ($null -ne $curl) {
+            Write-Host "Baixando com curl.exe (mais eficiente para arquivos grandes)..."
+            $curlArgs = @(
+                "--location",
+                "--fail",
+                "--show-error",
+                "--progress-bar",
+                "--retry", "2",
+                "--retry-delay", "2",
+                "--connect-timeout", "20",
+                "--max-time", "900",
+                "--output", $partial
+            )
+            if ($null -ne $partialFile -and $partialFile.Length -gt 0) {
+                Write-Host "Tentando retomar $([Math]::Round($partialFile.Length / 1MB, 1)) MB ja baixados..."
+                $curlArgs += @("--continue-at", "-")
             }
-            Move-Item -LiteralPath $partial -Destination $installer -Force
-        } finally {
-            if (Test-Path -LiteralPath $partial) {
-                Remove-Item -LiteralPath $partial -Force
+            & $curl.Source @curlArgs $trustedUrl
+            if ($LASTEXITCODE -ne 0) {
+                throw "curl.exe falhou (codigo $LASTEXITCODE). Rode o comando novamente para tentar retomar."
+            }
+        } else {
+            Write-Host "curl.exe indisponivel. Usando PowerShell sem barra de progresso..."
+            $oldProgressPreference = $ProgressPreference
+            try {
+                $ProgressPreference = "SilentlyContinue"
+                Invoke-WebRequest -Uri $trustedUrl -OutFile $partial -UseBasicParsing -TimeoutSec 900
+            } finally {
+                $ProgressPreference = $oldProgressPreference
             }
         }
+
+        $actualHash = (Get-FileHash -Path $partial -Algorithm SHA256).Hash
+        if ($actualHash -ne $expectedHash) {
+            Remove-Item -LiteralPath $partial -Force
+            throw "SHA-256 diferente do publicado no GitHub. Arquivo descartado. Instalacao cancelada."
+        }
+        Move-Item -LiteralPath $partial -Destination $installer -Force
     }
 
     Write-Host "SHA-256 verificado com sucesso."

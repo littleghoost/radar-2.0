@@ -144,3 +144,14 @@ O usuário sempre inicia a atualização executando o comando. A instalação oc
 sem a interface tradicional do instalador; eventuais avisos do Windows/UAC ainda podem aparecer.
 Se não quiser instalar de imediato, use `-CheckOnly` ou `-DownloadOnly`.
 O comando deve ser obtido do repositório oficial; revise scripts externos antes de executá-los.
+
+### Downloads mais rápidos pelo PowerShell
+
+O script de atualização usa `curl.exe` no Windows quando disponível, com barra de progresso simples,
+repetições limitadas para falhas de rede e tentativa de continuar downloads parciais. Se não houver
+`curl.exe`, usa o PowerShell com indicador de progresso desativado para evitar lentidão no console.
+O SHA-256 do GitHub continua sendo verificado antes de executar qualquer instalador. A velocidade
+real depende da conexão e do GitHub; o script não promete aumento garantido.
+
+O script fica no GitHub `main`, então melhorias nele passam a valer na **próxima vez** que o
+usuário copiar e executar o comando. Um download já iniciado mantém o comportamento anterior.
