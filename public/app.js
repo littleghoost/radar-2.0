@@ -2874,7 +2874,10 @@ $("#markActivitySeen")?.addEventListener("click", async () => {
 
 async function loadConnections() {
   try {
-    const connections = await api("/api/connections");
+    const [connections, sources] = await Promise.all([
+      api("/api/connections"),
+      api("/api/sources/status").catch(() => ({})),
+    ]);
 
     const names = {
       olx: "OLX",
@@ -3007,7 +3010,32 @@ async function loadConnections() {
       })
       .join("");
 
+    const sourceProtection = Object.entries({
+      mercadolivre: "Mercado Livre",
+      ebay: "eBay",
+    }).map(([key, name]) => {
+      const status = sources.request_policy?.[key];
+      if (!status) return "";
+      const remaining = Number(status.cooldownRemainingMs || 0);
+      const label = remaining > 0
+        ? `Em pausa: ${Math.ceil(remaining / 60000)} min (HTTP ${Number(status.blockedStatus || 0)})`
+        : "Buscas liberadas";
+      return `<div class="request-policy-row">
+        <strong>${escapeHtml(name)}</strong>
+        <span class="${remaining > 0 ? "request-policy-paused" : ""}">${escapeHtml(label)}</span>
+      </div>`;
+    }).join("");
+
     grid.innerHTML = `${providerCards}
+      <article class="connection-card request-policy-card">
+        <div class="connection-top">
+          <span class="connection-name">Proteção das APIs</span>
+          <span class="connection-status connected">Ativa</span>
+        </div>
+        <p>Limita requisições simultâneas, espaça as buscas e respeita pausas por bloqueio ou excesso de chamadas.</p>
+        ${sourceProtection || "<p>Status temporariamente indisponível.</p>"}
+        <small>Válido para as APIs oficiais conectadas; não inclui a Bridge do navegador.</small>
+      </article>
       <article class="connection-card">
         <div class="connection-top">
           <span class="connection-name">Radar 2.0 Bridge</span>

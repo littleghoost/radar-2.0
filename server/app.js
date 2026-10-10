@@ -16,6 +16,7 @@ const {
 const { createRadarRunner } = require("./services/radarRunner");
 const { createMobileDesktopSync } = require("./services/mobileDesktopSync");
 const { checkDesktopUpdate } = require("./services/desktopUpdates");
+const { sourceRequestPolicy } = require("./services/sources/requestPolicy");
 const {
   createSearchPlanner,
 } = require("./services/searchPlanner");
@@ -3144,6 +3145,10 @@ app.get("/api/sources/status", async (_req, res) => {
       ebay: getEbayStatus(ebayCredentials),
       olx: getOlxStatus(),
       depop: getDepopStatus(),
+      request_policy: {
+        mercadolivre: sourceRequestPolicy.status("api.mercadolibre.com"),
+        ebay: sourceRequestPolicy.status("api.ebay.com"),
+      },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

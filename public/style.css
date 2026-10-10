@@ -3173,3 +3173,32 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .radar-tab:focus-v
   .topbar-actions button { flex: 1; }
   .desktop-update-summary { grid-template-columns: 1fr; }
 }
+
+/* Friendly request pacing status on Conexões */
+.request-policy-card {
+  border-color: rgba(144, 178, 240, .18);
+}
+.request-policy-card > small {
+  display: block;
+  margin-top: 12px;
+  font-size: .76rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.request-policy-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: .84rem;
+}
+.request-policy-row span {
+  color: #b6e8c1;
+  font-size: .78rem;
+}
+.request-policy-row .request-policy-paused {
+  color: #f8ce9c;
+}

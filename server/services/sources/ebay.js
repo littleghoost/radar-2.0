@@ -1,42 +1,23 @@
 const tokenCache = new Map();
 
+const { sourceFetch } = require("./requestPolicy");
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchWithRetry(
-  url,
-  options = {},
-  attempts = 2,
-) {
+async function fetchWithRetry(url, options = {}, attempts = 2) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const response = await fetch(url, options);
-
-      if (
-        attempt < attempts &&
-        [408, 425, 429, 500, 502, 503, 504].includes(
-          response.status,
-        )
-      ) {
-        await response
-          .arrayBuffer()
-          .catch(() => null);
-        await sleep(350 * attempt);
-        continue;
-      }
-
-      return response;
-    } catch (err) {
-      lastError = err;
-
-      if (attempt >= attempts) {
-        throw err;
-      }
-
-      await sleep(350 * attempt);
+      // HTTP 403, 429 and Retry-After are handled by the shared request policy.
+      // Never immediately retry an HTTP error: that amplifies rate limits.
+      return await sourceFetch(url, options);
+    } catch (error) {
+      lastError = error;
+      if (error.rateLimited || attempt >= attempts) throw error;
+      await sleep(750 * attempt);
     }
   }
 
@@ -540,12 +521,14 @@ async function searchEbay({
     const itemGroups = [];
     const modes = [];
     const errors = [];
+    const errorStatuses = [];
 
     for (const result of settled) {
       if (result.status === "rejected") {
         errors.push(
           result.reason?.message || String(result.reason),
         );
+        errorStatuses.push(Number(result.reason?.status || 0));
         continue;
       }
 
@@ -567,8 +550,8 @@ async function searchEbay({
       return {
         source: "ebay",
         ok: false,
-        status: 502,
-        reason: errors.join(" | "),
+        status: errorStatuses.find((code) => [403, 429, 503].includes(code)) || 502,
+        reason: [...new Set(errors)].slice(0, 3).join(" | "),
         marketplace_id: config.marketplaceId,
         items: [],
       };

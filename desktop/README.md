@@ -77,3 +77,22 @@ A verificação automática usa a API pública do GitHub e não envia anúncios,
 4. O workflow de Windows compila o NSIS e publica automaticamente o instalador na página **GitHub Releases**. O painel do Desktop passa a encontrá-lo.
 
 **Segurança:** o checker só apresenta releases estáveis com instalador Windows e links do repositório oficial. Atualização de um clique (baixar, validar assinatura, instalar e reiniciar sem sair do app) dependerá de configurar chaves de assinatura Tauri, GitHub Actions Secrets e o plugin oficial de updater. Não instale binários silenciosamente sem essa verificação criptográfica.
+
+
+## Proteção das APIs oficiais — 0.2.1
+
+As chamadas das APIs oficiais do eBay e Mercado Livre compartilham um limitador local por host:
+- no máximo duas conexões simultâneas por API;
+- intervalo mínimo de 500 ms entre inícios das requisições;
+- limite de tempo de 15 segundos por requisição e uma nova tentativa apenas para falha de rede;
+- pausa automática após HTTP 429 (mínimo 60 segundos), HTTP 403 (5 minutos) e HTTP 503 (mínimo 20 segundos);
+- cabeçalho `Retry-After` respeitado quando pedir uma pausa maior (até 30 minutos);
+- requisições na fila são canceladas durante a pausa, sem tentativa imediata de contornar restrições.
+
+Em **Conexões → Proteção das APIs**, veja se cada fonte está liberada ou em pausa.
+A proteção opera enquanto o backend local estiver aberto. Reiniciar o processo zera a pausa
+em memória; isto não deve ser usado para contornar limites dos provedores.
+
+Esta proteção **não inclui** a coleta feita pela extensão Bridge no navegador nem garante que
+as plataformas nunca bloqueiem requisições. Para fontes não homologadas, mantenha a integração
+automática desativada até conseguir acesso autorizado.

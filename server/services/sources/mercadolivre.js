@@ -1,46 +1,25 @@
+const { sourceFetch } = require("./requestPolicy");
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchWithRetry(
-  url,
-  options = {},
-  attempts = 2,
-) {
+async function fetchWithRetry(url, options = {}, attempts = 2) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const response = await fetch(url, options);
-
-      if (
-        attempt < attempts &&
-        [408, 425, 429, 500, 502, 503, 504].includes(
-          response.status,
-        )
-      ) {
-        await response
-          .arrayBuffer()
-          .catch(() => null);
-        await sleep(350 * attempt);
-        continue;
-      }
-
-      return response;
-    } catch (err) {
-      lastError = err;
-
-      if (attempt >= attempts) {
-        throw err;
-      }
-
-      await sleep(350 * attempt);
+      // HTTP 403, 429 and Retry-After are handled by the shared request policy.
+      // Never immediately retry an HTTP error: that amplifies rate limits.
+      return await sourceFetch(url, options);
+    } catch (error) {
+      lastError = error;
+      if (error.rateLimited || attempt >= attempts) throw error;
+      await sleep(750 * attempt);
     }
   }
 
-  throw lastError || new Error(
-    "Falha de rede no Mercado Livre.",
-  );
+  throw lastError || new Error("Falha de rede no Mercado Livre.");
 }
 
 function buildQueryVariants(query, maxVariants = 8) {
@@ -147,7 +126,7 @@ async function searchCatalogProducts({
         return {
           query: searchQuery,
           ok: false,
-          status: null,
+          status: err.status || null,
           reason:
             err.cause?.code ||
             err.message ||
@@ -279,7 +258,7 @@ async function searchMercadoLivre({ query, accessToken, limit = 50 }) {
         return {
           query: searchQuery,
           ok: false,
-          status: null,
+          status: err.status || null,
           reason:
             err.cause?.code ||
             err.message ||
@@ -352,7 +331,11 @@ async function searchMercadoLivre({ query, accessToken, limit = 50 }) {
     errors: [],
   };
 
-  if (!successful.length || items.length === 0) {
+  // No fallback while the service is refusing or throttling requests.
+  const apiLimited = errors.some((error) =>
+    [403, 429, 503].includes(Number(error.status)),
+  );
+  if ((!successful.length || items.length === 0) && !apiLimited) {
     catalog = await searchCatalogProducts({
       queries,
       accessToken,
