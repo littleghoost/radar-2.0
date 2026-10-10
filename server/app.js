@@ -303,6 +303,21 @@ app.get("/api/image-proxy", async (req, res) => {
   }
 });
 
+// Android verified App Links require this exact URL with no redirect.
+// express.static ignores dot-directories by default, so publish explicitly.
+app.get("/.well-known/assetlinks.json", (_req, res) => {
+  res.type("application/json");
+  res.setHeader("Cache-Control", "public, max-age=300");
+  res.sendFile(
+    path.join(__dirname, "..", "public", ".well-known", "assetlinks.json"),
+    (error) => {
+      if (error && !res.headersSent) {
+        res.status(404).json({ error: "Associação Android indisponível." });
+      }
+    },
+  );
+});
+
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 /* =========================

@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.littleghoost.radar2.mobile",
+      "sha256_cert_fingerprints": [
+        "14:5A:55:7A:5D:F2:E3:8A:60:C6:4A:03:9A:F4:1C:70:EC:E4:0B:01:16:5F:F7:84:B7:46:21:6F:4B:7F:D4:C4"
+      ]
+    }
+  }
+]
