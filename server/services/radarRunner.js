@@ -136,6 +136,20 @@ function catalogItemRelevantToRadar(radar = {}, product = {}) {
   return true;
 }
 
+async function rescheduleAfterFailure({ get, run }, radarId) {
+  const radar = await get(
+    "SELECT schedule_enabled, schedule_interval_minutes FROM radars WHERE id = ?",
+    [radarId],
+  );
+  if (!radar?.schedule_enabled) return false;
+  const interval = Math.max(Number(radar.schedule_interval_minutes) || 240, 60);
+  await run(
+    "UPDATE radars SET next_run_at = datetime('now', '+' || ? || ' minutes') WHERE id = ?",
+    [interval, radarId],
+  );
+  return true;
+}
+
 function createRadarRunner({
   get,
   all,
@@ -1439,6 +1453,12 @@ function createRadarRunner({
         ).catch(() => {});
       }
 
+      // A failed scheduled run must not immediately become due again at the
+      // next 5-minute scheduler poll. Respect this radar's search interval.
+      await rescheduleAfterFailure({ get, run }, radarId).catch((error) => {
+        console.error("Falha ao reagendar radar após erro:", error.message);
+      });
+
       throw err;
     } finally {
       finishRun();
@@ -1482,4 +1502,5 @@ function createRadarRunner({
 module.exports = {
   createRadarRunner,
   catalogItemRelevantToRadar,
+  rescheduleAfterFailure,
 };

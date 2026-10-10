@@ -196,3 +196,10 @@ Adiciona atalho Conectar celular à navegação do Desktop, validação automát
 pareamento (QR removido após uso/expiração) e recuperação de execuções antigas
 em estado running ao iniciar o backend Desktop após reinício inesperado.
 O APK Android beta é compilado separadamente pelo workflow Android.
+
+## 0.2.5 - Proteção do agendamento após falhas
+
+Se uma busca agendada falhar, o Radar grava o erro e atualiza a próxima execução
+para o intervalo configurado (mínimo de 1 hora). Isso evita novas tentativas a
+cada checagem de 5 minutos quando o marketplace responde 403/429.
+Testes automatizados cobrem radares ativos e desativados.
