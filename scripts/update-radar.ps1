@@ -6,6 +6,8 @@ param(
 )
 
 # Radar 2.0: updater for official Windows releases.
+# With -AutoInstall it closes the app automatically after waiting for
+# active searches, then uses the silent installer.
 # Works with Windows PowerShell 5.1 and PowerShell 7+.
 $ErrorActionPreference = "Stop"
 $api = "https://api.github.com/repos/littleghoost/radar-2.0/releases/latest"
@@ -26,6 +28,93 @@ function Get-InstalledRadarVersion {
         }
     }
     return $null
+}
+
+function Get-RadarProcesses {
+    return @(Get-Process -Name "radar-2-0-desktop" -ErrorAction SilentlyContinue)
+}
+
+function Wait-ForRadarExit([int]$TimeoutSeconds = 240) {
+    for ($attempt = 0; $attempt -lt $TimeoutSeconds; $attempt++) {
+        if ((Get-RadarProcesses).Count -eq 0) { return $true }
+        Start-Sleep -Seconds 1
+    }
+    return (Get-RadarProcesses).Count -eq 0
+}
+
+function Close-RadarForUpdate {
+    if ((Get-RadarProcesses).Count -eq 0) { return }
+
+    $controlPath = Join-Path $env:APPDATA "com.littleghoost.radar2\update-control.json"
+    $prepared = $false
+
+    if (Test-Path -LiteralPath $controlPath) {
+        try {
+            $control = Get-Content -LiteralPath $controlPath -Raw | ConvertFrom-Json
+            if ($control.protocol -eq 1 -and $control.port -eq 3130 -and
+                [string]$control.token -match '^[a-f0-9]{64}$') {
+                $result = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:3130/api/desktop/update/prepare-shutdown" `
+                    -Headers @{ "x-radar-update-token" = [string]$control.token } `
+                    -ContentType "application/json" -Body '{}' -TimeoutSec 8
+                $prepared = [bool]$result.shutdown_requested
+            }
+        } catch {
+            Write-Host "Desligamento protegido indisponivel nesta versao; verificando modo de compatibilidade."
+        }
+    }
+
+    if ($prepared) {
+        Write-Host "Radar preparando encerramento seguro: novas buscas pausadas."
+        Write-Host "Aguardando as buscas ativas terminarem e o aplicativo fechar..."
+        if (-not (Wait-ForRadarExit -TimeoutSeconds 240)) {
+            throw "O Radar nao concluiu as buscas no prazo. Nenhum processo foi encerrado a forca."
+        }
+    } else {
+        # Compatibilidade com versões antigas que não implementam
+        # prepare-shutdown. Nunca encerra se não puder verificar as buscas.
+        Write-Host "Radar antigo: verificando buscas ativas antes do fechamento..."
+        $safeToStop = $false
+        for ($attempt = 0; $attempt -lt 90; $attempt++) {
+            try {
+                $runs = @(Invoke-RestMethod -Uri "http://127.0.0.1:3130/api/runs?limit=200" -TimeoutSec 8)
+                $active = @($runs | Where-Object { $_.status -eq "running" }).Count
+                if ($active -eq 0) {
+                    Start-Sleep -Seconds 2
+                    $recheck = @(Invoke-RestMethod -Uri "http://127.0.0.1:3130/api/runs?limit=200" -TimeoutSec 8)
+                    if (@($recheck | Where-Object { $_.status -eq "running" }).Count -eq 0) {
+                        $safeToStop = $true
+                        break
+                    }
+                }
+                Write-Host "Aguardando $active busca(s) terminar(em)..."
+            } catch {
+                throw "Nao foi possivel confirmar buscas inativas. Encerramento automatico cancelado."
+            }
+            Start-Sleep -Seconds 2
+        }
+        if (-not $safeToStop) {
+            throw "Ainda ha buscas em execucao. Atualizacao cancelada para proteger os dados."
+        }
+
+        # Apenas para instalações anteriores ao protocolo protegido.
+        # O Windows encerra a arvore de processos uma vez que a API
+        # confirmou que os radares nao estao fazendo buscas.
+        $processes = @(Get-RadarProcesses)
+        foreach ($process in $processes) {
+            Write-Host "Fechando Radar antigo ocioso (PID $($process.Id))..."
+            & taskkill.exe /PID $process.Id /T /F | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "O Windows nao conseguiu encerrar o Radar antigo."
+            }
+        }
+        if (-not (Wait-ForRadarExit -TimeoutSeconds 20)) {
+            throw "O Radar continuou aberto apos o comando de encerramento."
+        }
+    }
+
+    # Aguarda o backend liberar os arquivos do banco local.
+    Start-Sleep -Seconds 2
+    Write-Host "Radar fechado. Instalacao autorizada."
 }
 
 try {
@@ -152,32 +241,20 @@ try {
         exit 0
     }
 
-    $running = @(Get-Process -Name "radar-2-0-desktop" -ErrorAction SilentlyContinue)
-    if ($running.Count -gt 0) {
-        Write-Host ""
-        Write-Host "O Radar esta rodando em segundo plano!"
-        Write-Host "Clique com o botao direito no icone do Radar, perto do relogio do Windows,"
-        Write-Host "e escolha 'Sair do Radar' antes de continuar."
-        if ($AutoInstall) {
-            Write-Host "Aguardando o Radar fechar (ate 2 minutos). A instalacao continuara sozinha..."
-            for ($attempt = 0; $attempt -lt 120; $attempt++) {
-                if (@(Get-Process -Name "radar-2-0-desktop" -ErrorAction SilentlyContinue).Count -eq 0) {
-                    break
-                }
-                Start-Sleep -Seconds 1
-            }
-        } else {
-            [void](Read-Host "Depois de sair completamente, pressione Enter")
-        }
-        if (@(Get-Process -Name "radar-2-0-desktop" -ErrorAction SilentlyContinue).Count -gt 0) {
+    if ($AutoInstall) {
+        Close-RadarForUpdate
+    } elseif ((Get-RadarProcesses).Count -gt 0) {
+        Write-Host "Feche o Radar pelo icone na bandeja antes de instalar."
+        [void](Read-Host "Apos escolher Sair do Radar, pressione Enter")
+        if ((Get-RadarProcesses).Count -gt 0) {
             throw "O Radar ainda esta aberto. Instalador baixado, mas nao executado."
         }
     }
 
     if ($AutoInstall) {
         # NSIS uses /S for a quiet installation. Explicit opt-in is required.
-        # Never kill the app: the user must close it from the tray first so
-        # any ongoing radar search can finish and the SQLite DB can close.
+        # Modern versions exit gracefully after all radar runs finish.
+        # Legacy installations are closed only after confirming no active runs.
         Write-Host "Instalando Radar $latest automaticamente (NSIS /S)..."
         $process = Start-Process -FilePath $installer -ArgumentList "/S" -PassThru -Wait
         if ($process.ExitCode -ne 0) {

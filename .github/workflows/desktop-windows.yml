@@ -43,7 +43,7 @@ jobs:
         run: npm ci
 
       - name: Test update checker and release validation
-        run: node --test tests/desktopUpdates.test.js tests/requestPolicy.test.js tests/sourcesIntegration.test.js
+        run: node --test tests/desktopUpdates.test.js tests/requestPolicy.test.js tests/sourcesIntegration.test.js tests/updateShutdownControl.test.js
 
       - name: Validate release tag matches app version
         if: startsWith(github.ref, 'refs/tags/v')

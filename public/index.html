@@ -490,13 +490,13 @@
                 <strong><span aria-hidden="true">›_</span> Atualizar pelo PowerShell</strong>
                 <span>Windows 10/11</span>
               </div>
-              <p>Copie o comando, abra o PowerShell e cole. Ele baixa a última versão, confere a integridade e instala automaticamente.</p>
+              <p>Copie o comando e cole no PowerShell. Ele baixa, verifica e instala a versão nova, fechando o Radar automaticamente quando as buscas terminarem.</p>
               <label for="desktopPowerShellCommand">Comando para atualizar</label>
               <textarea id="desktopPowerShellCommand" rows="3" spellcheck="false" readonly></textarea>
               <button id="copyDesktopUpdateCommand" type="button" class="secondary">
                 Copiar comando de instalação
               </button>
-              <small>Se o Radar estiver aberto, finalize buscas em andamento e escolha <strong>Sair do Radar</strong> no ícone da bandeja quando o comando pedir. A instalação será silenciosa após isso.</small>
+              <small>O atualizador aguarda as buscas terminarem antes de fechar o Radar. Em versões antigas, o encerramento usa o modo de compatibilidade após verificar que não há buscas ativas. Se não for possível verificar, a instalação é cancelada para proteger os dados.</small>
             </div>
             <div class="settings-actions">
               <button id="checkDesktopUpdate" type="button" class="secondary">

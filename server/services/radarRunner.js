@@ -1,5 +1,6 @@
 const fs = require('fs/promises');
 const { searchAllSources, checkListingAvailability } = require('./sources');
+const { createUpdateShutdownControl } = require("./updateShutdownControl");
 const { downloadImage, extractVisualFeatures, visualSimilarity, hybridScore } = require('./visualSimilarity');
 const { embedImage, cosineSimilarity: semanticSimilarity } = require('./semanticVision');
 const { buildPreferenceProfile, preferenceScore, grailScore } = require('./preferenceLearning');
@@ -147,6 +148,7 @@ function createRadarRunner({
     all,
     run,
   });
+  const updateShutdown = createUpdateShutdownControl();
 
   function radarAlertConfig(radar = {}) {
     return {
@@ -515,6 +517,7 @@ function createRadarRunner({
   }
 
   async function executeRadarById(radarId, options = {}) {
+    const finishRun = updateShutdown.beginRun();
     let runRecord = null;
     const trigger = options.trigger || 'manual';
 
@@ -1437,10 +1440,15 @@ function createRadarRunner({
       }
 
       throw err;
+    } finally {
+      finishRun();
     }
   }
 
   async function runDueRadars(limit = 5) {
+    if (updateShutdown.status().shutdown_requested) {
+      return { due: 0, results: [], skipped_for_update: true };
+    }
     const due = await all(
       `SELECT * FROM radars
        WHERE schedule_enabled = 1
@@ -1452,6 +1460,7 @@ function createRadarRunner({
 
     const results = [];
     for (const radar of due) {
+      if (updateShutdown.status().shutdown_requested) break;
       try {
         results.push(await executeRadarById(radar.id, { trigger: 'scheduled' }));
       } catch (err) {
@@ -1462,7 +1471,12 @@ function createRadarRunner({
     return { due: due.length, results };
   }
 
-  return { executeRadarById, runDueRadars };
+  return {
+    executeRadarById,
+    runDueRadars,
+    prepareForUpdate: updateShutdown.prepare,
+    getUpdateShutdownStatus: updateShutdown.status,
+  };
 }
 
 module.exports = {

@@ -43,6 +43,23 @@ const PORT = process.env.PORT || 3000;
 const DATA_ROOT = process.env.DB_PATH
   ? path.dirname(process.env.DB_PATH)
   : path.join(__dirname, "..", "data");
+// Per-run secret for authenticated update shutdown requests from the Windows
+// updater. Stored only in the desktop user's private app-data directory.
+const DESKTOP_MODE = process.env.RADAR_DESKTOP === "1";
+const UPDATE_CONTROL_PATH = path.join(DATA_ROOT, "update-control.json");
+const UPDATE_CONTROL_TOKEN = DESKTOP_MODE
+  ? crypto.randomBytes(32).toString("hex")
+  : null;
+if (DESKTOP_MODE) {
+  fs.mkdirSync(DATA_ROOT, { recursive: true });
+  fs.writeFileSync(UPDATE_CONTROL_PATH, JSON.stringify({
+    protocol: 1,
+    port: Number(PORT),
+    token: UPDATE_CONTROL_TOKEN,
+    pid: process.pid,
+  }), { mode: 0o600 });
+}
+
 const IMAGE_DIR =
   process.env.IMAGE_DIR ||
   path.join(DATA_ROOT, "reference-images");
@@ -2568,6 +2585,32 @@ app.patch("/api/radars/:id/schedule", async (req, res) => {
   }
 });
 
+
+function allowDesktopUpdateControl(req, res) {
+  const remote = req.socket.remoteAddress || "";
+  const isLoopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remote);
+  if (!DESKTOP_MODE || !isLoopback) {
+    res.status(404).json({ error: "Recurso indisponível." });
+    return false;
+  }
+  return true;
+}
+
+app.get("/api/desktop/update/shutdown-status", (req, res) => {
+  if (!allowDesktopUpdateControl(req, res)) return;
+  res.setHeader("Cache-Control", "no-store");
+  res.json(radarRunner.getUpdateShutdownStatus());
+});
+
+app.post("/api/desktop/update/prepare-shutdown", (req, res) => {
+  if (!allowDesktopUpdateControl(req, res)) return;
+  const givenToken = String(req.get("x-radar-update-token") || "");
+  if (!UPDATE_CONTROL_TOKEN || !safeEqualText(givenToken, UPDATE_CONTROL_TOKEN)) {
+    return res.status(403).json({ error: "Token de atualização inválido." });
+  }
+  res.setHeader("Cache-Control", "no-store");
+  res.json(radarRunner.prepareForUpdate());
+});
 
 app.get("/api/desktop/update", async (_req, res) => {
   if (process.env.RADAR_DESKTOP !== "1") {
@@ -6118,7 +6161,7 @@ app.use((_req, res) => {
 
 app.listen(
   PORT,
-
+  DESKTOP_MODE ? "127.0.0.1" : "0.0.0.0",
   () => {
     console.log(`Radar 2.0 rodando em http://localhost:${PORT}`);
     mobileDesktopSync.start();

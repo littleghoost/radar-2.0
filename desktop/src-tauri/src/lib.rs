@@ -229,6 +229,41 @@ fn start_scheduler(app: tauri::AppHandle, running: Arc<AtomicBool>) {
     });
 }
 
+// A local, authenticated updater asks the sidecar to stop accepting new radar
+// jobs. Only after every running search has completed does this watcher invoke
+// Tauri's normal exit path (including backend cleanup).
+fn start_update_shutdown_watcher(app: tauri::AppHandle, running: Arc<AtomicBool>) {
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(3));
+        while running.load(Ordering::Relaxed) {
+            if let Ok(status) = http_json("GET", "/api/desktop/update/shutdown-status", None) {
+                let requested = status
+                    .get("shutdown_requested")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let ready = status
+                    .get("ready_for_exit")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+
+                if requested && ready {
+                    app.state::<AppState>()
+                        .quitting
+                        .store(true, Ordering::Relaxed);
+                    app.exit(0);
+                    return;
+                }
+            }
+            for _ in 0..2 {
+                if !running.load(Ordering::Relaxed) {
+                    return;
+                }
+                thread::sleep(Duration::from_secs(1));
+            }
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     const PORT: u16 = 3130;
@@ -358,6 +393,7 @@ pub fn run() {
             tray.build(app)?;
 
             start_scheduler(app.handle().clone(), scheduler_running.clone());
+            start_update_shutdown_watcher(app.handle().clone(), scheduler_running.clone());
             Ok(())
         })
         .build(tauri::generate_context!())

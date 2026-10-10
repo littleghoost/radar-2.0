@@ -155,3 +155,29 @@ real depende da conexão e do GitHub; o script não promete aumento garantido.
 
 O script fica no GitHub `main`, então melhorias nele passam a valer na **próxima vez** que o
 usuário copiar e executar o comando. Um download já iniciado mantém o comportamento anterior.
+
+## Encerramento automático durante atualização — 0.2.3
+
+A partir da versão 0.2.3, o script `scripts/update-radar.ps1 -AutoInstall` pode
+**fechar o aplicativo sozinho** antes de instalar, inclusive se ele estiver oculto
+na bandeja. O procedimento protegido usa:
+
+1. Um token aleatório gerado a cada execução pelo backend Desktop, salvo em
+   `%APPDATA%\com.littleghoost.radar2\update-control.json` na conta local.
+2. Solicitação autenticada por loopback para entrar em modo de atualização.
+3. O backend **recusa novas buscas** e espera todas as buscas já iniciadas terminarem.
+4. O Tauri acompanha a confirmação de que não há mais buscas ativas, chama seu
+   procedimento normal de saída e libera o banco SQLite.
+5. O PowerShell espera o encerramento real e executa o NSIS `/S` somente
+   após o programa fechar.
+
+**Compatibilidade:** versões anteriores à 0.2.3 não implementam essa saída
+protegida. Nelas, o script só usa `taskkill /T /F` se a API local responder e
+se **duas verificações consecutivas** confirmarem que nenhuma busca aparece
+como `running`. Caso contrário, o instalador não é executado. Não há garantia
+absoluta de eliminação de condições de corrida no modo legado; a partir da
+0.2.3, o protocolo protegido evita iniciar novas buscas durante o encerramento.
+
+O novo protocolo só está habilitado no backend local; o servidor Fly.io não
+aceita comandos de encerramento. A API Desktop escuta apenas no endereço
+`127.0.0.1` e a solicitação é autenticada por token por processo.
