@@ -529,6 +529,21 @@ db.serialize(() => {
     )
   `);
 
+  // Desktop startup repairs runs left open by a previous process exit.
+  // After a fresh process starts, those old runs cannot still be executing.
+  if (process.env.RADAR_DESKTOP === "1") {
+    db.run(
+      "UPDATE radar_runs SET status = 'failed', " +
+      "finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), " +
+      "error_message = COALESCE(error_message, " +
+      "'Execução interrompida antes da reinicialização do Radar.') " +
+      "WHERE status = 'running'",
+      (err) => {
+        if (err) console.error("Falha ao recuperar execuções interrompidas:", err.message);
+      },
+    );
+  }
+
   db.all(
     "PRAGMA table_info(radar_runs)",
     (err, columns) => {
