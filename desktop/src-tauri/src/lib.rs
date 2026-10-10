@@ -269,6 +269,7 @@ pub fn run() {
                 .env("PORT", PORT.to_string())
                 .env("DB_PATH", db_path.to_string_lossy().to_string())
                 .env("RADAR_DESKTOP", "1")
+                .env("RADAR_DESKTOP_VERSION", app.package_info().version.to_string())
                 .env("SEMANTIC_VISION_ENABLED", "1")
                 .env("SEMANTIC_CACHE_DIR", semantic_cache.to_string_lossy().to_string());
 

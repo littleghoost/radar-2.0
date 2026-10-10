@@ -15,6 +15,7 @@ const {
 } = require("./services/sources");
 const { createRadarRunner } = require("./services/radarRunner");
 const { createMobileDesktopSync } = require("./services/mobileDesktopSync");
+const { checkDesktopUpdate } = require("./services/desktopUpdates");
 const {
   createSearchPlanner,
 } = require("./services/searchPlanner");
@@ -2566,6 +2567,22 @@ app.patch("/api/radars/:id/schedule", async (req, res) => {
   }
 });
 
+
+app.get("/api/desktop/update", async (_req, res) => {
+  if (process.env.RADAR_DESKTOP !== "1") {
+    return res.json({ supported: false });
+  }
+  try {
+    const installed = process.env.RADAR_DESKTOP_VERSION || "0.1.0";
+    res.setHeader("Cache-Control", "no-store");
+    const update = await checkDesktopUpdate(installed);
+    return res.json(update);
+  } catch (error) {
+    return res.status(503).json({
+      error: error?.message || "Não consegui verificar atualizações.",
+    });
+  }
+});
 
 app.get("/api/desktop/settings", async (_req, res) => {
   try {

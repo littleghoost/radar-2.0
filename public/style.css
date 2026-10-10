@@ -3075,3 +3075,101 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .radar-tab:focus-v
     flex: 1 0 100%;
   }
 }
+
+/* Desktop update center */
+.topbar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.update-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 13px;
+  color: #d9ffe3;
+  border: 1px solid rgba(132, 240, 165, .3);
+  border-radius: 12px;
+  background: rgba(132, 240, 165, .09);
+  font-size: .8rem;
+  font-weight: 750;
+}
+.update-notice[hidden], #desktopUpdateCard[hidden],
+#downloadDesktopUpdate[hidden], #desktopUpdateNotes[hidden] { display: none !important; }
+.update-notice-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 4px rgba(132, 240, 165, .1);
+}
+.desktop-update-card {
+  border-color: rgba(132, 240, 165, .16);
+}
+.desktop-update-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+.desktop-update-summary > div {
+  display: grid;
+  gap: 7px;
+  padding: 13px 15px;
+  border: 1px solid var(--line-soft);
+  border-radius: 13px;
+  background: rgba(255,255,255,.022);
+}
+.desktop-update-summary span {
+  color: var(--muted);
+  font-size: .77rem;
+}
+.desktop-update-summary strong {
+  font-size: 1.18rem;
+  letter-spacing: -.025em;
+}
+.desktop-update-message {
+  font-size: .86rem;
+  line-height: 1.5;
+}
+.desktop-update-notes {
+  margin-top: 15px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: rgba(255,255,255,.018);
+}
+.desktop-update-notes summary {
+  padding: 12px 14px;
+  font-size: .84rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.desktop-update-notes p {
+  padding: 0 14px 13px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: .8rem;
+  line-height: 1.55;
+}
+.desktop-update-card .settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  margin-top: 16px;
+}
+.desktop-update-card .settings-actions .primary {
+  background: var(--accent);
+  color: #09090b;
+}
+.desktop-update-help {
+  display: block;
+  max-width: 650px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: .73rem;
+  line-height: 1.55;
+}
+@media(max-width: 580px) {
+  .topbar-actions { align-items: stretch; }
+  .topbar-actions button { flex: 1; }
+  .desktop-update-summary { grid-template-columns: 1fr; }
+}

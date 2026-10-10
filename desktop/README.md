@@ -56,3 +56,24 @@ A página **Perfil** agora inclui um painel do Radar Desktop com:
 - opção de iniciar minimizado no tray quando o Windows abrir o app.
 
 As preferências ficam salvas no SQLite local do desktop. O autostart usa o plugin oficial `tauri-plugin-autostart` e é sincronizado pelo processo desktop; o app só registra a inicialização automática quando a opção estiver ligada.
+
+## Atualizações do Radar Desktop
+
+A partir da versão **0.2.0**, o Desktop mostra um painel **Perfil → Atualizações**:
+- identifica a versão instalada diretamente do executável Tauri;
+- consulta a última versão estável em `github.com/littleghoost/radar-2.0/releases`;
+- mostra um aviso quando existir uma versão mais recente e apresenta notas da versão;
+- abre o download do instalador Windows publicado no repositório oficial.
+
+A verificação automática usa a API pública do GitHub e não envia anúncios, credenciais ou informações pessoais. Há cache de quinze minutos e um botão para verificar novamente.
+
+**Instalação ainda é confirmada pelo usuário.** O botão baixa o instalador oficial no navegador, mas não o executa silenciosamente. Para substituir uma versão anterior, feche o Radar pelo menu da bandeja (Sair do Radar), rode o instalador novo e abra o Radar. A pasta de dados do usuário não é modificada pela atualização.
+
+### Como publicar uma versão
+
+1. Atualize a mesma versão semântica em `desktop/package.json`, `desktop/src-tauri/tauri.conf.json` e `desktop/src-tauri/Cargo.toml`; atualize `desktop/package-lock.json` executando `npm install --package-lock-only`.
+2. Teste e envie as alterações à branch `main`.
+3. Crie e envie uma tag **de versão estável** correspondente, por exemplo `v0.2.0`.
+4. O workflow de Windows compila o NSIS e publica automaticamente o instalador na página **GitHub Releases**. O painel do Desktop passa a encontrá-lo.
+
+**Segurança:** o checker só apresenta releases estáveis com instalador Windows e links do repositório oficial. Atualização de um clique (baixar, validar assinatura, instalar e reiniciar sem sair do app) dependerá de configurar chaves de assinatura Tauri, GitHub Actions Secrets e o plugin oficial de updater. Não instale binários silenciosamente sem essa verificação criptográfica.

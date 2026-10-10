@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags:
+      - "v*"
     paths:
       - ".github/workflows/desktop-windows.yml"
       - "desktop/**"
@@ -13,7 +15,7 @@ on:
       - "package-lock.json"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   windows-installer:
@@ -21,10 +23,10 @@ jobs:
     timeout-minutes: 55
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -40,6 +42,18 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
 
+      - name: Test update checker and release validation
+        run: node --test tests/desktopUpdates.test.js
+
+      - name: Validate release tag matches app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = (Get-Content desktop/package.json | ConvertFrom-Json).version
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "A tag e a versão do app não coincidem."
+          }
+
       - name: Install desktop dependencies
         working-directory: desktop
         run: npm ci
@@ -49,9 +63,17 @@ jobs:
         run: npm run build:desktop
 
       - name: Publish Windows installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: radar-2-0-windows
           path: desktop/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish official GitHub Release on version tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: desktop/src-tauri/target/release/bundle/nsis/*.exe

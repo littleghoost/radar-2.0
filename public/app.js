@@ -3511,6 +3511,110 @@ $("#internationalCostForm")?.addEventListener(
 );
 
 /* =========================
+   ATUALIZAÇÕES DO DESKTOP
+========================= */
+
+let desktopReleaseDownloadUrl = null;
+let hasNotifiedDesktopUpdate = false;
+
+function isOfficialWindowsReleaseLink(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:" &&
+      url.hostname === "github.com" &&
+      /^\/littleghoost\/radar-2\.0\/releases\/download\/v?\d+\.\d+\.\d+\/[\w.%()+-]+\.exe$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function loadDesktopUpdateStatus(manual = false) {
+  const card = $("#desktopUpdateCard");
+  if (!card) return;
+  const button = $("#checkDesktopUpdate");
+  const badge = $("#desktopUpdateBadge");
+  const info = $("#desktopUpdateMessage");
+  const notice = $("#updateNotice");
+  const download = $("#downloadDesktopUpdate");
+  const notes = $("#desktopUpdateNotes");
+  desktopReleaseDownloadUrl = null;
+
+  if (button) button.disabled = true;
+  if (badge) badge.textContent = "Verificando...";
+  if (info) info.textContent = "Conferindo as versões oficiais do Radar...";
+  if (download) download.hidden = true;
+  if (notes) notes.hidden = true;
+  try {
+    const update = await api("/api/desktop/update");
+    if (!update.supported) {
+      card.hidden = true;
+      if (notice) notice.hidden = true;
+      return;
+    }
+
+    card.hidden = false;
+    $("#installedDesktopVersion").textContent = update.installed_version || "—";
+    $("#latestDesktopVersion").textContent = update.latest?.version || "Ainda não publicada";
+
+    if (update.update_available && isOfficialWindowsReleaseLink(update.latest?.download_url)) {
+      desktopReleaseDownloadUrl = update.latest.download_url;
+      badge.textContent = "Nova versão";
+      badge.classList.add("saved");
+      info.textContent =
+        `A versão ${update.latest.version} está pronta. Você está na ${update.installed_version}.`;
+      if (notice) notice.hidden = false;
+      download.hidden = false;
+      if (update.latest.notes) {
+        $("#desktopUpdateNotesText").textContent = update.latest.notes;
+        notes.hidden = false;
+      }
+      if (!hasNotifiedDesktopUpdate) {
+        hasNotifiedDesktopUpdate = true;
+        notify(`Nova versão do Radar disponível: ${update.latest.version}.`);
+      }
+    } else {
+      badge.textContent = "Atualizado";
+      badge.classList.remove("saved");
+      info.textContent = update.message || "Você já está na versão oficial mais recente.";
+      if (notice) notice.hidden = true;
+      if (manual) notify("Verificação concluída.");
+    }
+  } catch (err) {
+    const isDesktop = Boolean(window.__TAURI__ || window.__TAURI_INTERNALS__);
+    if (!isDesktop) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    badge.textContent = "Indisponível";
+    badge.classList.remove("saved");
+    info.textContent =
+      "Não foi possível consultar as versões. Confira sua conexão e tente novamente.";
+    if (manual) notify(errorMessage(err), "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+$("#checkDesktopUpdate")?.addEventListener("click", () => {
+  loadDesktopUpdateStatus(true);
+});
+
+$("#downloadDesktopUpdate")?.addEventListener("click", async () => {
+  if (!desktopReleaseDownloadUrl ||
+      !isOfficialWindowsReleaseLink(desktopReleaseDownloadUrl)) return;
+  await openExternalUrl(desktopReleaseDownloadUrl);
+});
+
+$("#updateNotice")?.addEventListener("click", () => {
+  document.querySelector('.nav-button[data-page="profile"]')?.click();
+  $("#desktopUpdateCard")?.scrollIntoView({
+    behavior: "smooth",
+    block: "center",
+  });
+});
+
+/* =========================
    CONFIGURAÇÕES DESKTOP
 ========================= */
 
@@ -3606,6 +3710,7 @@ $("#runBackgroundNow")?.addEventListener("click", async () => {
     await loadListings();
     await Promise.all([
       loadDesktopSettings(),
+      loadDesktopUpdateStatus(),
       loadInternationalCostSettings(),
       loadSemanticStatus(),
       loadPreferenceStatus(),

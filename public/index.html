@@ -23,7 +23,13 @@
         <p>Garimpo organizado. Sem perder anúncio bom no meio da bagunça.</p>
       </div>
 
-      <button id="openRadarModal" class="primary">+ Novo radar</button>
+      <div class="topbar-actions">
+        <button id="updateNotice" class="update-notice" type="button" hidden>
+          <span class="update-notice-dot" aria-hidden="true"></span>
+          Atualização disponível
+        </button>
+        <button id="openRadarModal" class="primary">+ Novo radar</button>
+      </div>
     </header>
 
     <!-- =========================
@@ -457,6 +463,40 @@
                 <button type="button" class="secondary" id="runBackgroundNow">Rodar radares agora</button>
               </div>
             </form>
+          </div>
+
+          <div class="profile-card desktop-update-card" id="desktopUpdateCard" hidden>
+            <div class="settings-head">
+              <div>
+                <span class="eyebrow"> RADAR DESKTOP • VERSÕES </span>
+                <h3>Atualizações</h3>
+                <p>Confira novas versões do Radar e baixe o instalador oficial com segurança.</p>
+              </div>
+              <span id="desktopUpdateBadge" class="settings-status">Verificando...</span>
+            </div>
+            <div class="desktop-update-summary">
+              <div><span>Versão instalada</span><strong id="installedDesktopVersion">—</strong></div>
+              <div><span>Versão mais recente</span><strong id="latestDesktopVersion">—</strong></div>
+            </div>
+            <p id="desktopUpdateMessage" class="desktop-update-message" role="status">
+              Verificando atualizações oficiais...
+            </p>
+            <details id="desktopUpdateNotes" class="desktop-update-notes" hidden>
+              <summary>O que mudou nesta versão</summary>
+              <p id="desktopUpdateNotesText"></p>
+            </details>
+            <div class="settings-actions">
+              <button id="checkDesktopUpdate" type="button" class="secondary">
+                Verificar atualizações
+              </button>
+              <button id="downloadDesktopUpdate" type="button" class="primary" hidden>
+                <span>Baixar nova versão ↗</span>
+              </button>
+            </div>
+            <small class="desktop-update-help">
+              O instalador abre no navegador. Feche o Radar pelo menu da bandeja antes de instalar;
+              seus radares e anúncios ficam salvos no banco de dados local.
+            </small>
           </div>
 
           <div class="profile-card">
