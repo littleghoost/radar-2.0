@@ -53,3 +53,38 @@ A beta de debug recebe um certificado temporário pelo CI. A associação
 assetlinks.json precisa corresponder a cada APK. A solução duradoura
 é configurar uma assinatura estável fora do repositório.
 Nunca versionar chaves privadas de assinatura.
+
+## Assinatura estável (para atualizar o APK sobre o anterior)
+
+A assinatura da beta antiga de debug muda a cada build. Na transição para
+uma assinatura permanente é necessária UMA ÚLTIMA desinstalação do APK antigo.
+Após instalar a primeira versão assinada de forma permanente, novos APKs
+podem instalar sobre ela sem perder os dados do Android.
+
+A chave permanente foi criada no Windows e NÃO está versionada, em:
+%APPDATA%\com.littleghoost.radar2\mobile-signing
+Arquivos privados: radar-mobile-signing.p12, signing-password.txt,
+signing-keystore-base64.txt, signing-sha256.txt.
+A pasta é acessível apenas à conta Windows e SYSTEM. Mantenha backup privado.
+
+Para ativar a assinatura no GitHub Actions, o proprietário do repositório deve
+adicionar DOIS segredos em Settings > Secrets and variables > Actions:
+
+RADAR_ANDROID_KEYSTORE_B64: conteúdo de signing-keystore-base64.txt
+RADAR_ANDROID_STORE_PASSWORD: conteúdo de signing-password.txt
+
+Use o PowerShell para copiar o valor sem exibir o segredo na tela:
+
+Get-Content "$env:APPDATA\com.littleghoost.radar2\mobile-signing\signing-keystore-base64.txt" -Raw | Set-Clipboard
+
+Get-Content "$env:APPDATA\com.littleghoost.radar2\mobile-signing\signing-password.txt" -Raw | Set-Clipboard
+
+Após colar cada segredo no campo Value do GitHub, limpe o clipboard:
+Set-Clipboard -Value ""
+
+Após configurar AMBOS os secrets, executar o workflow Android. Ele produz
+app-release.apk com a mesma identidade nas próximas versões.
+Se eles não estiverem presentes, o build de debug ainda é efêmero e requer
+desinstalação. Não distribuir esse build como se fosse atualização compatível.
+O servidor oferece assetlinks.json com o certificado debug antigo e o estável
+para não quebrar o QR durante a transição.
