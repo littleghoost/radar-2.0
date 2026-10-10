@@ -18,6 +18,8 @@ public final class MobileActivity extends Activity {
     private static final String HOST = "radar-2-0-littleghoost.fly.dev";
     private static final String HOME = "https://" + HOST + "/mobile/";
     private static final int FILE_REQUEST = 501;
+    private static final String PAIRING_ID_PATTERN = "[a-fA-F0-9]{32}";
+    private static final String PAIRING_SECRET_PATTERN = "[A-Za-z0-9_-]{24,128}";
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
 
@@ -84,21 +86,55 @@ public final class MobileActivity extends Activity {
         return true;
     }
 
-    private void openPair(Uri uri) {
-        String hash = uri.getEncodedFragment();
-        if (hash == null || hash.isEmpty() || hash.length() > 700) {
-            Toast.makeText(this, "QR inválido", Toast.LENGTH_LONG).show();
+    private void openPair(String id, String secret) {
+        if (id == null || !id.matches(PAIRING_ID_PATTERN)
+                || secret == null || !secret.matches(PAIRING_SECRET_PATTERN)) {
+            Toast.makeText(this, "QR de pareamento inválido ou incompleto", Toast.LENGTH_LONG).show();
             web.loadUrl(HOME);
             return;
         }
-        web.loadUrl(HOME + "pair.html#" + hash);
+        // Only allow the two expected keys; never load arbitrary URLs received via an Intent.
+        web.loadUrl(HOME + "pair.html#id=" + Uri.encode(id) + "&secret=" + Uri.encode(secret));
+    }
+
+    private void openPair(Uri uri) {
+        // Legacy custom-scheme links received directly from a browser.
+        String fragment = uri.getEncodedFragment();
+        if (fragment == null) {
+            Toast.makeText(this, "QR de pareamento inválido", Toast.LENGTH_LONG).show();
+            web.loadUrl(HOME);
+            return;
+        }
+        String id = null;
+        String secret = null;
+        for (String item : fragment.split("&")) {
+            int equals = item.indexOf('=');
+            if (equals < 0) continue;
+            String key = Uri.decode(item.substring(0, equals));
+            String value = Uri.decode(item.substring(equals + 1));
+            if ("id".equals(key)) id = value;
+            if ("secret".equals(key)) secret = value;
+        }
+        openPair(id, secret);
     }
 
     private void handleIntent(Intent intent) {
-        Uri data = intent == null ? null : intent.getData();
-        if (data != null && "radar2".equalsIgnoreCase(data.getScheme())
-                && "pair".equalsIgnoreCase(data.getHost())) openPair(data);
-        else web.loadUrl(HOME);
+        if (intent != null) {
+            // Chrome's intent:// deep link passes token parts as typed extras.
+            String id = intent.getStringExtra("pairing_id");
+            String secret = intent.getStringExtra("pairing_secret");
+            if (id != null || secret != null) {
+                openPair(id, secret);
+                return;
+            }
+            Uri data = intent.getData();
+            if (data != null && "radar2".equalsIgnoreCase(data.getScheme())
+                    && "pair".equalsIgnoreCase(data.getHost())) {
+                openPair(data);
+                return;
+            }
+        }
+        web.loadUrl(HOME);
     }
 
     @Override protected void onNewIntent(Intent intent) {

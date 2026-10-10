@@ -440,6 +440,7 @@ async function disablePushNotifications() {
 function renderConnectionPanels() {
   const relay = state.mode === "relay";
   $("#relayPanel").hidden = !relay;
+  $("#pairByLinkPanel").hidden = relay;
   $("#localPanel").hidden = relay;
 
   if (relay) {
@@ -1305,6 +1306,38 @@ $("#statusFilter").addEventListener(
   "change",
   renderListings,
 );
+
+$("#pairByLinkButton")?.addEventListener("click", () => {
+  const typed = $("#pairLinkInput").value.trim();
+  let link;
+  try {
+    link = new URL(typed);
+  } catch {
+    toast("Cole o link completo gerado pelo QR.");
+    return;
+  }
+  if (link.protocol !== "https:" ||
+      link.hostname !== "radar-2-0-littleghoost.fly.dev" ||
+      link.pathname !== "/mobile/pair.html" ||
+      link.username || link.password || link.port) {
+    toast("Use apenas o link seguro do QR do Radar 2.0.");
+    return;
+  }
+  const params = new URLSearchParams(link.hash.replace(/^#/, ""));
+  const id = params.get("id") || "";
+  const secret = params.get("secret") || "";
+  if (!/^[a-fA-F0-9]{32}$/.test(id) ||
+      !/^[A-Za-z0-9_-]{24,128}$/.test(secret)) {
+    toast("Este link está incompleto ou é inválido. Gere outro QR.");
+    return;
+  }
+  // Stay inside this app's WebView so credentials are saved to its
+  // private localStorage, not to the external browser's storage.
+  location.assign("./pair.html#" + new URLSearchParams({
+    id,
+    secret,
+  }).toString());
+});
 
 $("#baseUrlInput").value = state.baseUrl;
 

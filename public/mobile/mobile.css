@@ -143,3 +143,10 @@ h3{font-size:16px}
 .visual-primary{position:absolute;top:6px;left:6px;padding:4px 6px;border-radius:999px;background:rgba(11,13,16,.82);color:var(--accent);font-size:8px;font-weight:900}
 .visual-placeholder{display:grid;place-items:center;width:100%;aspect-ratio:1/1;color:var(--muted);font-size:10px;text-align:center;padding:10px;background:#161b21}
 @media(max-width:620px){.visual-upload-grid{grid-template-columns:1fr}.visual-history{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Direct pairing fallback for Android browsers that do not open app links */
+.pair-by-link{padding:14px;margin:12px 0 18px;background:#0d1418;border:1px solid rgba(115,247,162,.25);border-radius:14px}
+.pair-by-link strong{font-size:13px}
+.pair-by-link p{margin:8px 0 12px}
+.pair-by-link input{font-size:12px}
+.pair-by-link .primary{margin:0;width:100%}

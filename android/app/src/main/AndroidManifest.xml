@@ -5,7 +5,7 @@
    android:usesCleartextTraffic="false"
    android:theme="@android:style/Theme.Material.NoActionBar"
    android:icon="@drawable/radar_icon">
-  <activity android:name=".MobileActivity" android:exported="true">
+  <activity android:name=".MobileActivity" android:launchMode="singleTop" android:exported="true">
    <intent-filter>
     <action android:name="android.intent.action.MAIN"/>
     <category android:name="android.intent.category.LAUNCHER"/>

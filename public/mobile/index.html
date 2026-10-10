@@ -162,6 +162,15 @@
           <button class="ghost wide danger-ghost" id="unlinkButton" type="button">Desvincular este celular</button>
         </div>
 
+        <div id="pairByLinkPanel" class="pair-by-link">
+          <strong>Parear por link (alternativa ao QR)</strong>
+          <p>Se o botão do QR não abrir o aplicativo, copie o link da página de pareamento, abra o Radar Mobile e cole aqui.</p>
+          <label for="pairLinkInput">Link temporário do QR</label>
+          <input id="pairLinkInput" type="url" inputmode="url" autocomplete="off"
+            placeholder="https://radar-2-0-littleghoost.fly.dev/mobile/pair.html#...">
+          <button id="pairByLinkButton" type="button" class="primary">Conectar com este link</button>
+        </div>
+
         <div id="localPanel">
           <p>Sem pareamento, o celular pode acessar o Radar diretamente quando estiver na mesma rede do PC.</p>
           <label>
