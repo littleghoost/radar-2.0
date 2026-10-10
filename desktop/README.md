@@ -96,3 +96,31 @@ em memória; isto não deve ser usado para contornar limites dos provedores.
 Esta proteção **não inclui** a coleta feita pela extensão Bridge no navegador nem garante que
 as plataformas nunca bloqueiem requisições. Para fontes não homologadas, mantenha a integração
 automática desativada até conseguir acesso autorizado.
+
+## Atualizar pelo PowerShell (sem clonar o repositório)
+
+O atualizador fica em `scripts/update-radar.ps1` e funciona no **Windows PowerShell 5.1** ou no PowerShell 7. Para atualizar o aplicativo instalado, abra o **PowerShell normal** (não exige administrador só para baixar) e execute:
+
+```powershell
+Invoke-WebRequest "https://raw.githubusercontent.com/littleghoost/radar-2.0/main/scripts/update-radar.ps1" -OutFile "$env:TEMP\update-radar.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\update-radar.ps1"
+```
+
+O `-ExecutionPolicy Bypass` vale apenas para esse processo e permite executar o arquivo obtido do repositório oficial; revise o script e o endereço antes de executá-lo. O comando nunca executa diretamente conteúdo remoto sem salvar o arquivo para inspeção.
+
+Funcionalidades:
+- Usa a API oficial de Releases do GitHub e aceita apenas versões estáveis;
+- verifica a versão instalada no registro do Windows;
+- baixa ou reutiliza o instalador NSIS oficial do Radar;
+- **verifica o hash SHA-256 contra o digest publicado pelo GitHub**, recusando instalar em caso de divergência;
+- com `-CheckOnly`, consulta a última versão sem baixar;
+- com `-DownloadOnly`, baixa e verifica sem abrir o instalador;
+- antes de instalar, pede para sair do Radar pela bandeja do Windows, sem encerrar processos à força.
+
+Para conferir sem instalar:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\update-radar.ps1" -CheckOnly
+```
+
+A atualização não apaga o banco local. Esse método é **assistido** (não silencioso): o Windows abrirá o instalador e o usuário confirmará a instalação. Para atualizações inteiramente automáticas, ainda será preciso implementar o updater Tauri com assinatura criptográfica.
