@@ -1089,7 +1089,7 @@ async function loadRadars() {
                 <p class="radar-schedule">
                   ${
                     radar.schedule_enabled
-                      ? `Agendamento preparado: a cada ${Math.round((radar.schedule_interval_minutes || 240) / 60)}h • próxima ${escapeHtml(dateTime(radar.next_run_at))}`
+                      ? `Agendado a cada ${Math.round((radar.schedule_interval_minutes || 240) / 60)}h • próxima ${escapeHtml(dateTime(radar.next_run_at))}`
                       : "Execução manual"
                   }
                 </p>
@@ -1345,53 +1345,78 @@ async function runRadar(id) {
    AGENDAMENTO PREPARADO
 ========================= */
 
-async function configureSchedule(id) {
+let selectedScheduleRadarId = null;
+
+function configureSchedule(id) {
   const radar = state.radars.find((item) => Number(item.id) === Number(id));
   if (!radar) return;
 
-  if (radar.schedule_enabled) {
-    const disable = confirm(
-      "Este radar está com agendamento preparado.\n\nOK = desligar agendamento\nCancelar = manter como está",
-    );
-    if (!disable) return;
-
-    try {
-      await api(`/api/radars/${id}/schedule`, {
-        method: "PATCH",
-        body: JSON.stringify({ enabled: false }),
-      });
-      await loadRadars();
-    } catch (err) {
-      alert(err.message);
-    }
-    return;
+  selectedScheduleRadarId = Number(radar.id);
+  const enabled = Boolean(radar.schedule_enabled);
+  const interval = String(radar.schedule_interval_minutes || 240);
+  const select = $("#scheduleInterval");
+  if (![...select.options].some((option) => option.value === interval)) {
+    const custom = new Option(`A cada ${Number(interval) / 60} hora(s) — atual`, interval);
+    select.add(custom);
   }
-
-  const hours = prompt(
-    "Preparar este radar para rodar a cada quantas horas?\n\nO Fly NÃO executará sozinho por enquanto. Isso deixa a configuração pronta para o futuro app/servidor.",
-    "4",
-  );
-  if (hours === null) return;
-
-  const value = Number(hours.replace?.(",", ".") ?? hours);
-  if (!Number.isFinite(value) || value < 1) {
-    alert("Use um intervalo de pelo menos 1 hora.");
-    return;
-  }
-
-  try {
-    await api(`/api/radars/${id}/schedule`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        enabled: true,
-        interval_minutes: Math.round(value * 60),
-      }),
-    });
-    await loadRadars();
-  } catch (err) {
-    alert(err.message);
-  }
+  select.value = interval;
+  $("#scheduleModalTitle").textContent = `Agendar • ${radar.name}`;
+  $("#scheduleCurrentStatus").textContent = enabled
+    ? `Ativo • próxima execução: ${dateTime(radar.next_run_at)}`
+    : "Desativado • sem buscas automáticas";
+  $("#disableRadarSchedule").hidden = !enabled;
+  $("#saveRadarSchedule").textContent = enabled ? "Salvar intervalo" : "Ativar agendamento";
+  $("#scheduleModal").showModal();
 }
+
+$("#scheduleModal")?.addEventListener("close", () => {
+  selectedScheduleRadarId = null;
+});
+
+$("#scheduleForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (selectedScheduleRadarId === null) return;
+  const interval = Number($("#scheduleInterval").value);
+  if (!Number.isInteger(interval) || interval < 60 || interval > 1440) {
+    notify("Escolha um intervalo válido, a partir de 1 hora.", "error");
+    return;
+  }
+
+  const button = $("#saveRadarSchedule");
+  button.disabled = true;
+  try {
+    await api(`/api/radars/${selectedScheduleRadarId}/schedule`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled: true, interval_minutes: interval }),
+    });
+    $("#scheduleModal").close();
+    await loadRadars();
+    notify(`Agendamento salvo: a cada ${interval / 60} hora(s).`);
+  } catch (err) {
+    notify(errorMessage(err), "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("#disableRadarSchedule")?.addEventListener("click", async () => {
+  if (selectedScheduleRadarId === null) return;
+  const button = $("#disableRadarSchedule");
+  button.disabled = true;
+  try {
+    await api(`/api/radars/${selectedScheduleRadarId}/schedule`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled: false }),
+    });
+    $("#scheduleModal").close();
+    await loadRadars();
+    notify("Agendamento desativado para este radar.");
+  } catch (err) {
+    notify(errorMessage(err), "error");
+  } finally {
+    button.disabled = false;
+  }
+});
 
 /* =========================
    SEARCH PLANNER

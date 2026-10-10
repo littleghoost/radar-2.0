@@ -954,6 +954,40 @@
       </form>
     </dialog>
 
+    <!-- AGENDAMENTO DO RADAR -->
+    <dialog id="scheduleModal" aria-labelledby="scheduleModalTitle">
+      <form id="scheduleForm">
+        <div class="modal-head">
+          <div>
+            <span class="eyebrow"> MONITORAMENTO </span>
+            <h3 id="scheduleModalTitle">Agendamento do radar</h3>
+          </div>
+          <button class="icon-btn close-modal" type="button" aria-label="Fechar">×</button>
+        </div>
+        <p id="scheduleCurrentStatus" class="schedule-current-status"></p>
+        <label for="scheduleInterval">
+          Frequência das buscas
+          <select name="interval_minutes" id="scheduleInterval" required>
+            <option value="60">A cada 1 hora — recomendado</option>
+            <option value="120">A cada 2 horas</option>
+            <option value="240">A cada 4 horas</option>
+            <option value="480">A cada 8 horas</option>
+            <option value="720">A cada 12 horas</option>
+            <option value="1440">Uma vez por dia</option>
+          </select>
+        </label>
+        <p class="schedule-help">
+          A frequência vale para este radar. O Desktop confere os agendamentos em segundo plano
+          enquanto estiver em execução. Salvar um novo intervalo recalcula a próxima busca.
+        </p>
+        <div class="schedule-modal-actions">
+          <button type="button" class="secondary close-modal">Cancelar</button>
+          <button type="button" class="danger-btn" id="disableRadarSchedule" hidden>Desativar</button>
+          <button type="submit" class="primary" id="saveRadarSchedule">Salvar agendamento</button>
+        </div>
+      </form>
+    </dialog>
+
     <!-- =========================
        SCRIPT
   ========================== -->

@@ -3036,3 +3036,42 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .radar-tab:focus-v
     padding: 9px 12px;
   }
 }
+
+/* Radar scheduler: change interval without disabling first */
+#scheduleModal {
+  width: min(510px, calc(100vw - 28px));
+}
+#scheduleModal .modal-head h3 { margin-top: 6px; font-size: 1.2rem; }
+#scheduleModal form { padding: 22px; }
+.schedule-current-status {
+  padding: 12px 14px;
+  border: 1px solid rgba(132,240,165,.2);
+  border-radius: 12px;
+  background: rgba(132,240,165,.045);
+  color: #c5dfcd;
+  font-size: .84rem;
+  line-height: 1.5;
+}
+.schedule-help {
+  margin: 8px 0 18px;
+  font-size: .8rem;
+  line-height: 1.55;
+}
+.schedule-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 15px;
+  border-top: 1px solid var(--line-soft);
+}
+.schedule-modal-actions #disableRadarSchedule:not([hidden]) { margin-right: auto; }
+.schedule-modal-actions [hidden] { display: none; }
+@media (max-width: 550px) {
+  .schedule-modal-actions > button {
+    flex: 1;
+  }
+  .schedule-modal-actions #saveRadarSchedule {
+    flex: 1 0 100%;
+  }
+}
