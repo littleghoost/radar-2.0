@@ -113,3 +113,22 @@ O relay já aceita `import_url`, mas o executor do Desktop ainda responde como n
 3. Testar ponta a ponta com o backend cloud publicado.
 4. Adicionar importação de link no executor Desktop.
 5. Push notifications para grails e quedas de preço.
+
+## Android beta e QR aprimorado - 2026-10-10
+
+O Android beta está na pasta android/, compilado com Gradle 8.11.1 no GitHub
+Actions, usando a interface mobile hospedada pelo relay.
+
+O fluxo QR é:
+1. Desktop: clicar no atalho Conectar celular, gerar o QR de uso único.
+2. Celular: escanear com a câmera, abrir a página HTTPS segura.
+3. Clicar em Abrir no aplicativo Radar (esquema radar2://pair) para abrir o APK.
+4. Confirmar o pareamento no APK, que guarda as credenciais na WebView privada.
+5. Desktop detecta automaticamente que o token foi resgatado, limpa o QR e
+   mostra confirmação. O pareamento expira após dez minutos.
+
+A API do Desktop já lista aparelhos pareados e permite revogação. Os dados são
+enviados apenas por HTTPS à nuvem, não há abertura de portas domésticas.
+O APK debug não tem assinatura estável: usar como beta e não distribuir como
+versão final. Próxima fase para produção: assinatura Android persistente,
+notificações push nativas, tratamento offline e teste físico em celular.

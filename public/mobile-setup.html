@@ -32,6 +32,8 @@
     .dot.on{background:#73f7a2}
     .pair-box{margin-top:16px;padding:14px;border-radius:15px;background:#0d1115;border:1px solid rgba(115,247,162,.18)}
     .pair-box[hidden]{display:none}
+    .pair-notice{margin-top:14px;color:#73f7a2;font-size:12px;line-height:1.5}
+    .pair-notice[hidden]{display:none}
     .pair-box label{display:block;color:#8f9aa7;font-size:11px;margin-bottom:6px}
     .pair-url{display:flex;gap:8px}
     .pair-url input{min-width:0;flex:1;background:#090c0f;color:#f4f7fb;border:1px solid rgba(255,255,255,.08);border-radius:11px;padding:11px}
@@ -73,6 +75,8 @@
         </div>
 
         <button id="pairButton" class="primary" type="button">Gerar novo pareamento</button>
+
+        <p id="pairNotice" class="pair-notice" role="status" aria-live="polite" hidden></p>
 
         <div id="pairBox" class="pair-box" hidden>
           <label>Escaneie com a câmera do celular</label>
@@ -184,12 +188,35 @@
       }
     }
 
+    let pairCountdown = null;
+    let pairPolling = null;
+    let currentPairingId = null;
+
+    function stopPairingTimers() {
+      if (pairCountdown) clearInterval(pairCountdown);
+      if (pairPolling) clearInterval(pairPolling);
+      pairCountdown = null;
+      pairPolling = null;
+    }
+
+    function endPairing(message) {
+      stopPairingTimers();
+      currentPairingId = null;
+      $("#pairBox").hidden = true;
+      $("#pairUrl").value = "";
+      $("#pairQr").removeAttribute("src");
+      $("#pairNotice").textContent = message;
+      $("#pairNotice").hidden = false;
+    }
+
     $("#pairButton").addEventListener("click", async () => {
       const button = $("#pairButton");
       button.disabled = true;
       button.textContent = "Gerando…";
 
       try {
+        stopPairingTimers();
+        $("#pairNotice").hidden = true;
         const data = await api("/api/mobile/pairing", {
           method: "POST",
           body: "{}",
@@ -199,19 +226,40 @@
         $("#pairQr").src = data.qr_data_url || "";
         $("#pairBox").hidden = false;
 
+        currentPairingId = String(data.pairing_id || "");
         let remaining = Number(data.expires_in_seconds) || 600;
         const expiry = $("#pairExpiry");
-        expiry.textContent = `Expira em ${Math.ceil(remaining / 60)} minuto(s).`;
+        expiry.textContent = "Expira em " + Math.ceil(remaining / 60) + " minuto(s).";
 
-        const timer = setInterval(() => {
+        pairCountdown = setInterval(() => {
           remaining -= 1;
           if (remaining <= 0) {
-            clearInterval(timer);
-            expiry.textContent = "Pareamento expirado. Gere outro.";
+            endPairing("O QR expirou. Gere outro para conectar o celular.");
             return;
           }
-          expiry.textContent = `Expira em ${Math.ceil(remaining / 60)} minuto(s).`;
+          expiry.textContent = "Expira em " + Math.ceil(remaining / 60) + " minuto(s).";
         }, 1000);
+
+        if (currentPairingId) {
+          const thisPairingId = currentPairingId;
+          pairPolling = setInterval(async () => {
+            if (currentPairingId !== thisPairingId) return;
+            try {
+              const status = await api(
+                "/api/mobile/pairing/" + encodeURIComponent(thisPairingId),
+              );
+              if (currentPairingId !== thisPairingId) return;
+              if (status.status === "claimed") {
+                endPairing("✓ Celular conectado com sucesso! O Radar já pode sincronizar.");
+                await loadStatus();
+              } else if (status.status !== "pending") {
+                endPairing("Esse pareamento não está mais disponível. Gere outro QR.");
+              }
+            } catch {
+              // Connection interruptions do not invalidate a short-lived QR.
+            }
+          }, 3000);
+        }
       } catch (error) {
         alert(error.message);
       } finally {

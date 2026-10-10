@@ -3256,3 +3256,30 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .radar-tab:focus-v
   resize: vertical;
 }
 #copyDesktopUpdateCommand { justify-self: start; }
+
+/* Mobile pairing shortcut in Radar Desktop navigation */
+.mobile-nav-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 13px;
+  margin-left: auto;
+  border-radius: 14px;
+  color: #c8f7d8;
+  background: rgba(115,247,162,.08);
+  border: 1px solid rgba(115,247,162,.22);
+  text-decoration: none;
+  font-size: .83rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.mobile-nav-link:hover,
+.mobile-nav-link:focus-visible {
+  color: #0b0d10;
+  background: #9aefb1;
+}
+.mobile-nav-link[hidden] { display:none!important; }
+@media(max-width:600px) {
+  .mobile-nav-link { margin-left:0; width:100%; }
+}

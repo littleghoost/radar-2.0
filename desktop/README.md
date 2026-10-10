@@ -189,3 +189,10 @@ o script `-AutoInstall` tenta encontrar a instalação atual do Radar e iniciar
 `radar-2-0-desktop.exe --background` automaticamente, restaurando o processo
 local de monitoramento. Se não puder identificar o executável ou a abertura
 falhar, ele informa que a instalação ocorreu e orienta abrir pelo Menu Iniciar.
+
+## v0.2.4 - Radar Mobile QR
+
+Adiciona atalho Conectar celular à navegação do Desktop, validação automática de
+pareamento (QR removido após uso/expiração) e recuperação de execuções antigas
+em estado running ao iniciar o backend Desktop após reinício inesperado.
+O APK Android beta é compilado separadamente pelo workflow Android.

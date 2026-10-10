@@ -3538,6 +3538,20 @@ $("#internationalCostForm")?.addEventListener(
   },
 );
 
+async function loadMobileNavLink() {
+  const link = $("#mobileNavLink");
+  if (!link) return;
+  try {
+    const status = await api("/api/mobile/status");
+    link.hidden = !status.enabled;
+    link.title = status.relay_ok
+      ? "Abrir QR Code e gerenciar celulares conectados"
+      : "Abrir configuração do Radar Mobile";
+  } catch {
+    link.hidden = true;
+  }
+}
+
 /* =========================
    ATUALIZAÇÕES DO DESKTOP
 ========================= */
@@ -3775,6 +3789,7 @@ $("#runBackgroundNow")?.addEventListener("click", async () => {
     await loadListings();
     await Promise.all([
       loadDesktopSettings(),
+      loadMobileNavLink(),
       loadDesktopUpdateStatus(),
       loadInternationalCostSettings(),
       loadSemanticStatus(),
