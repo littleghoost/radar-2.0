@@ -16,7 +16,7 @@
 
     <header class="topbar">
       <div>
-        <span class="eyebrow"> LOCAL • MVP 0.1 </span>
+        <span class="eyebrow"> RADAR 2.0 • GARIMPO INTELIGENTE </span>
 
         <h1>RADAR 2.0</h1>
 
@@ -89,6 +89,7 @@
               <span class="eyebrow"> BUSCAS </span>
 
               <h2>Seus radares</h2>
+              <p class="section-hint">Selecione um radar para filtrar os anúncios ou rode uma nova busca.</p>
             </div>
           </div>
 
@@ -103,6 +104,7 @@
               <span class="eyebrow"> FEED </span>
 
               <h2>Anúncios</h2>
+              <p class="section-hint">Achados individuais, organizados por prioridade.</p>
             </div>
 
             <div class="listing-actions">
@@ -158,6 +160,20 @@
             </select>
           </div>
 
+          <div class="feed-toolbar" aria-live="polite">
+            <div class="feed-toolbar-status">
+              <span class="feed-live-dot" aria-hidden="true"></span>
+              <span id="listingResultsInfo">Carregando anúncios...</span>
+            </div>
+            <div class="feed-toolbar-actions">
+              <button id="resetListingFilters" type="button" class="secondary compact">Limpar filtros</button>
+              <button id="toggleListingView" type="button" class="secondary compact" aria-pressed="false">☷ Lista compacta</button>
+            </div>
+          </div>
+          <div id="feedLoading" class="feed-loading" hidden>
+            <div class="feed-loading-track"><span></span></div>
+            <span>Atualizando resultados...</span>
+          </div>
           <div id="inboxSummary" class="inbox-summary"></div>
 
           <section id="catalogPanel" class="catalog-panel" hidden>
@@ -170,6 +186,7 @@
               <strong id="catalogCount" class="catalog-count">0</strong>
             </div>
             <div id="catalogDiscoveries" class="catalog-grid"></div>
+            <p class="catalog-disclaimer">Pistas servem para identificar modelos. Confira o anúncio individual antes de avaliar preço ou disponibilidade.</p>
           </section>
 
           <div class="bulk-actions" id="bulkActions">
@@ -473,6 +490,14 @@
           <button type="button" class="icon-btn close-modal">×</button>
         </div>
 
+        <div class="radar-tabs" role="tablist" aria-label="Etapas do radar">
+          <button type="button" class="radar-tab active" data-radar-step="basico" role="tab" aria-selected="true">1. Busca</button>
+          <button type="button" class="radar-tab" data-radar-step="criterios" role="tab" aria-selected="false">2. Critérios</button>
+          <button type="button" class="radar-tab" data-radar-step="visual" role="tab" aria-selected="false">3. Imagem e IA</button>
+          <button type="button" class="radar-tab" data-radar-step="alertas" role="tab" aria-selected="false">4. Alertas</button>
+        </div>
+        <section class="radar-step active" data-radar-panel="basico"  >
+          <p class="radar-step-description">Busca e orçamento</p>
         <label>
           Nome
 
@@ -489,6 +514,46 @@
           />
         </label>
 
+        <div class="three-cols">
+          <label>
+            Preço máximo
+
+            <input
+              name="max_price"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="150"
+            />
+          </label>
+
+          <label>
+            Moeda do teto
+            <select name="budget_currency">
+              <option value="BRL" selected>BRL — R$</option>
+              <option value="USD">USD — US$</option>
+              <option value="EUR">EUR — €</option>
+              <option value="GBP">GBP — £</option>
+              <option value="JPY">JPY — ¥</option>
+            </select>
+          </label>
+
+          <label>
+            Categoria
+
+            <select name="category">
+              <option value="roupas">Roupas</option>
+
+              <option value="cameras">Câmeras</option>
+
+              <option value="geral">Geral</option>
+            </select>
+          </label>
+        </div>
+
+        </section>
+        <section class="radar-step" data-radar-panel="criterios" hidden>
+          <p class="radar-step-description">Regras e planejamento</p>
         <div class="visual-radar-box criteria-builder">
           <div>
             <span class="eyebrow"> CRITÉRIOS DO RADAR </span>
@@ -575,6 +640,9 @@
           </div>
         </div>
 
+        </section>
+        <section class="radar-step" data-radar-panel="visual" hidden>
+          <p class="radar-step-description">Referência visual e IA</p>
         <div class="visual-radar-box">
           <div>
             <span class="eyebrow"> RADAR POR IMAGEM </span>
@@ -629,6 +697,9 @@
           </div>
         </div>
 
+        </section>
+        <section class="radar-step" data-radar-panel="alertas" hidden>
+          <p class="radar-step-description">Notificações inteligentes</p>
         <div class="visual-radar-box">
           <div>
             <span class="eyebrow"> ALERTAS INTELIGENTES </span>
@@ -674,44 +745,12 @@
           </div>
         </div>
 
-        <div class="three-cols">
-          <label>
-            Preço máximo
-
-            <input
-              name="max_price"
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="150"
-            />
-          </label>
-
-          <label>
-            Moeda do teto
-            <select name="budget_currency">
-              <option value="BRL" selected>BRL — R$</option>
-              <option value="USD">USD — US$</option>
-              <option value="EUR">EUR — €</option>
-              <option value="GBP">GBP — £</option>
-              <option value="JPY">JPY — ¥</option>
-            </select>
-          </label>
-
-          <label>
-            Categoria
-
-            <select name="category">
-              <option value="roupas">Roupas</option>
-
-              <option value="cameras">Câmeras</option>
-
-              <option value="geral">Geral</option>
-            </select>
-          </label>
-        </div>
-
+        </section>
+        <div class="radar-modal-footer">
+          <span>As configurações das outras abas também serão salvas.</span>
+          <button type="button" class="secondary close-modal">Cancelar</button>
         <button class="primary wide" id="radarSubmitButton" type="submit">Criar radar</button>
+        </div>
       </form>
     </dialog>
 
@@ -919,6 +958,7 @@
        SCRIPT
   ========================== -->
 
+<div id="toastRegion" class="toast-region" role="status" aria-live="polite" aria-atomic="false"></div>
     <script src="app.js"></script>
   </body>
 </html>

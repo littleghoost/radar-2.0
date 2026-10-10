@@ -10,6 +10,58 @@ const state = {
 
 const $ = (selector) => document.querySelector(selector);
 
+function notify(message, variant = "success") {
+  const region = $("#toastRegion");
+  if (!region) return;
+  const toast = document.createElement("div");
+  toast.className = "radar-toast " + (variant === "error" ? "error" : "success");
+  toast.setAttribute("role", variant === "error" ? "alert" : "status");
+  toast.textContent = String(message);
+  region.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add("leaving");
+    setTimeout(() => toast.remove(), 250);
+  }, 3800);
+  while (region.children.length > 3) region.firstElementChild.remove();
+}
+
+function setRadarStep(name) {
+  const modal = $("#radarModal");
+  if (!modal) return;
+  modal.querySelectorAll("[data-radar-step]").forEach((tab) => {
+    const selected = tab.dataset.radarStep === name;
+    tab.classList.toggle("active", selected);
+    tab.setAttribute("aria-selected", String(selected));
+  });
+  modal.querySelectorAll("[data-radar-panel]").forEach((panel) => {
+    const selected = panel.dataset.radarPanel === name;
+    panel.hidden = !selected;
+    panel.classList.toggle("active", selected);
+  });
+}
+
+document.querySelectorAll("[data-radar-step]").forEach((tab) => {
+  tab.addEventListener("click", () => setRadarStep(tab.dataset.radarStep));
+});
+
+$("#radarForm")?.addEventListener("invalid", (event) => {
+  const parent = event.target.closest("[data-radar-panel]");
+  if (parent) setRadarStep(parent.dataset.radarPanel);
+}, true);
+
+let listingRequestId = 0;
+function setFeedLoading(loading) {
+  const bar = $("#feedLoading");
+  if (bar) bar.hidden = !loading;
+  const grid = $("#listingGrid");
+  if (grid) grid.setAttribute("aria-busy", String(loading));
+}
+function updateFeedCount(count) {
+  const label = $("#listingResultsInfo");
+  if (label) label.textContent = count === 1 ? "1 anúncio encontrado" : `${count} anúncios encontrados`;
+}
+
+
 function safeExternalUrl(value) {
   try {
     const url = new URL(String(value || ""));
@@ -95,6 +147,17 @@ document.addEventListener("click", (event) => {
     "a[data-external-url]",
   );
   if (!link) return;
+
+  const isTauri = Boolean(
+    window.__TAURI__ ||
+    window.__TAURI_INTERNALS__,
+  );
+
+  if (!isTauri) {
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    return;
+  }
 
   event.preventDefault();
   openExternalUrl(
@@ -211,6 +274,7 @@ function updateBulkActions() {
   );
   const count = state.selectedListings.size;
   const hasSelection = count > 0;
+  $("#bulkActions")?.classList.toggle("has-selection", hasSelection);
 
   [
     "#deleteSelectedListings",
@@ -414,7 +478,10 @@ function openSelectedLinks() {
   }
 
   selected.forEach((listing) => {
-    if (listing.url) {
+    if (!listing.url) return;
+    if (!window.__TAURI__ && !window.__TAURI_INTERNALS__) {
+      window.open(safeExternalUrl(listing.url), "_blank", "noopener,noreferrer");
+    } else {
       openExternalUrl(listing.url);
     }
   });
@@ -474,6 +541,7 @@ function resetRadarFormForCreate() {
       '<div class="empty">Salve o radar para gerar o plano de busca.</div>';
   }
   if (manualQuery) manualQuery.value = "";
+  setRadarStep("basico");
 
   const visualHistory = $("#visualReferenceHistory");
   if (visualHistory) {
@@ -924,12 +992,11 @@ async function loadRadars() {
   if (!state.radars.length) {
     radarList.innerHTML = `
 
-      <div class="empty">
-
-        Nenhum radar ainda.
-
-        Crie o primeiro.
-
+      <div class="empty empty-state radar-empty">
+        <div class="empty-state-icon" aria-hidden="true">⌕</div>
+        <strong>Seu primeiro radar começa aqui</strong>
+        <span>Configure o que deseja garimpar e deixe as buscas organizadas.</span>
+        <button class="primary" type="button" onclick="openNewRadarModal()">Criar meu radar</button>
       </div>
 
     `;
@@ -1081,6 +1148,9 @@ async function loadRadars() {
                   </button>
 
 
+                  <details class="card-more">
+                    <summary>Mais opções do radar <span aria-hidden="true">⌄</span></summary>
+                    <div class="card-more-buttons">
                   <button
 
                     class="secondary"
@@ -1136,6 +1206,9 @@ async function loadRadars() {
 
                   </button>
 
+                    </div>
+                  </details>
+
                 </div>
 
               </article>
@@ -1144,6 +1217,10 @@ async function loadRadars() {
       })
       .join("");
   }
+
+  document.querySelectorAll(".radar-card .card-more").forEach((details) => {
+    details.addEventListener("click", (event) => event.stopPropagation());
+  });
 
   document.querySelectorAll(".radar-card").forEach((card) => {
     card.onclick = () => {
@@ -1642,6 +1719,7 @@ async function editRadar(id) {
       : "Escolher imagem";
   }
 
+  setRadarStep("basico");
   radarModal.showModal();
   loadSearchPlan(radar.id);
   loadVisualReferenceHistory(radar.id);
@@ -1737,12 +1815,13 @@ async function loadCatalogDiscoveries(radarId = "") {
                 class="catalog-open external-link"
                 href="${escapeAttr(item.url)}"
                 data-external-url="${escapeAttr(item.url)}"
-                rel="noopener"
+                rel="noopener noreferrer"
+                target="_blank"
               >
                 Abrir no Mercado Livre
                 <span aria-hidden="true">↗</span>
               </a>
-            ` : ""}
+            ` : `<span class="catalog-link-missing">Link do catálogo não disponível</span>`}
           </div>
         </article>
       `;
@@ -1755,6 +1834,9 @@ async function loadCatalogDiscoveries(radarId = "") {
 ========================= */
 
 async function loadListings() {
+  const requestId = ++listingRequestId;
+  setFeedLoading(true);
+  try {
   const params = new URLSearchParams();
 
   const radar = $("#radarFilter").value;
@@ -1767,7 +1849,7 @@ async function loadListings() {
     params.set("radar_id", radar);
   }
 
-  if (status) {
+  if (status && status !== "todos") {
     params.set("status", status);
   }
 
@@ -1778,6 +1860,7 @@ async function loadListings() {
   const fetchedListings = await api(`/api/listings?${params.toString()}`);
 
   await loadCatalogDiscoveries(radar).catch(() => {});
+  if (requestId !== listingRequestId) return;
 
   renderInboxSummary(fetchedListings);
 
@@ -1847,6 +1930,8 @@ async function loadListings() {
   );
 
   const allListings = await api("/api/listings");
+  if (requestId !== listingRequestId) return;
+  updateFeedCount(state.listings.length);
 
   $("#statListings").textContent = allListings.length;
 
@@ -1859,10 +1944,10 @@ async function loadListings() {
   if (!state.listings.length) {
     grid.innerHTML = `
 
-      <div class="empty">
-
-        Nenhum anúncio encontrado.
-
+      <div class="empty empty-state">
+        <div class="empty-state-icon" aria-hidden="true">⌁</div>
+        <strong>Nenhum anúncio por aqui</strong>
+        <span>Ajuste os filtros ou rode um radar para buscar novos achados.</span>
       </div>
 
     `;
@@ -2146,6 +2231,9 @@ async function loadListings() {
                   </button>
 
 
+                  <details class="card-more">
+                    <summary>Gerenciar anúncio <span aria-hidden="true">⌄</span></summary>
+                    <div class="card-more-buttons">
                   <button
 
                     class="secondary"
@@ -2219,6 +2307,9 @@ async function loadListings() {
 
                   </button>
 
+                    </div>
+                  </details>
+
                 </div>
 
               </div>
@@ -2230,6 +2321,15 @@ async function loadListings() {
     .join("");
 
   updateBulkActions();
+  } catch (error) {
+    if (requestId === listingRequestId) {
+      const grid = $("#listingGrid");
+      if (grid) grid.innerHTML = `<div class="empty empty-state"><strong>Não foi possível carregar os anúncios.</strong><span>Tente atualizar os resultados.</span><button class="secondary" type="button" onclick="loadListings()">Tentar de novo</button></div>`;
+      notify(error.message || "Falha ao carregar anúncios", "error");
+    }
+  } finally {
+    if (requestId === listingRequestId) setFeedLoading(false);
+  }
 }
 
 $("#selectAllListings")?.addEventListener("change", (event) => {
@@ -2388,6 +2488,7 @@ $("#radarForm").onsubmit = async (event) => {
 
     await loadRadars();
     await loadListings();
+    notify(editingRadarId ? "Radar atualizado." : "Radar criado com sucesso.");
   } catch (err) {
     if (submitButton) {
       submitButton.disabled = false;
@@ -2430,9 +2531,7 @@ $("#listingForm").onsubmit = async (event) => {
 
     await loadRadars();
 
-    if (["interessante", "descartado"].includes(status)) {
-      await loadPreferenceStatus();
-    }
+    notify("Anúncio salvo no Radar.");
   } catch (err) {
     alert(err.message);
   }
@@ -2543,6 +2642,24 @@ $("#statusFilter").onchange = loadListings;
 $("#inboxFilter").onchange = loadListings;
 
 $("#sortFilter").onchange = loadListings;
+
+$("#resetListingFilters")?.addEventListener("click", () => {
+  ["#radarFilter", "#inboxFilter", "#searchInput"].forEach((selector) => {
+    const input = $(selector);
+    if (input) input.value = "";
+  });
+  $("#statusFilter").value = "todos";
+  $("#sortFilter").value = "default";
+  state.activeRadar = "";
+  loadRadars();
+  loadListings();
+});
+$("#toggleListingView")?.addEventListener("click", (event) => {
+  const button = event.currentTarget;
+  const compact = $("#listingGrid").classList.toggle("compact-view");
+  button.setAttribute("aria-pressed", String(compact));
+  button.textContent = compact ? "▦ Ver cards" : "☷ Lista compacta";
+});
 
 /* =========================
    PESQUISA
