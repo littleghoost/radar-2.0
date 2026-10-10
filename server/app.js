@@ -148,6 +148,8 @@ app.post("/logout", (_req, res) => {
 app.use((req, res, next) => {
   if (!authEnabled()) return next();
   if (req.path === "/api/health") return next();
+  // Android verifies the app's signing certificate without login or cookies.
+  if (req.path === "/.well-known/assetlinks.json") return next();
   if (req.path === "/auth/mercadolivre/callback") return next();
   if (req.path === "/webhooks/ebay/marketplace-account-deletion") return next();
   if (req.path.startsWith("/bridge/")) return next();
@@ -310,6 +312,7 @@ app.get("/.well-known/assetlinks.json", (_req, res) => {
   res.setHeader("Cache-Control", "public, max-age=300");
   res.sendFile(
     path.join(__dirname, "..", "public", ".well-known", "assetlinks.json"),
+    { dotfiles: "allow" },
     (error) => {
       if (error && !res.headersSent) {
         res.status(404).json({ error: "Associação Android indisponível." });
