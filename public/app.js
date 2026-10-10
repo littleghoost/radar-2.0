@@ -10,6 +10,98 @@ const state = {
 
 const $ = (selector) => document.querySelector(selector);
 
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    if (!["http:", "https:"].includes(url.protocol)) {
+      return null;
+    }
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+async function openExternalUrl(value) {
+  const url = safeExternalUrl(value);
+  if (!url) {
+    alert("Link externo inválido.");
+    return false;
+  }
+
+  const tauri = window.__TAURI__;
+  const isTauri = Boolean(
+    tauri ||
+    window.__TAURI_INTERNALS__,
+  );
+
+  try {
+    if (tauri?.opener?.openUrl) {
+      await tauri.opener.openUrl(url);
+      return true;
+    }
+
+    if (tauri?.core?.invoke) {
+      await tauri.core.invoke(
+        "plugin:opener|open_url",
+        {
+          url,
+          with: null,
+        },
+      );
+      return true;
+    }
+
+    if (
+      window.__TAURI_INTERNALS__?.invoke
+    ) {
+      await window.__TAURI_INTERNALS__.invoke(
+        "plugin:opener|open_url",
+        {
+          url,
+          with: null,
+        },
+      );
+      return true;
+    }
+  } catch (error) {
+    console.warn(
+      "Falha ao abrir pelo Tauri opener:",
+      error,
+    );
+  }
+
+  if (isTauri) {
+    alert(
+      "Não consegui abrir o navegador externo. O link foi copiado para você.",
+    );
+    await navigator.clipboard
+      ?.writeText(url)
+      .catch(() => {});
+    return false;
+  }
+
+  const opened = window.open(
+    url,
+    "_blank",
+    "noopener,noreferrer",
+  );
+
+  return Boolean(opened);
+}
+
+document.addEventListener("click", (event) => {
+  const link = event.target.closest(
+    "a[data-external-url]",
+  );
+  if (!link) return;
+
+  event.preventDefault();
+  openExternalUrl(
+    link.dataset.externalUrl || link.href,
+  );
+});
+
 const radarModal = $("#radarModal");
 
 const listingModal = $("#listingModal");
@@ -73,17 +165,25 @@ function renderInboxSummary(listings) {
     if (counts[tier] !== undefined) counts[tier] += 1;
   });
 
+  const activeTier =
+    $("#inboxFilter")?.value || "";
+
   summary.innerHTML = Object.entries(counts)
-    .map(([tier, count]) => `
-      <button
-        type="button"
-        class="inbox-summary-chip ${tier}"
-        onclick="setInboxFilter('${tier}')"
-      >
-        <span>${inboxTierLabel(tier)}</span>
-        <strong>${count}</strong>
-      </button>
-    `)
+    .map(([tier, count]) => {
+      const active = activeTier === tier;
+
+      return `
+        <button
+          type="button"
+          class="inbox-summary-chip ${tier} ${active ? "active" : ""}"
+          onclick="setInboxFilter('${tier}')"
+          aria-pressed="${active ? "true" : "false"}"
+          title="${active ? "Remover filtro" : `Filtrar por ${inboxTierLabel(tier)}`}">
+          <span>${inboxTierLabel(tier)}</span>
+          <strong>${count}</strong>
+        </button>
+      `;
+    })
     .join("");
 }
 
@@ -315,7 +415,7 @@ function openSelectedLinks() {
 
   selected.forEach((listing) => {
     if (listing.url) {
-      window.open(listing.url, "_blank", "noopener,noreferrer");
+      openExternalUrl(listing.url);
     }
   });
 }
@@ -1619,14 +1719,31 @@ async function loadCatalogDiscoveries(radarId = "") {
 
       return `
         <article class="catalog-card">
-          <strong>${escapeHtml(item.title)}</strong>
-          <div class="catalog-meta">
-            ${item.external_id ? `<span>${escapeHtml(item.external_id)}</span>` : ""}
-            ${item.domain_id ? `<span>${escapeHtml(item.domain_id)}</span>` : ""}
-            ${item.radar_name ? `<span>${escapeHtml(item.radar_name)}</span>` : ""}
+          <div class="catalog-card-main">
+            <div class="catalog-symbol" aria-hidden="true">◇</div>
+            <div class="catalog-copy">
+              <strong class="catalog-title">${escapeHtml(item.title)}</strong>
+              <div class="catalog-meta">
+                <span class="catalog-kind">Produto de catálogo</span>
+                ${item.radar_name ? `<span>${escapeHtml(item.radar_name)}</span>` : ""}
+                ${item.external_id ? `<span class="catalog-id">${escapeHtml(item.external_id)}</span>` : ""}
+              </div>
+            </div>
           </div>
-          ${query ? `<small class="muted">${query}</small>` : ""}
-          ${item.url ? `<a href="${escapeAttr(item.url)}" target="_blank" rel="noopener">Abrir produto de catálogo</a>` : ""}
+          <div class="catalog-card-foot">
+            ${query ? `<span class="catalog-query">${query}</span>` : "<span></span>"}
+            ${item.url ? `
+              <a
+                class="catalog-open external-link"
+                href="${escapeAttr(item.url)}"
+                data-external-url="${escapeAttr(item.url)}"
+                rel="noopener"
+              >
+                Abrir no Mercado Livre
+                <span aria-hidden="true">↗</span>
+              </a>
+            ` : ""}
+          </div>
         </article>
       `;
     })
@@ -1990,11 +2107,12 @@ async function loadListings() {
                     class="
                       primary
                       wide-action
+                      external-link
                     "
 
                     href="${escapeAttr(listing.url)}"
 
-                    target="_blank"
+                    data-external-url="${escapeAttr(listing.url)}"
 
                     rel="noreferrer"
 
@@ -2568,7 +2686,7 @@ async function loadActivity() {
     list.innerHTML = events
       .map((event) => {
         const link = event.listing_url
-          ? `<a href="${escapeAttr(event.listing_url)}" target="_blank" rel="noopener">Abrir anúncio</a>`
+          ? `<a class="external-link" href="${escapeAttr(event.listing_url)}" data-external-url="${escapeAttr(event.listing_url)}" rel="noopener">Abrir anúncio ↗</a>`
           : "";
 
         return `
