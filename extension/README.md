@@ -1,4 +1,4 @@
-# Radar 2.0 Bridge 0.4.1 (desenvolvimento)
+# Radar 2.0 Bridge 0.4.2 (desenvolvimento)
 
 Extensão Manifest V3 para Opera GX, Chrome e outros navegadores Chromium.
 Envia metadados de anúncios individuais para o Radar Desktop em
