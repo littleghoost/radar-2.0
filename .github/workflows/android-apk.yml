@@ -46,18 +46,15 @@ jobs:
           RADAR_ANDROID_STORE_PASSWORD: ${{ secrets.RADAR_ANDROID_STORE_PASSWORD }}
         run: |
           set -euo pipefail
-          if [[ -n "$RADAR_ANDROID_KEYSTORE_B64" && -n "$RADAR_ANDROID_STORE_PASSWORD" ]]; then
-            KEYSTORE="$RUNNER_TEMP/radar-mobile-signing.p12"
-            printf '%s' "$RADAR_ANDROID_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
-            chmod 600 "$KEYSTORE"
-            echo "RADAR_ANDROID_KEYSTORE_FILE=$KEYSTORE" >> "$GITHUB_ENV"
-            echo "Stable Android signing enabled (private key hidden)."
-          elif [[ -n "$RADAR_ANDROID_KEYSTORE_B64" || -n "$RADAR_ANDROID_STORE_PASSWORD" ]]; then
-            echo "::error::Android signing is only partially configured. Set both GitHub Secrets."
+          if [[ -z "$RADAR_ANDROID_KEYSTORE_B64" || -z "$RADAR_ANDROID_STORE_PASSWORD" ]]; then
+            echo "::error::Missing one or both permanent Android signing GitHub Secrets."
             exit 1
-          else
-            echo "::warning::Signing secrets unavailable: building an ephemeral debug APK, which cannot be updated in-place."
           fi
+          KEYSTORE="$RUNNER_TEMP/radar-mobile-signing.p12"
+          printf '%s' "$RADAR_ANDROID_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          echo "RADAR_ANDROID_KEYSTORE_FILE=$KEYSTORE" >> "$GITHUB_ENV"
+          echo "Stable Android signing enabled (private key hidden)."
 
       - name: Build Android APK
         working-directory: android
@@ -66,13 +63,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -n "${RADAR_ANDROID_KEYSTORE_FILE:-}" ]]; then
-            gradle --no-daemon assembleRelease
-            echo "RADAR_APK_PATH=android/app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_ENV"
-          else
-            gradle --no-daemon assembleDebug
-            echo "RADAR_APK_PATH=android/app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_ENV"
-          fi
+          test -f "$RADAR_ANDROID_KEYSTORE_FILE"
+          gradle --no-daemon assembleRelease
+          echo "RADAR_APK_PATH=android/app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_ENV"
 
       - name: Verify APK signature and export signing fingerprint
         shell: bash
@@ -81,13 +74,10 @@ jobs:
           SIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           "$SIGNER" verify --print-certs "$RADAR_APK_PATH" | tee android/signing-fingerprint.txt
           grep -q 'Signer #1 certificate SHA-256 digest:' android/signing-fingerprint.txt
-          if [[ -n "${RADAR_ANDROID_KEYSTORE_FILE:-}" ]]; then
-            # This hash is PUBLIC (not the signing key).
-            EXPECTED_CERT="bd7d54692ca2f5f2b9dd92858f71a464810aea3ff0f6f312f635bedc95366391"
-            if ! grep -Fqi "$EXPECTED_CERT" android/signing-fingerprint.txt; then
-              echo "::error::The APK signature differs from Radar's permanent certificate."
-              exit 1
-            fi
+          EXPECTED_CERT="bd7d54692ca2f5f2b9dd92858f71a464810aea3ff0f6f312f635bedc95366391"
+          if ! grep -Fqi "$EXPECTED_CERT" android/signing-fingerprint.txt; then
+            echo "::error::The APK signature differs from Radar's permanent certificate."
+            exit 1
           fi
 
       - name: Upload installable APK

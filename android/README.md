@@ -88,3 +88,15 @@ Se eles não estiverem presentes, o build de debug ainda é efêmero e requer
 desinstalação. Não distribuir esse build como se fosse atualização compatível.
 O servidor oferece assetlinks.json com o certificado debug antigo e o estável
 para não quebrar o QR durante a transição.
+
+## Primeira release permanente (0.1.3)
+
+A partir do cadastro dos dois GitHub Secrets, o CI exige assinatura
+estável e falha explicitamente caso estejam ausentes, em vez de enviar
+um APK debug incompatível. O artifact deve trazer app-release.apk
+assinado com a identidade permanente do Radar Mobile. A assinatura deve
+ter o fingerprint do assetlinks.json publicado.
+
+A primeira migração a partir do APK debug 0.1.2 requer desinstalar a beta
+antiga. Depois dela, novas versões com a mesma assinatura e versionCode
+crescente devem instalar por cima da anterior.
