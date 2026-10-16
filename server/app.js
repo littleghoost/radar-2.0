@@ -20,6 +20,7 @@ const { createDesktopBackupService } = require("./services/desktopBackups");
 const { checkDesktopUpdate } = require("./services/desktopUpdates");
 const { sourceRequestPolicy } = require("./services/sources/requestPolicy");
 const { listingRegion } = require("./services/listingRegion");
+const { inspectListing, inspectBatch } = require("./services/listingPreflight");
 const {
   createSearchPlanner,
 } = require("./services/searchPlanner");
@@ -389,12 +390,11 @@ function run(sql, params = []) {
 
 async function getPreferenceProfile(category = "geral") {
   const rows = await all(
-    `SELECT l.status, l.image_embedding_json
+    `SELECT l.status, l.title, l.image_embedding_json
      FROM listings l
      LEFT JOIN radars r ON r.id = l.radar_id
      WHERE COALESCE(r.category, 'geral') = ?
-       AND l.status IN ('interessante', 'descartado')
-       AND l.image_embedding_json IS NOT NULL`,
+       AND l.status IN ('interessante', 'descartado')`,
     [category || "geral"],
   );
   return buildPreferenceProfile(rows, category || "geral");
@@ -428,7 +428,7 @@ async function rebuildPreferenceScores(category = null) {
       embedding = listing.image_embedding_json ? JSON.parse(listing.image_embedding_json) : null;
     } catch {}
     const profile = profiles.get(listing.category || "geral");
-    const learned = preferenceScore(embedding, profile);
+    const learned = preferenceScore(embedding, profile, listing.title);
     const grail = grailScore(listing.hybrid_score, learned, profile?.total_feedback || 0);
     const radar = radars.get(listing.radar_id);
     const ranking = radar
@@ -1061,7 +1061,7 @@ async function scoreListingForRadar({
   });
 
   const profile = await getPreferenceProfile(radar.category || "geral");
-  const learned = preferenceScore(embedding, profile);
+  const learned = preferenceScore(embedding, profile, title);
   const grail = grailScore(hybrid, learned, profile.total_feedback);
   const criteria = evaluateRadarCriteria(radar, {
     title,
@@ -2878,6 +2878,99 @@ app.get("/api/runs", async (req, res) => {
   }
 });
 
+// Treinamento assistido: voluntário, rotaciona exemplos ainda não avaliados.
+// Nenhum item é ocultado do catálogo só porque a pessoa escolheu "Não sei".
+app.get("/api/training/queue", async (req, res) => {
+  try {
+    const radarId = Number(req.query.radar_id);
+    if (!Number.isInteger(radarId) || radarId <= 0) {
+      return res.status(400).json({error:"Escolha um radar para treinar."});
+    }
+    const radar = await get("SELECT * FROM radars WHERE id = ?", [radarId]);
+    if (!radar) return res.status(404).json({error:"Radar não encontrado."});
+    const limit = Math.min(12, Math.max(1, Number(req.query.limit) || 6));
+    const rows = await all(
+      `SELECT l.* FROM listings l
+       LEFT JOIN listing_training_feedback tf ON tf.listing_id = l.id
+       WHERE l.status = 'novo'
+         AND tf.listing_id IS NULL
+         AND l.image_url IS NOT NULL AND l.image_url <> ''
+         AND (l.radar_id = ? OR l.radar_id IS NULL)
+       ORDER BY CASE WHEN l.image_embedding_json IS NOT NULL THEN 0 ELSE 1 END,
+                CASE WHEN l.radar_id = ? THEN 0 ELSE 1 END,
+                l.created_at DESC, l.id DESC
+       LIMIT 300`,
+      [radarId,radarId],
+    );
+    const eligible = rows.filter(listing => {
+      const check = inspectListing(listing,{radar_category:radar.category});
+      // Itens sem radar precisam ter sinais positivos da categoria.
+      return check.verdict !== "rejected" &&
+        (listing.radar_id === radarId || check.verdict === "candidate");
+    });
+    res.json({
+      radar_id:radarId,
+      pending:eligible.length,
+      items:eligible.slice(0,limit).map(row => ({
+        id:row.id, title:row.title, image_url:row.image_url,
+        platform:row.platform, url:row.url,
+        current_price:row.current_price, currency:row.currency,
+        radar_id:row.radar_id,
+        grail_score:row.grail_score,
+        preference_score:row.preference_score,
+        visual_learning_ready:Boolean(row.image_embedding_json),
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({error:error.message});
+  }
+});
+
+app.post("/api/training/feedback", async (req,res) => {
+  try {
+    const listingId = Number(req.body?.listing_id);
+    const radarId = Number(req.body?.radar_id);
+    const verdict = String(req.body?.verdict || "");
+    if (!Number.isInteger(listingId) || listingId <= 0 ||
+        !Number.isInteger(radarId) || radarId <= 0 ||
+        !["rare","common","unsure"].includes(verdict)) {
+      return res.status(400).json({error:"Avaliação inválida."});
+    }
+    const [radar,listing] = await Promise.all([
+      get("SELECT id,category FROM radars WHERE id = ?",[radarId]),
+      get("SELECT * FROM listings WHERE id = ?",[listingId]),
+    ]);
+    if (!radar || !listing) return res.status(404).json({error:"Peça ou radar não encontrado."});
+    if (listing.radar_id && listing.radar_id !== radarId) {
+      return res.status(409).json({error:"Essa peça pertence a outro radar."});
+    }
+    const existing = await get("SELECT verdict FROM listing_training_feedback WHERE listing_id = ?",[listingId]);
+    if (existing) return res.status(409).json({error:"Essa peça já foi avaliada."});
+    if (listing.status !== "novo") return res.status(409).json({error:"Essa peça já possui avaliação no catálogo."});
+    if (!listing.radar_id &&
+        inspectListing(listing,{radar_category:radar.category}).verdict !== "candidate") {
+      return res.status(400).json({error:"Peça sem categoria suficiente para esse radar."});
+    }
+    await run(`INSERT INTO listing_training_feedback(listing_id,radar_id,verdict)
+      VALUES(?,?,?)`,[listingId,radarId,verdict]);
+    if (verdict !== "unsure") {
+      await run(`UPDATE listings SET radar_id=?, status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+        [radarId,verdict==="rare" ? "interessante" : "descartado",listingId]);
+      await rebuildPreferenceScores(radar.category || "geral");
+    }
+    const profile = await getPreferenceProfile(radar.category || "geral");
+    const counts = await get(`SELECT
+      SUM(CASE WHEN verdict='rare' THEN 1 ELSE 0 END) rare,
+      SUM(CASE WHEN verdict='common' THEN 1 ELSE 0 END) common,
+      SUM(CASE WHEN verdict='unsure' THEN 1 ELSE 0 END) unsure
+      FROM listing_training_feedback WHERE radar_id=?`,[radarId]);
+    res.json({ok:true,listing_id:listingId,verdict,
+      feedback_count:profile.total_feedback,training_counts:counts});
+  } catch(error) {
+    res.status(500).json({error:error.message});
+  }
+});
+
 app.get("/api/preferences/status", async (_req, res) => {
   try {
     const rows = await all("SELECT DISTINCT COALESCE(category, 'geral') AS category FROM radars ORDER BY category");
@@ -2887,8 +2980,10 @@ app.get("/api/preferences/status", async (_req, res) => {
       const profile = await getPreferenceProfile(category);
       profiles.push({
         category,
-        positive_count: profile.positive_count,
-        negative_count: profile.negative_count,
+        positive_count: profile.labeled_positive,
+        negative_count: profile.labeled_negative,
+        visual_positive_count: profile.positive_count,
+        visual_negative_count: profile.negative_count,
         total_feedback: profile.total_feedback,
         active: profile.total_feedback > 0,
       });
@@ -3661,7 +3756,17 @@ app.post("/api/import/assisted", async (req, res) => {
       if (!radar) return res.status(404).json({ error: "Radar não encontrado." });
     }
 
+    const destinationRadar = radarId
+      ? await get("SELECT category FROM radars WHERE id = ?", [radarId])
+      : null;
+    const preflightContext = {
+      source_url: req.body?.source_url,
+      radar_category: destinationRadar?.category || "",
+    };
+
     const summary = {
+      filtered: 0,
+      filtered_reasons: [],
       imported: 0,
       updated: 0,
       auto_assigned: 0,
@@ -3686,6 +3791,15 @@ app.post("/api/import/assisted", async (req, res) => {
         try { parsedUrl = new URL(url); } catch { parsedUrl = null; }
         if (!title || !parsedUrl || !["http:", "https:"].includes(parsedUrl.protocol)) {
           summary.invalid += 1;
+          continue;
+        }
+
+        const inspection = inspectListing(raw, preflightContext);
+        if (inspection.verdict === "rejected" && req.body?.include_rejected !== true) {
+          summary.filtered++;
+          if (summary.filtered_reasons.length < 12) {
+            summary.filtered_reasons.push(inspection.reason);
+          }
           continue;
         }
 
@@ -4055,6 +4169,10 @@ app.post("/api/listings/bulk", async (req, res) => {
     }
 
     if (action === "delete") {
+      await run(
+        `DELETE FROM listing_training_feedback WHERE listing_id IN (${placeholders})`,
+        ids,
+      );
       await run(
         `DELETE FROM price_history WHERE listing_id IN (${placeholders})`,
         ids,
@@ -4509,6 +4627,10 @@ app.delete(
 
   async (req, res) => {
     try {
+      await run(
+        "DELETE FROM listing_training_feedback WHERE listing_id = ?",
+        [req.params.id],
+      );
       await run(
         `
         DELETE FROM price_history

@@ -926,7 +926,7 @@ function createRadarRunner({
           semanticWeight,
         });
 
-        const learnedScore = preferenceScore(candidateEmbedding, preferenceProfile);
+        const learnedScore = preferenceScore(candidateEmbedding, preferenceProfile, item.title);
         const finalGrailScore = grailScore(
           combinedScore,
           learnedScore,

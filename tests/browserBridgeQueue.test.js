@@ -50,7 +50,7 @@ test("Busca confirmada é removida da fila e deixa as próximas disponíveis",as
 test("Falha parcial de importação permanece visível e permite nova tentativa",async()=>{
  const f=backgroundFixture();
  f.context.fetch=async()=>({ok:true,json:async()=>({imported:2,updated:0,failed:1})});
- const result=await f.context.importAutoCapture({items:[{url:'https://www.ebay.com/itm/123456789012'}],source_url:'https://www.ebay.com/sch/i.html'},{});
+ const result=await f.context.importAutoCapture({items:[{title:'Sony Handycam DCR-SR47',url:'https://www.ebay.com/itm/123456789012'}],source_url:'https://www.ebay.com/sch/i.html'},{});
  assert.equal(result.ok,false);assert.equal(result.retryable,true);assert.equal(result.result.imported,2);
  assert.match(f.state.lastAutoCaptureError,/1 anúncio/);
 });

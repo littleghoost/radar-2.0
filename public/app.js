@@ -3459,7 +3459,8 @@ async function loadPreferenceStatus() {
           <strong>${escapeHtml(profile.category || "geral")}</strong>
           <span>${profile.positive_count} interessante(s)</span>
           <span>${profile.negative_count} descartado(s)</span>
-          <span>${profile.total_feedback >= 8 ? "perfil forte" : "aprendendo"}</span>
+          <span>${profile.visual_positive_count + profile.visual_negative_count} com análise visual</span>
+          <span>${profile.total_feedback >= 8 ? "perfil em treinamento" : "aprendendo"}</span>
         </div>
       `)
       .join("");
@@ -3886,3 +3887,110 @@ $("#runBackgroundNow")?.addEventListener("click", async () => {
     alert("Não consegui carregar o Radar: " + err.message);
   }
 })();
+
+let trainerQueue = [];
+let trainerCurrentRadar = null;
+let trainerBusy = false;
+let trainerReviewed = 0;
+
+function showTrainer(message) {
+  $("#trainerContent").textContent = message;
+}
+
+async function refreshTrainerQueue() {
+  const id = Number($("#trainerRadar").value);
+  trainerCurrentRadar = id;
+  if (!id) {
+    showTrainer("Escolha um radar.");
+    return;
+  }
+  showTrainer("Preparando peças para sua avaliação...");
+  const result = await api("/api/training/queue?radar_id=" + id + "&limit=8");
+  if (id !== Number($("#trainerRadar").value) || $("#trainerPanel").hidden) return;
+  trainerQueue = result.items || [];
+  renderTrainer();
+}
+
+function renderTrainer() {
+  const container = $("#trainerContent");
+  const item = trainerQueue[0];
+  if (!item) {
+    container.innerHTML = '<div class="empty"><strong>Nenhuma peça pendente por aqui.</strong><span>Novas capturas aparecerão para você validar.</span></div>';
+    return;
+  }
+  const image = item.image_url ? `<img src="${escapeAttr(listingImageUrl(item.image_url))}" alt="Foto da peça a avaliar">` : "";
+  const link = safeExternalUrl(item.url);
+  container.innerHTML = `
+    <div class="training-card">
+      ${image}
+      <div>
+        <div class="training-meta">Peça ${trainerReviewed+1} nesta sessão · ${trainerQueue.length} carregada(s) · ${escapeHtml(item.platform)}</div>
+        <h4>${escapeHtml(item.title)}</h4>
+        <strong>${money(item.current_price,item.currency)}</strong>
+        <p>Você considera essa peça diferenciada e interessante para o seu radar? Não use só a marca como critério; observe modelagem, gráficos e detalhes.</p>
+        ${item.visual_learning_ready
+          ? '<p>Avaliação visual disponível: sua resposta contribui para o reconhecimento por similaridade.</p>'
+          : '<p>Esta imagem ainda não tem embedding visual. Sua decisão ensina os sinais do título agora; a aprendizagem visual exige processar as fotos.</p>'}
+        ${link ? `<p><a href="${escapeAttr(link)}" data-external-url="${escapeAttr(link)}" class="external-link">Abrir anúncio para examinar</a></p>` : ""}
+        <div class="training-buttons">
+          <button type="button" data-trainer-verdict="rare" class="training-rare">✦ É rara / gostei</button>
+          <button type="button" data-trainer-verdict="common" class="training-common">É comum / não quero</button>
+          <button type="button" data-trainer-verdict="unsure" class="secondary">Não sei · Pular</button>
+        </div>
+      </div>
+    </div>`;
+  container.querySelectorAll("[data-trainer-verdict]").forEach(button=>{
+    button.addEventListener("click",()=>submitTrainerVerdict(item.id,button.dataset.trainerVerdict));
+  });
+}
+
+async function submitTrainerVerdict(listingId,verdict) {
+  if (trainerBusy || trainerCurrentRadar !== Number($("#trainerRadar").value)) return;
+  trainerBusy = true;
+  $("#trainerContent").querySelectorAll("button").forEach(button=>{button.disabled=true;});
+  try {
+    await api("/api/training/feedback",{
+      method:"POST",
+      body:JSON.stringify({listing_id:listingId,radar_id:trainerCurrentRadar,verdict}),
+    });
+    trainerReviewed++;
+    trainerQueue.shift();
+    notify(verdict==="rare" ? "Peça validada como rara." :
+      verdict==="common" ? "Peça marcada como comum." : "Peça pulada sem treinar a IA.");
+    if (trainerQueue.length) renderTrainer();
+    else await refreshTrainerQueue();
+    if (verdict!=="unsure") loadListings().catch(()=>{});
+  } catch(error) {
+    notify(error.message || "Erro ao registrar avaliação.", "error");
+    renderTrainer();
+  } finally {
+    trainerBusy=false;
+  }
+}
+
+$("#openTrainer").addEventListener("click",async()=>{
+  const panel=$("#trainerPanel");
+  panel.hidden=!panel.hidden;
+  $("#openTrainer").setAttribute("aria-expanded",String(!panel.hidden));
+  if (panel.hidden) return;
+  trainerReviewed=0;
+  showTrainer("Carregando seus radares...");
+  try {
+    const radars=await api("/api/radars");
+    const picker=$("#trainerRadar");
+    const previous=picker.value || $("#radarFilter").value;
+    picker.replaceChildren(new Option("Selecione um radar",""),
+      ...radars.map(r=>new Option(r.name,String(r.id))));
+    if (radars.some(r=>String(r.id)===String(previous))) picker.value=String(previous);
+    else if (radars.length) picker.value=String(radars[0].id);
+    await refreshTrainerQueue();
+  } catch(error) {showTrainer(error.message || "Falha ao carregar as peças.");}
+});
+$("#closeTrainer").addEventListener("click",()=>{
+  $("#trainerPanel").hidden=true;
+  $("#openTrainer").setAttribute("aria-expanded","false");
+});
+$("#trainerRadar").addEventListener("change",()=>{
+  trainerReviewed=0;
+  refreshTrainerQueue().catch(error=>showTrainer(error.message || "Falha ao carregar as peças."));
+});

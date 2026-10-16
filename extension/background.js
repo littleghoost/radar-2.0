@@ -1,5 +1,5 @@
 const RADAR_URL = 'http://127.0.0.1:3130';
-importScripts('marketplaces.js', 'browserSearches.js');
+importScripts('marketplaces.js', 'browserSearches.js', 'listingPreflight.js');
 
 async function radarApi(path, options = {}) {
   const response = await fetch(`${RADAR_URL}${path}`, {
@@ -147,6 +147,12 @@ async function importAutoCapture(
   if (!capture?.items?.length) {
     return { ok: true, skipped: true, reason: 'no_items' };
   }
+  const screened = ListingPreflight.inspectBatch(capture.items,{
+    source_url:capture.source_url,
+  });
+  if (!screened.accepted.length) {
+    return {ok:true,skipped:true,reason:'screened_out',filtered:screened.rejected.length};
+  }
 
   try {
     const result = await radarApi('/api/import/assisted', {
@@ -157,7 +163,7 @@ async function importAutoCapture(
         capture_mode: 'auto',
         capture_version: Number(capture.version || 5),
         source_url: capture.source_url,
-        items: capture.items,
+        items: screened.accepted,
       }),
     });
 
@@ -174,6 +180,8 @@ async function importAutoCapture(
       lastAutoCaptureAt: new Date().toISOString(),
       lastAutoCaptureHost: host,
       lastAutoCaptureCount: capture.items.length,
+      lastAutoCaptureFiltered: screened.rejected.length,
+      lastAutoCaptureReview: screened.review.length,
       lastAutoCaptureImported: result.imported || 0,
       lastAutoCaptureUpdated: result.updated || 0,
       lastAutoCaptureAutoAssigned: result.auto_assigned || 0,

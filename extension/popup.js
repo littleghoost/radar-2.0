@@ -56,9 +56,11 @@ async function loadRadars() {
   const radars = await radarApi('/api/radars');
   const select = $('#radarSelect');
   const stored = await chrome.storage.local.get(['lastRadarId']);
-  select.innerHTML = '<option value="">Sem radar</option>' + radars
-    .map((radar) => `<option value="${radar.id}">${escapeHtml(radar.name)}</option>`)
-    .join('');
+  select.replaceChildren(new Option('Sem radar',''),...radars.map(radar=>{
+    const option=new Option(radar.name,String(radar.id));
+    option.dataset.category=radar.category || '';
+    return option;
+  }));
   if (stored.lastRadarId && radars.some((radar) => String(radar.id) === String(stored.lastRadarId))) {
     select.value = String(stored.lastRadarId);
   }
@@ -315,6 +317,7 @@ async function scanPage() {
 
   if (!result?.result) throw new Error('Não consegui ler esta página.');
   lastCapture = result.result;
+  $('#includeRejected').checked = false;
   renderPreview();
 }
 
@@ -333,11 +336,17 @@ function renderPreview() {
     return;
   }
 
-  const items = lastCapture.items;
+  const screened = ListingPreflight.inspectBatch(lastCapture.items,{
+    source_url:lastCapture.source_url,
+    radar_category:$('#radarSelect').selectedOptions[0]?.dataset.category || '',
+  });
+  $('#includeRejectedRow').hidden = !screened.rejected.length;
+  const includeRejected = $('#includeRejected').checked;
+  const items = includeRejected ? lastCapture.items : screened.accepted;
   const images = items.filter((item) => item.image_url).length;
   const prices = items.filter((item) => item.current_price !== null && item.current_price !== undefined).length;
-  preview.innerHTML = `<strong>${items.length} anúncios detectados</strong>${images} com imagem • ${prices} com preço • ${escapeHtml(lastCapture.platform)}`;
-  send.disabled = false;
+  preview.innerHTML = `<strong>${lastCapture.items.length} lidos · ${screened.candidates.length} candidatos · ${screened.review.length} para revisar · ${screened.rejected.length} fora do filtro</strong>${images} com imagem • ${prices} com preço • ${escapeHtml(lastCapture.platform)} · ${items.length} selecionados para enviar`;
+  send.disabled = !items.length;
   send.textContent = `Enviar ${items.length} para o Radar`;
 }
 
@@ -348,16 +357,26 @@ async function sendItems() {
   button.textContent = 'Enviando...';
   try {
     const radarId = $('#radarSelect').value || null;
+    const includeRejected = $('#includeRejected').checked;
+    const selected = ListingPreflight.inspectBatch(lastCapture.items,{
+      source_url:lastCapture.source_url,
+      radar_category:$('#radarSelect').selectedOptions[0]?.dataset.category || '',
+    });
+    if (!includeRejected && !selected.accepted.length) {
+      renderPreview();
+      return;
+    }
     await chrome.storage.local.set({ lastRadarId: radarId });
     const result = await radarApi('/api/import/assisted', {
       method: 'POST',
       body: JSON.stringify({
         radar_id: radarId,
         source_url: lastCapture.source_url,
-        items: lastCapture.items,
+        items: includeRejected ? lastCapture.items : selected.accepted,
+        include_rejected: includeRejected,
       }),
     });
-    $('#preview').innerHTML = `<strong>${result.imported} importado(s) • ${result.updated || 0} atualizado(s)</strong>${result.duplicates} sem mudança • ${result.invalid} inválido(s) • ${result.failed} falha(s)`;
+    $('#preview').innerHTML = `<strong>${result.imported} importado(s) • ${result.updated || 0} atualizado(s)</strong>${selected.rejected.length + (result.filtered || 0)} filtrados • ${result.duplicates} sem mudança • ${result.invalid} inválido(s) • ${result.failed} falha(s)`;
     button.textContent = result.failed > 0
       ? 'Tentar novamente'
       : result.imported > 0 || result.updated > 0 ? 'Enviado ✓' : 'Sem alterações';
@@ -537,3 +556,6 @@ activeTab().then((tab) => {
 }).catch(() => {});
 
 loadRadarStatus();
+
+$('#includeRejected')?.addEventListener('change',renderPreview);
+$('#radarSelect')?.addEventListener('change',()=>{if(lastCapture)renderPreview();});

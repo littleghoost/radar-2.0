@@ -508,6 +508,17 @@ db.serialize(() => {
     },
   );
 
+  // Uma resposta por anúncio: "unsure" não altera o status nem treina o modelo.
+  // O histórico evita repetir a mesma pergunta nas próximas sessões.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS listing_training_feedback (
+      listing_id INTEGER PRIMARY KEY,
+      radar_id INTEGER NOT NULL,
+      verdict TEXT NOT NULL CHECK(verdict IN ('rare','common','unsure')),
+      reviewed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   /* =========================
      EXECUÇÕES DO RADAR
   ========================= */

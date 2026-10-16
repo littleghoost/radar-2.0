@@ -34,51 +34,65 @@ function centroid(vectors = []) {
   return normalize(sum.map((value) => value / count));
 }
 
+const TITLE_STOP = new Set([
+  'calca','jeans','camisa','camiseta','roupa','usado','usada','novo','nova',
+  'vintage','original','rare','raro','size','sz','black','preto','preta',
+  'sony','handycam','filmadora','camera','digital','the','and','for','com',
+  'para','de','da','do','em','brasil','tamanho','item','nice','y2k',
+]);
+function titleTokens(title) {
+  return [...new Set(String(title||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,' ').split(/\s+/)
+    .filter(word=>word.length>=3 && !TITLE_STOP.has(word)))];
+}
 function buildPreferenceProfile(rows = [], category = 'geral') {
-  const positives = [];
-  const negatives = [];
+  const positives = [], negatives = [];
+  const positiveTerms = {}, negativeTerms = {};
+  let labeledPositive = 0, labeledNegative = 0;
   for (const row of rows) {
-    if (!row.image_embedding_json) continue;
+    if (!['interessante','descartado'].includes(row.status)) continue;
+    const isPositive = row.status === 'interessante';
+    if (isPositive) labeledPositive++; else labeledNegative++;
+    const counts = isPositive ? positiveTerms : negativeTerms;
+    for (const word of titleTokens(row.title)) counts[word]=(counts[word]||0)+1;
     let embedding;
-    try {
-      embedding = JSON.parse(row.image_embedding_json);
-    } catch {
-      continue;
-    }
+    try {embedding=JSON.parse(row.image_embedding_json);} catch {continue;}
     if (!Array.isArray(embedding) || !embedding.length) continue;
-    if (row.status === 'interessante') positives.push(embedding);
-    if (row.status === 'descartado') negatives.push(embedding);
+    if (isPositive) positives.push(embedding); else negatives.push(embedding);
   }
-
   return {
     category,
-    positive_count: positives.length,
-    negative_count: negatives.length,
-    total_feedback: positives.length + negatives.length,
-    positive_centroid: centroid(positives),
-    negative_centroid: centroid(negatives),
+    positive_count:positives.length,negative_count:negatives.length,
+    labeled_positive:labeledPositive,labeled_negative:labeledNegative,
+    total_feedback:labeledPositive+labeledNegative,
+    positive_terms:positiveTerms,negative_terms:negativeTerms,
+    positive_centroid:centroid(positives),negative_centroid:centroid(negatives),
   };
 }
-
-function preferenceScore(embedding, profile) {
-  if (!Array.isArray(embedding) || !embedding.length || !profile) return null;
+function textPreferenceScore(title, profile) {
+  const words = titleTokens(title);
+  if (!words.length || !profile?.total_feedback) return null;
+  const pos = words.reduce((v,w)=>v+(profile.positive_terms?.[w]||0),0);
+  const neg = words.reduce((v,w)=>v+(profile.negative_terms?.[w]||0),0);
+  if (!pos && !neg) return null;
+  // Bayesian smoothing avoids extreme scores from a single token.
+  return Math.max(5,Math.min(95,Math.round(50 + 45*(pos-neg)/(pos+neg+2))));
+}
+function preferenceScore(embedding, profile, title = '') {
+  if (!profile) return null;
   const hasPositive = Array.isArray(profile.positive_centroid);
   const hasNegative = Array.isArray(profile.negative_centroid);
-  if (!hasPositive && !hasNegative) return null;
-
-  const positive = hasPositive ? cosine(embedding, profile.positive_centroid) : null;
-  const negative = hasNegative ? cosine(embedding, profile.negative_centroid) : null;
-
-  let score;
-  if (hasPositive && hasNegative) {
-    score = positive * 0.72 + (1 - negative) * 0.28;
-  } else if (hasPositive) {
-    score = positive;
-  } else {
-    score = 1 - negative;
+  if (Array.isArray(embedding) && embedding.length && (hasPositive || hasNegative)) {
+    const positive = hasPositive ? cosine(embedding, profile.positive_centroid) : null;
+    const negative = hasNegative ? cosine(embedding, profile.negative_centroid) : null;
+    const score=hasPositive && hasNegative
+      ? positive*0.72 + (1-negative)*0.28
+      : hasPositive ? positive : 1-negative;
+    return Math.max(0,Math.min(100,Math.round(score*100)));
   }
-
-  return Math.max(0, Math.min(100, Math.round(score * 100)));
+  // Sem embedding, o feedback ainda ensina sinais no título. Isso NÃO é
+  // reconhecimento visual: a interface explica essa limitação ao usuário.
+  return textPreferenceScore(title,profile);
 }
 
 function grailScore(hybridScore, learnedScore, feedbackCount = 0) {
