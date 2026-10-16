@@ -85,3 +85,24 @@ test('Bloqueio durante scroll suspende a coleta, sem perder diagnóstico',async(
   assert.equal(capture.diagnostics.requiresUserAction,'verification_required');
   assert.equal(capture.items.length,1);
 });
+
+test('Auto-Browse padrão prioriza marketplaces brasileiros, sem apagar buscas internacionais salvas',()=>{
+  const f=backgroundFixture();
+  const clothes=Array.from(f.context.autoBrowseSourcesForRadar({category:'roupas'}));
+  const cameras=Array.from(f.context.autoBrowseSourcesForRadar({category:'cameras'}));
+  assert.deepEqual(clothes,['olx','enjoei','mercadolivre']);
+  assert.deepEqual(cameras,['olx','enjoei','mercadolivre']);
+  f.state.autoBrowseQueue.push({id:'depop-saved',source:'depop',source_query:'JNCO',url:'https://www.depop.com/search/?q=JNCO',attempts:0});
+  assert.ok(f.state.autoBrowseQueue.some(job=>job.source==='depop'));
+});
+
+test('Busca BR fica na frente, com uma busca gringa a cada três nacionais',()=>{
+  const f=backgroundFixture();
+  const input=['depop','grailed','olx','enjoei','mercadolivre','vinted','facebook','olx']
+    .map((source,index)=>({source,id:String(index)}));
+  const ordered=Array.from(f.context.prioritizeBrazilianJobs(input));
+  assert.deepEqual(ordered.map(row=>row.source),
+    ['olx','enjoei','mercadolivre','depop','facebook','olx','grailed','vinted']);
+  assert.equal(input[0].source,'depop');
+  assert.equal(ordered.length,input.length);
+});

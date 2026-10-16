@@ -303,10 +303,26 @@ function autoBrowseSourcesForRadar(radar = {}) {
     category === 'clothing' ||
     category === 'fashion'
   ) {
-    return ['olx', 'enjoei', 'mercadolivre', 'depop'];
+    // Fontes brasileiras primeiro. As estrangeiras continuam disponíveis nas buscas salvas.
+    return ['olx', 'enjoei', 'mercadolivre'];
   }
 
-  return ['olx', 'enjoei', 'mercadolivre', 'depop'];
+  return ['olx', 'enjoei', 'mercadolivre'];
+}
+
+function prioritizeBrazilianJobs(jobs) {
+  const brazil = [];
+  const other = [];
+  const domestic = new Set(['olx', 'enjoei', 'mercadolivre', 'facebook', 'repassa', 'ebrecho', 'shopee']);
+  for (const job of jobs) {
+    (domestic.has(job.source) ? brazil : other).push(job);
+  }
+  const ordered = [];
+  while (brazil.length || other.length) {
+    for (let i = 0; i < 3 && brazil.length; i++) ordered.push(brazil.shift());
+    if (other.length) ordered.push(other.shift());
+  }
+  return ordered;
 }
 
 async function buildDueAutoBrowseJobs({
@@ -424,12 +440,13 @@ async function buildDueAutoBrowseJobs({
     if (jobs.length >= 24) break;
   }
 
+  const scheduled = prioritizeBrazilianJobs(jobs);
   await chrome.storage.local.set({
-    autoBrowseQueue: jobs,
+    autoBrowseQueue: scheduled,
     autoBrowseLastEnqueuedByRadar: lastMap,
   });
 
-  return jobs;
+  return scheduled;
 }
 
 function waitForTabComplete(tab, timeoutMs = 30_000) {
