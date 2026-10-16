@@ -1,4 +1,4 @@
-# Radar 2.0 Bridge — extensão Chromium
+# Radar 2.0 Bridge 0.4.0 — extensão Chromium
 
 Extensão Manifest V3 para Chrome/Chromium/Opera GX. Possui captura manual, Auto-Capture em páginas visíveis (ligado por padrão) e Auto-Browse beta (desligado por padrão). Envia anúncios para o Radar Desktop local em `http://127.0.0.1:3130`.
 
@@ -21,6 +21,12 @@ No Chrome/Chromium, o processo é equivalente em `chrome://extensions`.
 5. Confira a quantidade detectada e clique em **Enviar para o Radar**.
 
 A extensão lembra o último radar escolhido.
+
+### Sites com conta e buscas salvas
+
+Abra **Sites e buscas com sua conta** no popup. Faça login no marketplace pelo navegador, abra uma busca com os filtros desejados e use **Ativar coleta neste site**. Escolha o radar, nome e intervalo, e clique em **Salvar busca desta página**. Ligue Auto-Browse para repetir as páginas salvas. Login ou CAPTCHA deixam a busca pendente; conclua no site e use **Continuar** na Bridge.
+
+Reconhece também Mercari EUA/Japão, Vinted, Grailed e Poshmark. Outros sites HTTPS têm captura genérica de cards com título, preço, foto e link. O acesso persistente a um novo domínio é opcional e escolhido individualmente. Não é necessário informar senha ou token de marketplace ao Radar. Compatível com Desktop 0.2.9; ao atualizar a extensão, recarregue também as páginas de marketplace já abertas.
 
 ### Auto-Browse (beta)
 
