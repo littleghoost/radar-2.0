@@ -140,7 +140,9 @@
       }
 
       if (platform === 'Repassa') {
-        return `repassa:${path.toLowerCase().replace(/\/$/, '')}`;
+        const match = path.match(/\/store\/product\/(\d+)(?:\/|$)/i);
+        return match ? `repassa:${match[1]}` :
+          `repassa:${path.toLowerCase().replace(/\/$/, '')}`;
       }
 
       if (platform === 'Mercari') {
@@ -328,7 +330,7 @@
       if (platform === 'Poshmark') return /\/listing\/[^/]+-[a-f\d]{12,}/i.test(path);
       if (platform === 'Shopee') return /-i\.\d+\.\d+(?:\/|$)/i.test(path) ||
         /\/product\/\d+\/\d+(?:\/|$)/i.test(path);
-      if (platform === 'Repassa') return /\/produtos\/[^/]+/.test(path);
+      if (platform === 'Repassa') return /\/produtos\/[^/]+/.test(path) || /\/store\/product\/\d+(?:\/|$)/.test(path);
       // Em sites sem perfil próprio, não confundir buscas e categorias com anúncios.
       // Exigimos um caminho de produto explícito ou slug com identificador.
       if (/\/(?:products?|produtos?|items?|listings?|anuncios?|p|dp|itm)\/[^/]+/.test(path)) return true;
@@ -565,9 +567,10 @@
     if (!items.length) {
       const visible = el => el && (!el.getBoundingClientRect || el.getBoundingClientRect().width > 0);
       const gated = /\/(?:login|signin|sign-in|auth|captcha|challenge)(?:\/|[?#]|$)/i.test(location.href);
+      const trafficChallenge = /\/verify\/traffic\//i.test(location.href);
       const password = document.querySelector?.('input[type="password"]');
       const challenge = document.querySelector?.('iframe[src*="captcha"], iframe[src*="challenges.cloudflare.com"]');
-      diagnostics.requiresUserAction = visible(challenge) || /verifique que voc[eê] [eé] humano|verify you are human|access denied|acesso negado|performing security verification|this website uses a security service|checking your browser|just a moment/i.test(bodyText)
+      diagnostics.requiresUserAction = trafficChallenge || visible(challenge) || /verifique que voc[eê] [eé] humano|verify you are human|access denied|acesso negado|performing security verification|this website uses a security service|checking your browser|just a moment/i.test(bodyText)
         ? 'verification_required' : gated || visible(password) ? 'login_required' : null;
     }
     return {

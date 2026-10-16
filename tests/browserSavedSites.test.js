@@ -168,5 +168,21 @@ test('Shopee e Repassa aceitam somente links individuais, não categorias',()=>{
   assert.equal(ctx.__testListingUrl(repassa,'Repassa'),false); // Another site's links blocked on a Shopee page.
   ctx.location.href='https://www.repassa.com.br/prod';ctx.location.hostname='www.repassa.com.br';
   assert.equal(ctx.__testListingUrl(repassa,'Repassa'),true);
+  assert.equal(ctx.__testListingUrl('https://www.repassa.com.br/store/product/2080729/cal-a-jeans-tng','Repassa'),true);
+  assert.equal(ctx.__testListingUrl('https://www.repassa.com.br/store/sell','Repassa'),false);
   assert.equal(ctx.__testListingUrl('https://www.repassa.com.br/prod','Repassa'),false);
+});
+
+
+test('Shopee: tela de verificação de tráfego suspende a coleta',()=>{
+  const document={body:{innerText:''},documentElement:{},querySelectorAll(){return []},addEventListener(){}};
+  const ctx=vm.createContext({URL,Date,console,
+    location:{href:'https://shopee.com.br/verify/traffic/error?home_url=test',hostname:'shopee.com.br'},
+    document,MutationObserver:class{observe(){}},setTimeout(){},clearTimeout(){},addEventListener(){},
+    chrome:{runtime:{onMessage:{addListener(){}}},storage:{local:{async get(){return {autoCaptureEnabled:false}}},onChanged:{addListener(){}}}}});
+  for(const name of ['marketplaces.js','collector.js'])
+    vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension',name),'utf8'),ctx);
+  const capture=ctx.__radarCollectVisibleListings(100);
+  assert.equal(capture.items.length,0);
+  assert.equal(capture.diagnostics.requiresUserAction,'verification_required');
 });

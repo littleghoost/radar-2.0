@@ -3527,11 +3527,13 @@ function inferBrowserSourceIdentity(platform, url) {
   } else if (platformText.includes("repassa") || lowerUrl.includes("repassa.com.br")) {
     sourceKey = "repassa";
     const pathname = new URL(urlText).pathname;
-    if (/^\/produtos\/[^/]+/.test(pathname)) externalId = pathname.toLowerCase();
+    const match = pathname.match(/^\/store\/product\/(\d+)(?:\/|$)/i);
+    if (match) externalId = match[1];
+    else if (/^\/produtos\/[^/]+/.test(pathname)) externalId = pathname.toLowerCase();
   } else if (platformText.includes("ebrecho") || lowerUrl.includes("ebrecho.com.br")) {
     sourceKey = "ebrecho";
     const pathname = new URL(urlText).pathname;
-    if (/^\/(?:produto|products?|items?)\/[^/]+/.test(pathname)) externalId = pathname.toLowerCase();
+    if (/(?:^|\/)produto\/[^/]+/.test(pathname)) externalId = pathname.toLowerCase();
   } else if (platformText.includes("depop") || lowerUrl.includes("depop.com")) {
     sourceKey = "depop";
     const match = new URL(urlText).pathname.match(
