@@ -21,7 +21,7 @@
 - O modelo melhora a ordenação à medida que recebe feedback; seus exemplos não transformam automaticamente o sistema em um detector visual perfeito.
 
 
-## Aprendizado visual por lotes — Desktop 0.2.13
+## Aprendizado visual por lotes — Desktop 0.2.14
 
 No painel **Treinar IA · Validar peças**, existe o bloco **Aprendizado pelas imagens**.
 Ele usa o modelo CLIP que já vem integrado ao Radar para calcular embeddings sem exigir
@@ -40,3 +40,5 @@ uma foto de referência ou ativar `semantic_enabled` no radar de roupas.
 - A função é manual; **não** baixa centenas de imagens automaticamente ao iniciar o app.
 - Se o modelo CLIP não carregar, a interface informa a falha e o aprendizado textual
   e a validação manual continuam disponíveis.
+
+A versão 0.2.14 ajusta exclusivamente o timeout do teste de carga Windows (100 importações), sem ampliar timeouts na operação do usuário.
