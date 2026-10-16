@@ -1,6 +1,6 @@
 [package]
 name = "radar-2-0-desktop"
-version = "0.2.14"
+version = "0.2.15"
 description = "Radar 2.0 desktop shell"
 authors = ["littleghoost"]
 edition = "2021"

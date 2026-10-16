@@ -544,3 +544,25 @@ test('Status visual por radar e lote proibido em ambiente sem CLIP',async()=>{
   const untouched=await listings(target.id);
   assert.equal(untouched.filter(x=>x.image_embedding_json).length,0);
 });
+
+test("Avaliação de filmadora é bloqueada no radar de roupas, sem alterar registros existentes",async()=>{
+  const radarClothes=await radar({name:"Grails teste",category:"roupas"});
+  const title="Sony Handycam DCR SX 30 Camcorder Y2K";
+  const saved=await importItems(radarClothes.id,[item("wrong-camera",{
+    title,platform:"Vinted",url:"https://www.vinted.pt/items/700009999",
+  })]);
+  assert.equal(saved.imported,1);
+  const row=saved.listings[0];
+  const queue=await api("/api/training/queue?radar_id="+radarClothes.id);
+  assert.ok(!queue.items.some(x=>x.id===row.id));
+  await api("/api/training/feedback","POST",
+    {radar_id:radarClothes.id,listing_id:row.id,verdict:"rare"},400);
+  const untouched=(await listings(radarClothes.id)).find(x=>x.id===row.id);
+  assert.equal(untouched.status,"novo");
+  await api("/api/listings/"+row.id,"PATCH",{status:"interessante"});
+  const excluded=await api("/api/preferences/status");
+  const clothProfile=excluded.profiles.find(x=>x.category==="roupas");
+  assert.ok(clothProfile.excluded_cross_category>=1);
+  const stillSaved=(await listings(radarClothes.id)).find(x=>x.id===row.id);
+  assert.equal(stillSaved.status,"interessante");
+});
