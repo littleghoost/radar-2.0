@@ -1195,6 +1195,20 @@ function registerMobileRelay(app, db) {
         if (Buffer.byteLength(encoded,"utf8") > 512*1024) {
           return res.status(413).json({error:"Página maior que 512 KiB."});
         }
+        // Limpa uploads incompletos antigos sem remover o snapshot já publicado.
+        if (pageIndex === 1) {
+          await dbRun(db,
+            `DELETE FROM mobile_snapshot_pages
+             WHERE desktop_id = ? AND created_at < datetime('now','-2 hours')
+               AND NOT EXISTS (
+                 SELECT 1 FROM mobile_snapshots s
+                 WHERE s.desktop_id = mobile_snapshot_pages.desktop_id
+                   AND json_extract(s.payload_json,'$.snapshot_id') =
+                       mobile_snapshot_pages.snapshot_id
+               )`,
+            [req.mobileDesktop.id]
+          );
+        }
         await dbRun(db,
           `INSERT INTO mobile_snapshot_pages
            (desktop_id, snapshot_id, page_index, payload_json)

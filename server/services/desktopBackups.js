@@ -24,6 +24,8 @@ function createDesktopBackupService({db,dataDir,keep=7,now=()=>new Date()}) {
       if (await fs.stat(target).catch(()=>null)) {
         return {ok:true,skipped:true,reason:"already_backed_up",target};
       }
+      // Recomeça corretamente após interrupção anterior à renomeação.
+      await fs.unlink(partial).catch(()=>{});
       await new Promise((resolve,reject)=>{
         const backup=db.backup(partial);
         // db.backup() apenas inicializa o objeto; copiar páginas exige step().
