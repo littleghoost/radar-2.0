@@ -3335,3 +3335,14 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .radar-tab:focus-v
 .training-buttons .training-common {border:1px solid var(--line-strong);background:var(--panel-raised);color:var(--text);}
 .training-meta {font-size:.76rem;opacity:.65;margin-bottom:9px;}
 @media(max-width:650px){.training-card {grid-template-columns:1fr;}.training-card img {max-width:320px;}}
+
+
+.training-visual-tools {display:flex;flex-wrap:wrap;gap:12px;align-items:center;
+  border:1px solid var(--line-soft);background:rgba(120,120,145,.06);
+  padding:12px;border-radius:12px;margin:10px 0 18px;}
+.training-visual-tools > div {flex:1 1 240px;}
+.training-visual-tools strong {font-size:.82rem;}
+.training-visual-tools p {font-size:.76rem;line-height:1.5;opacity:.8;margin-top:3px;}
+.training-visual-tools label {font-size:.75rem;display:grid;gap:4px;}
+.training-visual-tools select {border-radius:8px;background:var(--panel);color:var(--text);
+  padding:7px;border:1px solid var(--line-soft);}

@@ -20,6 +20,7 @@ const { createDesktopBackupService } = require("./services/desktopBackups");
 const { checkDesktopUpdate } = require("./services/desktopUpdates");
 const { sourceRequestPolicy } = require("./services/sources/requestPolicy");
 const { listingRegion } = require("./services/listingRegion");
+const { downloadTrainingImage } = require("./services/visualTrainingImages");
 const { inspectListing, inspectBatch } = require("./services/listingPreflight");
 const {
   createSearchPlanner,
@@ -2875,6 +2876,83 @@ app.get("/api/runs", async (req, res) => {
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Indexação por lotes dos embeddings CLIP, independente das imagens de
+// referência ou da opção semantic_enabled de cada radar.
+let trainingImageBatchBusy = false;
+
+app.get("/api/training/images/status", async (req,res) => {
+  try {
+    const radarId=Number(req.query.radar_id);
+    if (!Number.isSafeInteger(radarId)||radarId<=0)
+      return res.status(400).json({error:"Radar inválido."});
+    const radar=await get("SELECT id, name FROM radars WHERE id = ?",[radarId]);
+    if (!radar)return res.status(404).json({error:"Radar não encontrado."});
+    const counts=await get(`SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN image_url IS NOT NULL AND image_url <> '' THEN 1 ELSE 0 END) AS with_image,
+      SUM(CASE WHEN image_embedding_json IS NOT NULL THEN 1 ELSE 0 END) AS indexed,
+      SUM(CASE WHEN image_url IS NOT NULL AND image_url <> '' AND image_embedding_json IS NULL THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN status IN ('interessante','descartado') AND image_url IS NOT NULL AND image_url <> '' AND image_embedding_json IS NULL THEN 1 ELSE 0 END) AS reviewed_pending,
+      SUM(CASE WHEN status IN ('interessante','descartado') AND image_embedding_json IS NOT NULL THEN 1 ELSE 0 END) AS reviewed_indexed
+      FROM listings WHERE radar_id = ?`,[radarId]);
+    res.json({radar_id:radarId,...counts,model:semanticStatus(),busy:trainingImageBatchBusy});
+  } catch(error) {res.status(500).json({error:error.message});}
+});
+
+app.post("/api/training/images/batch", async (req,res) => {
+  const radarId=Number(req.body?.radar_id);
+  const afterId=Number(req.body?.after_id ?? 0);
+  const scope=String(req.body?.scope || "reviewed");
+  const amount=Number(req.body?.limit ?? 2);
+  if (!Number.isSafeInteger(radarId)||radarId<=0 ||
+      !Number.isSafeInteger(afterId)||afterId<0 ||
+      !["reviewed","all"].includes(scope) ||
+      !Number.isSafeInteger(amount)||amount<1||amount>3)
+    return res.status(400).json({error:"Parâmetros de processamento inválidos."});
+  if (!semanticStatus().enabled)
+    return res.status(409).json({error:"Aprendizado visual indisponível neste ambiente."});
+  if (trainingImageBatchBusy)
+    return res.status(409).json({error:"Já existe um lote visual em processamento."});
+  trainingImageBatchBusy=true;
+  try {
+    const radar=await get("SELECT id,category FROM radars WHERE id = ?",[radarId]);
+    if (!radar) return res.status(404).json({error:"Radar não encontrado."});
+    const conditions=`radar_id = ? AND id > ? AND image_url IS NOT NULL AND image_url <> ''
+      AND image_embedding_json IS NULL
+      ${scope==="reviewed" ? "AND status IN ('interessante','descartado')" : ""}`;
+    const rows=await all(`SELECT id,image_url FROM listings WHERE ${conditions}
+      ORDER BY id LIMIT ?`,[radarId,afterId,amount]);
+    let processed=0;
+    const failures=[];
+    for (const row of rows) {
+      try {
+        const bytes=await downloadTrainingImage(row.image_url);
+        const vector=await embedImage(bytes);
+        if (!Array.isArray(vector)||vector.length<16||!vector.every(Number.isFinite))
+          throw new Error("O modelo não produziu uma representação válida.");
+        await run(`UPDATE listings SET image_embedding_json=?,
+          updated_at=CURRENT_TIMESTAMP
+          WHERE id=? AND radar_id=? AND image_embedding_json IS NULL`,
+          [JSON.stringify(vector),row.id,radarId]);
+        processed++;
+      } catch(error) {
+        failures.push({id:row.id,reason:String(error?.message||error).slice(0,180)});
+      }
+    }
+    const nextAfterId=rows.at(-1)?.id ?? afterId;
+    const hasMore=Boolean(await get(`SELECT id FROM listings WHERE ${conditions} LIMIT 1`,
+      [radarId,nextAfterId]));
+    if (processed) await rebuildPreferenceScores(radar.category||"geral");
+    res.json({ok:true,radar_id:radarId,scope,processed,failed:failures.length,
+      failures,next_after_id:nextAfterId,has_more:hasMore,
+      checked:rows.length});
+  } catch(error) {
+    res.status(500).json({error:String(error?.message||error)});
+  } finally {
+    trainingImageBatchBusy=false;
   }
 });
 

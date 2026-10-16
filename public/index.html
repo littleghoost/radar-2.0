@@ -194,6 +194,20 @@
               Radar a treinar
               <select id="trainerRadar"></select>
             </label>
+            <div class="training-visual-tools">
+              <div>
+                <strong>Aprendizado pelas imagens</strong>
+                <p id="trainerVisualStatus" aria-live="polite">Escolha um radar para conferir as imagens analisadas.</p>
+              </div>
+              <label>Fotos a processar
+                <select id="trainerVisualScope">
+                  <option value="reviewed">Apenas peças avaliadas</option>
+                  <option value="all">Todas as peças do radar</option>
+                </select>
+              </label>
+              <button id="trainerProcessImages" class="secondary compact" type="button">Processar até 5 fotos</button>
+              <button id="trainerStopImages" class="secondary compact" type="button" hidden>Parar após a atual</button>
+            </div>
             <div id="trainerContent" role="status" aria-live="polite">Escolha um radar para começar.</div>
           </section>
 

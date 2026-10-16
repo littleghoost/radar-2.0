@@ -3888,6 +3888,100 @@ $("#runBackgroundNow")?.addEventListener("click", async () => {
   }
 })();
 
+let trainerVisualBusy = false;
+let trainerVisualStopRequested = false;
+const visualImageCursors = new Map();
+
+async function updateTrainerVisualStatus(message = null) {
+  const label=$("#trainerVisualStatus");
+  const radarId=Number($("#trainerRadar").value);
+  const processButton=$("#trainerProcessImages");
+  if (!radarId) {
+    label.textContent="Selecione um radar para acompanhar o processamento.";
+    processButton.disabled=true;
+    return;
+  }
+  const status=await api("/api/training/images/status?radar_id="+radarId);
+  if (radarId!==Number($("#trainerRadar").value)) return;
+  const count=Number(status.indexed||0);
+  const total=Number(status.with_image||0);
+  const pending=Number(status.pending||0);
+  const reviewedPending=Number(status.reviewed_pending||0);
+  label.textContent=message || (
+    `${count}/${total} fotos analisadas · ${pending} pendentes · ${reviewedPending} avaliações aguardam imagem.` +
+    (status.model?.enabled ? "" : " Modelo visual desativado neste ambiente.")
+  );
+  const available=$("#trainerVisualScope").value==="reviewed" ? reviewedPending : pending;
+  processButton.disabled=trainerVisualBusy || !status.model?.enabled ||
+    (status.busy && !trainerVisualBusy) || !available;
+}
+async function processTrainerVisualImages() {
+  if (trainerVisualBusy) return;
+  const radarId=Number($("#trainerRadar").value);
+  if (!radarId) return;
+  const scope=$("#trainerVisualScope").value;
+  const cursorKey=radarId+":"+scope;
+  let afterId=visualImageCursors.get(cursorKey)||0;
+  let attempted=0,processed=0,failed=0;
+  trainerVisualBusy=true;
+  trainerVisualStopRequested=false;
+  let finalMessage=null;
+  $("#trainerProcessImages").disabled=true;
+  $("#trainerVisualScope").disabled=true;
+  $("#trainerStopImages").disabled=false;
+  $("#trainerStopImages").hidden=false;
+  try {
+    while(attempted<5 && !trainerVisualStopRequested) {
+      $("#trainerVisualStatus").textContent=
+        `Processando imagens: ${attempted}/5 verificadas · ${processed} concluídas. Pode parar após esta foto.`;
+      const page=await api("/api/training/images/batch",{
+        method:"POST",
+        body:JSON.stringify({radar_id:radarId,after_id:afterId,
+          limit:Math.min(2,5-attempted),scope}),
+      });
+      const checked=Number(page.checked||0);
+      attempted+=checked;
+      processed+=Number(page.processed||0);
+      failed+=Number(page.failed||0);
+      afterId=Number(page.next_after_id||afterId);
+      visualImageCursors.set(cursorKey,afterId);
+      if(!page.has_more || !checked) {
+        visualImageCursors.set(cursorKey,0);
+        break;
+      }
+    }
+    if(processed) {
+      await loadListings().catch(()=>{});
+      await refreshTrainerQueue().catch(()=>{});
+    }
+    finalMessage=
+      `Nesta rodada: ${processed} foto(s) processada(s)`+
+      (failed ? `, ${failed} indisponível(is) ou não analisada(s)` : "")+
+      `. ${trainerVisualStopRequested ? "Processamento interrompido." : "Outras fotos podem ser processadas em novos lotes."}`;
+  } catch(error) {
+    finalMessage="Falha no processamento: "+error.message;
+    notify(error.message||"Não foi possível processar as imagens.","error");
+  } finally {
+    trainerVisualBusy=false;
+    $("#trainerStopImages").hidden=true;
+    $("#trainerVisualScope").disabled=false;
+    updateTrainerVisualStatus(finalMessage).catch(()=>{
+      $("#trainerVisualStatus").textContent=finalMessage || "Não consegui consultar as fotos.";
+      $("#trainerProcessImages").disabled=false;
+    });
+  }
+}
+$("#trainerProcessImages")?.addEventListener("click",processTrainerVisualImages);
+$("#trainerStopImages")?.addEventListener("click",()=>{
+  trainerVisualStopRequested=true;
+  $("#trainerStopImages").disabled=true;
+  $("#trainerVisualStatus").textContent="Finalizando a imagem atual…";
+});
+$("#trainerVisualScope")?.addEventListener("change",()=>{
+  visualImageCursors.delete(Number($("#trainerRadar").value)+":"+$("#trainerVisualScope").value);
+  updateTrainerVisualStatus().catch(()=>{});
+});
+
 let trainerQueue = [];
 let trainerCurrentRadar = null;
 let trainerBusy = false;
@@ -3909,6 +4003,9 @@ async function refreshTrainerQueue() {
   if (id !== Number($("#trainerRadar").value) || $("#trainerPanel").hidden) return;
   trainerQueue = result.items || [];
   renderTrainer();
+  updateTrainerVisualStatus().catch(error=>{
+    $("#trainerVisualStatus").textContent=error.message || "Não consegui consultar a IA visual.";
+  });
 }
 
 function renderTrainer() {
@@ -3960,6 +4057,7 @@ async function submitTrainerVerdict(listingId,verdict) {
     if (trainerQueue.length) renderTrainer();
     else await refreshTrainerQueue();
     if (verdict!=="unsure") loadListings().catch(()=>{});
+    updateTrainerVisualStatus().catch(()=>{});
   } catch(error) {
     notify(error.message || "Erro ao registrar avaliação.", "error");
     renderTrainer();
@@ -3991,6 +4089,11 @@ $("#closeTrainer").addEventListener("click",()=>{
   $("#openTrainer").setAttribute("aria-expanded","false");
 });
 $("#trainerRadar").addEventListener("change",()=>{
+  if (trainerVisualBusy) {
+    notify("Termine o lote de imagens antes de mudar de radar.","error");
+    $("#trainerRadar").value=String(trainerCurrentRadar);
+    return;
+  }
   trainerReviewed=0;
   refreshTrainerQueue().catch(error=>showTrainer(error.message || "Falha ao carregar as peças."));
 });
