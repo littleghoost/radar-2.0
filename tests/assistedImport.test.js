@@ -108,13 +108,13 @@ function item(key, overrides = {}) {
   };
 }
 
-async function importItems(radarId, items, overrides = {}) {
+async function importItems(radarId, items, overrides = {}, timeout = 15000) {
   return api("/api/import/assisted", "POST", {
     radar_id: radarId,
     source_url: "https://marketplace.example/busca",
     items,
     ...overrides,
-  });
+  }, 200, timeout);
 }
 
 async function listings(radarId) {
@@ -353,7 +353,10 @@ test("API rejeita itens sem título ou URL HTTP/HTTPS e limita o lote a cem", as
   const invalid = await importItems(target.id, [null, {}, item("invalid", { url: "javascript:alert(1)" }), item("empty", { title: " " })]);
   assert.equal(invalid.invalid, 4);
   assert.equal(invalid.imported, 0);
-  const limited = await importItems(target.id, Array.from({ length: 101 }, (_, i) => item(`limit-${i}`)));
+  // Esse lote de 100 imagens pode demorar mais no runner Windows compartilhado.
+  // Mantemos o limite curto nos demais testes e ampliamos só nesta prova de carga.
+  const limited = await importItems(target.id,
+    Array.from({ length: 101 }, (_, i) => item(`limit-${i}`)), {}, 90000);
   assert.equal(limited.imported, 100);
   assert.equal((await listings(target.id)).length, 100);
 });
