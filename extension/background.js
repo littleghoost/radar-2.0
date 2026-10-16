@@ -2,17 +2,20 @@ const RADAR_URL = 'http://127.0.0.1:3130';
 
 async function radarApi(path, options = {}) {
   const response = await fetch(`${RADAR_URL}${path}`, {
+    ...options,
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {}),
     },
-    ...options,
+    signal: options.signal || AbortSignal.timeout(path === '/api/import/assisted' ? 120_000 : 15_000),
   });
 
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.error || `Radar respondeu ${response.status}`);
+    const error = new Error(data.error || `Radar respondeu ${response.status}`);
+    error.retryable = response.status >= 500 || [408, 429].includes(response.status);
+    throw error;
   }
 
   return data;
@@ -158,6 +161,9 @@ async function importAutoCapture(
     });
 
     let host = capture.platform || 'marketplace';
+    const partialError = Number(result.failed || 0) > 0
+      ? `${result.failed} anúncio(s) não foram salvos. A captura será tentada novamente.`
+      : null;
 
     try {
       host = new URL(sender?.tab?.url || capture.source_url).hostname;
@@ -171,19 +177,19 @@ async function importAutoCapture(
       lastAutoCaptureUpdated: result.updated || 0,
       lastAutoCaptureAutoAssigned: result.auto_assigned || 0,
       lastAutoCapturePriceDrops: result.price_drops || 0,
-      lastAutoCaptureError: null,
+      lastAutoCaptureError: partialError,
     });
 
     await notifyAutoCapture(result).catch(() => {});
 
-    return { ok: true, result };
+    return { ok: !partialError, result, ...(partialError ? {error: partialError, retryable: true} : {}) };
   } catch (error) {
     await chrome.storage.local.set({
       lastAutoCaptureAt: new Date().toISOString(),
       lastAutoCaptureError: error.message || String(error),
     });
 
-    return { ok: false, error: error.message || String(error) };
+    return { ok: false, error: error.message || String(error), retryable: error.retryable !== false };
   }
 }
 
@@ -619,6 +625,7 @@ async function runAutoBrowseJob(job) {
       price_drops:
         result?.result?.price_drops || 0,
       error: result?.error || null,
+      retryable: result?.retryable,
       diagnostics: capture?.diagnostics || null,
       source_url: capture?.source_url || job.url,
     };
@@ -786,19 +793,20 @@ async function processAutoBrowseTick(
     let totalAssigned = 0;
     let job = null;
     let result = null;
+    let autoBrowseDisabled = false;
+    const attemptedJobs = new Set();
 
     while (
       queue.length &&
       jobsTried < maxJobs
     ) {
-      let jobIndex = 0;
+      let jobIndex = queue.findIndex((candidate) => !attemptedJobs.has(candidate.id));
 
       if (preferredSource) {
         const preferredIndex =
           queue.findIndex(
             (candidate) =>
-              candidate.source ===
-              preferredSource,
+              candidate.source === preferredSource && !attemptedJobs.has(candidate.id),
           );
 
         if (preferredIndex >= 0) {
@@ -808,7 +816,10 @@ async function processAutoBrowseTick(
         }
       }
 
+      if (jobIndex < 0) break;
+
       job = queue[jobIndex];
+      attemptedJobs.add(job.id);
       const queueWithoutJob = [
         ...queue.slice(0, jobIndex),
         ...queue.slice(jobIndex + 1),
@@ -835,12 +846,17 @@ async function processAutoBrowseTick(
 
       try {
         result = await runAutoBrowseJob(job);
+        if (!result?.ok && result?.retryable !== false) {
+          throw Object.assign(new Error(result?.error || 'Não consegui salvar a captura.'), {result});
+        }
         queue = queueWithoutJob;
       } catch (error) {
         const attempts =
           Number(job.attempts || 0) + 1;
 
-        if (attempts <= 1 && !force) {
+        if (autoBrowseCancelRequested) {
+          // Closing the worker is cancellation, not a completed search.
+        } else if (attempts <= 1 && error.retryable !== false) {
           queue = [
             ...queueWithoutJob,
             {
@@ -852,7 +868,7 @@ async function processAutoBrowseTick(
           queue = queueWithoutJob;
         }
 
-        result = {
+        result = error.result || {
           ok: false,
           error:
             error?.message || String(error),
@@ -878,7 +894,13 @@ async function processAutoBrowseTick(
         result?.auto_assigned || 0,
       );
 
-      if (autoBrowseCancelRequested) {
+      const latest = await chrome.storage.local.get({autoBrowseEnabled: false});
+      autoBrowseDisabled = !latest.autoBrowseEnabled;
+      if (autoBrowseDisabled) queue = [];
+      // Persist each completed attempt before the service worker can sleep.
+      await chrome.storage.local.set({autoBrowseQueue: queue});
+
+      if (autoBrowseCancelRequested || autoBrowseDisabled) {
         break;
       }
 
@@ -960,7 +982,9 @@ async function processAutoBrowseTick(
       '';
 
     const finalFound = totalFound;
-    const finalMessage = autoBrowseCancelRequested
+    const finalMessage = autoBrowseDisabled
+      ? 'Busca desativada'
+      : autoBrowseCancelRequested
       ? 'Busca cancelada'
       : result?.error
         ? 'Busca interrompida por erro'
@@ -1013,7 +1037,7 @@ async function processAutoBrowseTick(
       lastAutoBrowseRemaining:
         queue.length,
       lastAutoBrowseError:
-        autoBrowseCancelRequested
+        autoBrowseCancelRequested || autoBrowseDisabled
           ? null
           : result.error || null,
       lastAutoBrowseDiagnostics:

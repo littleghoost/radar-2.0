@@ -1305,8 +1305,21 @@ async function reindexVisualRadar(id, button) {
     button.textContent = "Analisando...";
   }
   try {
-    const result = await api(`/api/radars/${id}/reindex-visual`, { method: "POST" });
-    if (button) button.textContent = `${result.analyzed} analisado(s)`;
+    let afterId = 0, throughId, analyzed = 0, failed = 0;
+    let result;
+    do {
+      result = await api(`/api/radars/${id}/reindex-visual`, {
+        method: "POST",
+        body: JSON.stringify({after_id: afterId, through_id: throughId, limit: 50}),
+      });
+      analyzed += result.analyzed;
+      failed += result.failed;
+      throughId = result.through_id;
+      if (result.has_more && result.next_after_id <= afterId) throw new Error("A reanálise não avançou. Tente novamente.");
+      afterId = result.next_after_id;
+      if (button) button.textContent = `${analyzed + failed}/${result.total} analisado(s)`;
+    } while (result.has_more);
+    if (button) button.textContent = `${analyzed} analisado(s)${failed ? ` • ${failed} falha(s)` : ""}`;
     await loadListings();
     setTimeout(() => { if (button) button.textContent = original; }, 1800);
   } catch (err) {

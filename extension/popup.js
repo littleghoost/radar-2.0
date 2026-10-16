@@ -5,8 +5,9 @@ const $ = (selector) => document.querySelector(selector);
 
 async function radarApi(path, options = {}) {
   const response = await fetch(`${RADAR_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    signal: options.signal || AbortSignal.timeout(path === '/api/import/assisted' ? 120_000 : 15_000),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `Radar respondeu ${response.status}`);
@@ -351,7 +352,10 @@ async function sendItems() {
       }),
     });
     $('#preview').innerHTML = `<strong>${result.imported} importado(s) • ${result.updated || 0} atualizado(s)</strong>${result.duplicates} sem mudança • ${result.invalid} inválido(s) • ${result.failed} falha(s)`;
-    button.textContent = result.imported ? 'Enviado ✓' : 'Nada novo';
+    button.textContent = result.failed > 0
+      ? 'Tentar novamente'
+      : result.imported > 0 || result.updated > 0 ? 'Enviado ✓' : 'Sem alterações';
+    if (result.failed > 0) button.disabled = false;
   } catch (error) {
     $('#preview').innerHTML = `<strong>Falha ao importar</strong>${escapeHtml(error.message)}`;
     button.textContent = 'Tentar novamente';

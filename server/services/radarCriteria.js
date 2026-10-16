@@ -1,3 +1,5 @@
+const {boundedNumber} = require("./numericSettings");
+
 const DEFAULT_STOPWORDS = new Set([
   "para", "com", "sem", "por", "uma", "umas", "uns", "das", "dos",
   "de", "da", "do", "em", "no", "na", "nos", "nas", "e", "ou",
@@ -174,13 +176,7 @@ function radarCriteriaConfig(radar = {}) {
       radar.exclude_terms_json ??
         radar.exclude_terms,
     ),
-    criteriaWeight: Math.max(
-      0,
-      Math.min(
-        100,
-        Number(radar.criteria_weight ?? 65) || 65,
-      ),
-    ),
+    criteriaWeight: boundedNumber(radar.criteria_weight, 65),
     budgetCurrency: String(
       radar.budget_currency || "BRL",
     ).toUpperCase(),
@@ -524,13 +520,7 @@ function blendCriteriaScore(
     return Math.round(base);
   }
 
-  const weight = Math.max(
-    0,
-    Math.min(
-      100,
-      Number(radar.criteria_weight ?? 65) || 65,
-    ),
-  ) / 100;
+  const weight = boundedNumber(radar.criteria_weight, 65) / 100;
 
   return Math.round(
     base * (1 - weight) +

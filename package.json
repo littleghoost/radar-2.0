@@ -4,6 +4,8 @@
   "description": "MVP local para organizar radares e anúncios de garimpo.",
   "main": "server/app.js",
   "scripts": {
+    "test": "node --test",
+    "test:collector-fixtures": "node tests/browser/harness.cjs",
     "start": "node server/app.js",
     "dev": "node --watch server/app.js"
   },
