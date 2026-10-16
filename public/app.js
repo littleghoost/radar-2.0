@@ -3999,7 +3999,7 @@ async function refreshTrainerQueue() {
     return;
   }
   showTrainer("Preparando peças para sua avaliação...");
-  const result = await api("/api/training/queue?radar_id=" + id + "&limit=8");
+  const result = await api("/api/training/queue?radar_id=" + id + "&limit=5");
   if (id !== Number($("#trainerRadar").value) || $("#trainerPanel").hidden) return;
   trainerQueue = result.items || [];
   renderTrainer();

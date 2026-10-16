@@ -20,6 +20,7 @@ const { createDesktopBackupService } = require("./services/desktopBackups");
 const { checkDesktopUpdate } = require("./services/desktopUpdates");
 const { sourceRequestPolicy } = require("./services/sources/requestPolicy");
 const { listingRegion } = require("./services/listingRegion");
+const { trainingCategoryMismatch } = require("./services/trainingEligibility");
 const { downloadTrainingImage } = require("./services/visualTrainingImages");
 const { inspectListing, inspectBatch } = require("./services/listingPreflight");
 const {
@@ -398,7 +399,10 @@ async function getPreferenceProfile(category = "geral") {
        AND l.status IN ('interessante', 'descartado')`,
     [category || "geral"],
   );
-  return buildPreferenceProfile(rows, category || "geral");
+  // Never train the Grails category on misfiled filmadoras (or vice versa).
+  // Human labels and listing ownership remain unchanged; only the model input is filtered.
+  const eligible=rows.filter(row=>!trainingCategoryMismatch(row,category||"geral"));
+  return buildPreferenceProfile(eligible, category || "geral");
 }
 
 async function rebuildPreferenceScores(category = null) {
@@ -2923,11 +2927,16 @@ app.post("/api/training/images/batch", async (req,res) => {
     const conditions=`radar_id = ? AND id > ? AND image_url IS NOT NULL AND image_url <> ''
       AND image_embedding_json IS NULL
       ${scope==="reviewed" ? "AND status IN ('interessante','descartado')" : ""}`;
-    const rows=await all(`SELECT id,image_url FROM listings WHERE ${conditions}
+    const rows=await all(`SELECT id,title,url,image_url FROM listings WHERE ${conditions}
       ORDER BY id LIMIT ?`,[radarId,afterId,amount]);
     let processed=0;
+    let ignoredCategory=0;
     const failures=[];
     for (const row of rows) {
+      if (trainingCategoryMismatch(row,radar.category)) {
+        ignoredCategory++;
+        continue;
+      }
       try {
         const bytes=await downloadTrainingImage(row.image_url);
         const vector=await embedImage(bytes);
@@ -2947,6 +2956,7 @@ app.post("/api/training/images/batch", async (req,res) => {
       [radarId,nextAfterId]));
     if (processed) await rebuildPreferenceScores(radar.category||"geral");
     res.json({ok:true,radar_id:radarId,scope,processed,failed:failures.length,
+      ignored_category:ignoredCategory,
       failures,next_after_id:nextAfterId,has_more:hasMore,
       checked:rows.length});
   } catch(error) {
@@ -2966,7 +2976,7 @@ app.get("/api/training/queue", async (req, res) => {
     }
     const radar = await get("SELECT * FROM radars WHERE id = ?", [radarId]);
     if (!radar) return res.status(404).json({error:"Radar não encontrado."});
-    const limit = Math.min(12, Math.max(1, Number(req.query.limit) || 6));
+    const limit = Math.min(5, Math.max(1, Number(req.query.limit) || 5));
     const rows = await all(
       `SELECT l.* FROM listings l
        LEFT JOIN listing_training_feedback tf ON tf.listing_id = l.id
@@ -2981,6 +2991,7 @@ app.get("/api/training/queue", async (req, res) => {
       [radarId,radarId],
     );
     const eligible = rows.filter(listing => {
+      if (trainingCategoryMismatch(listing,radar.category)) return false;
       const check = inspectListing(listing,{radar_category:radar.category});
       // Itens sem radar precisam ter sinais positivos da categoria.
       return check.verdict !== "rejected" &&
@@ -3025,6 +3036,9 @@ app.post("/api/training/feedback", async (req,res) => {
     const existing = await get("SELECT verdict FROM listing_training_feedback WHERE listing_id = ?",[listingId]);
     if (existing) return res.status(409).json({error:"Essa peça já foi avaliada."});
     if (listing.status !== "novo") return res.status(409).json({error:"Essa peça já possui avaliação no catálogo."});
+    if (trainingCategoryMismatch(listing,radar.category)) {
+      return res.status(400).json({error:"Essa peça parece pertencer a outro radar. A avaliação não foi alterada."});
+    }
     if (!listing.radar_id &&
         inspectListing(listing,{radar_category:radar.category}).verdict !== "candidate") {
       return res.status(400).json({error:"Peça sem categoria suficiente para esse radar."});
@@ -3064,6 +3078,11 @@ app.get("/api/preferences/status", async (_req, res) => {
         visual_negative_count: profile.negative_count,
         total_feedback: profile.total_feedback,
         active: profile.total_feedback > 0,
+        excluded_cross_category: (await all(
+          `SELECT l.title,l.url FROM listings l JOIN radars r ON r.id=l.radar_id
+           WHERE r.category = ? AND l.status IN ('interessante','descartado')`,
+          [category],
+        )).filter(row=>trainingCategoryMismatch(row,category)).length,
       });
     }
     res.json({ profiles });

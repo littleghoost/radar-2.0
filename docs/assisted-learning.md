@@ -42,3 +42,15 @@ uma foto de referência ou ativar `semantic_enabled` no radar de roupas.
   e a validação manual continuam disponíveis.
 
 A versão 0.2.14 ajusta exclusivamente o timeout do teste de carga Windows (100 importações), sem ampliar timeouts na operação do usuário.
+
+
+## Separação segura das categorias — Desktop 0.2.15
+
+- O treinamento de roupas não considera anúncios explicitamente de filmadoras e vice-versa.
+- O filtro é conservador: uma camiseta estampada com uma câmera não é bloqueada.
+- Se uma peça estiver vinculada ao radar errado, a avaliação continua salva,
+  mas não influencia o perfil da categoria incompatível.
+- A tela de treinamento mostra no máximo cinco peças por rodada.
+- A API não permite gravar novos rótulos em uma categoria explicitamente errada.
+- Itens classificados fora da categoria não são processados pelo indexador visual
+  desse radar. Nenhum status ou voto antigo é apagado por essa atualização.
