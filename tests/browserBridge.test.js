@@ -6,18 +6,18 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-function collectorFixture({offline = false, reply = {ok:true}} = {}) {
+function collectorFixture({offline = false, reply = {ok:true}, platform = 'ebay'} = {}) {
   let now = 100000, nextTimer = 0, observer, observed;
   const timers = new Map(), messages = [], listeners = {}, storageListeners = [];
   const item = {title:"Sony Handycam DCR SR47",price:"R$ 299,90",image:"https://i.ebayimg.com/camera.jpg"};
   const img = {get currentSrc(){return item.image;},get src(){return item.image;},get alt(){return item.title;},getAttribute(name){return item[name] || null;}};
   const heading = {get innerText(){return item.title;}};
-  const card = {get innerText(){return item.title+" "+item.price;},querySelector(selector){return selector==='img'?img:heading;},getBoundingClientRect(){return {width:200,height:200};}};
+  const card = {get innerText(){return item.title+" "+item.price;},outerHTML:'<article data-url="/p/camisa-vintage-12345678"></article>',querySelectorAll(){return [];},querySelector(selector){return selector==='img'?img:heading;},getBoundingClientRect(){return {width:200,height:200};}};
   const anchor = {href:"https://www.ebay.com/itm/123456789012",getAttribute(){return this.href;},closest(){return card;}};
-  const document = {visibilityState:"visible",body:{innerText:"Sony Handycam R$ 299,90"},documentElement:{},querySelectorAll(selector){return selector==='a[href]'?[anchor]:selector==='img'?[img]:[];},addEventListener(name,fn){listeners[name]=fn;}};
+  const document = {visibilityState:"visible",body:{innerText:"Sony Handycam R$ 299,90"},documentElement:{},querySelectorAll(selector){if(platform==='enjoei'&&selector.includes('.c-product-card'))return [card];return selector==='a[href]'?(platform==='enjoei'?[]:[anchor]):selector==='img'?[img]:[];},addEventListener(name,fn){listeners[name]=fn;}};
   const state = {autoCaptureEnabled:true};
   const context = vm.createContext({
-    URL,console,Date:class extends Date {static now(){return now;}},location:{hostname:"www.ebay.com",href:"https://www.ebay.com/sch/i.html"},document,
+    URL,console,Date:class extends Date {static now(){return now;}},location:{hostname:platform==='enjoei'?'www.enjoei.com.br':'www.ebay.com',href:platform==='enjoei'?'https://www.enjoei.com.br/s?term=camisa':'https://www.ebay.com/sch/i.html'},document,
     MutationObserver:class {constructor(fn){observer=fn;}observe(_node,options){observed=options;}},
     addEventListener(name,fn){listeners[name]=fn;},
     setTimeout(fn,ms){const id=++nextTimer;timers.set(id,{at:now+ms,fn});return id;},clearTimeout(id){timers.delete(id);},
@@ -84,4 +84,16 @@ test("Captura inválida não gera tentativas repetidas em página estática",asy
  const f=collectorFixture({reply:{ok:false,retryable:false,error:'captura inválida'}});
  await f.advance(120000);assert.equal(f.messages.length,1);
  f.scroll();await f.advance(30000);assert.equal(f.messages.length,1);
+});
+
+test("Preço em euro também aceita formato numérico internacional do eBay",()=>{
+ const f=collectorFixture();f.item.price='EUR 1,234.56';
+ const item=f.context.__radarCollectVisibleListings(100).items[0];
+ assert.equal(item.current_price,1234.56);assert.equal(item.currency,'EUR');
+});
+
+test("Enjoei reconhece URL embutida com letra s no slug do anúncio",()=>{
+ const f=collectorFixture({platform:'enjoei'});f.item.title='Camisa vintage';
+ const items=f.context.__radarCollectVisibleListings(100).items;
+ assert.equal(items.length,1);assert.equal(items[0].url,'https://www.enjoei.com.br/p/camisa-vintage-12345678');
 });

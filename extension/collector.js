@@ -66,16 +66,15 @@
           ? 'GBP'
           : 'USD';
 
-    if (currency === 'BRL' || currency === 'EUR') {
-      if (raw.includes(',')) {
-        raw = raw.replace(/\./g, '').replace(',', '.');
-      } else if (/^\d{1,3}(?:\.\d{3})+$/.test(raw)) {
-        raw = raw.replace(/\./g, '');
-      }
-    } else if (raw.includes('.') && raw.includes(',')) {
-      raw = raw.replace(/,/g, '');
-    } else if ((raw.match(/,/g) || []).length === 1 && /,[0-9]{2}$/.test(raw)) {
+    // Marketplaces can display a currency with either locale's separators.
+    if (raw.includes('.') && raw.includes(',')) {
+      raw = raw.lastIndexOf(',') > raw.lastIndexOf('.')
+        ? raw.replace(/\./g, '').replace(',', '.')
+        : raw.replace(/,/g, '');
+    } else if ((raw.match(/,/g) || []).length === 1 && /,[0-9]{1,2}$/.test(raw)) {
       raw = raw.replace(',', '.');
+    } else if (/^\d{1,3}(?:\.\d{3})+$/.test(raw)) {
+      raw = raw.replace(/\./g, '');
     } else {
       raw = raw.replace(/,/g, '');
     }
@@ -309,7 +308,7 @@
 
     const html = String(card.outerHTML || '');
     const embedded = html.match(
-      /(?:https?:\/\/www\.enjoei\.com\.br)?(\/p\/[^"'<>\\s]+-\d{6,})(?:[?"'<>\\s]|$)/i,
+      /(?:https?:\/\/www\.enjoei\.com\.br)?(\/p\/[^"'<>\s]+-\d{6,})(?:[?"'<>\s]|$)/i,
     );
     if (embedded?.[1]) {
       return cleanUrl(
