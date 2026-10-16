@@ -220,3 +220,23 @@ O resumo da importação passa a mostrar também a quantidade de anúncios atual
 O feedback de interessante/descartado agora atualiza a ordenação junto com o
 Grail Score, respeitando os termos de exclusão. A edição de anúncios também
 recusa estados inválidos para manter os filtros consistentes.
+
+
+## Desktop 0.2.8 — estabilidade
+
+- Sincronização mobile em páginas autenticadas para 1.001 a 10.000 anúncios.
+  O snapshot anterior permanece disponível caso uma página falhe; o cliente
+  só aplica o novo conjunto depois de baixar todas as páginas.
+- Backups SQLite diários consistentes via API nativa de backup, verificados por
+  PRAGMA integrity_check, retendo as últimas 7 cópias em
+  %APPDATA%\\com.littleghoost.radar2\\backups.
+- Fontes sem busca API homologada continuam disponíveis por importação assistida
+  via Radar Bridge, sem promessas de captura automática não autorizada.
+- Pistas de catálogo identificadas como referências e com opção de copiar link.
+- Testes de integração para catálogo mobile, fonte assistida e restauração de
+  conteúdo a partir de cópia SQLite.
+
+As melhorias de IA CLIP foram exercitadas por testes de comparação perceptual
+e filtros com imagens sintéticas; precisão com anúncios reais ainda requer
+uma amostra avaliada manualmente. Sincronização paginada não é incremental:
+o Desktop ainda envia um novo snapshot completo a cada atualização.

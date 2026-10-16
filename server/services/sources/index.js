@@ -7,6 +7,7 @@ const {
 } = require('./ebay');
 const { searchOlx, getOlxStatus } = require('./olx');
 const { getDepopStatus } = require('./depop');
+const { getAssistedSourceStatuses } = require('./assisted');
 
 async function searchAllSources({
   query,
@@ -89,4 +90,5 @@ module.exports = {
   getEbayStatus,
   getOlxStatus,
   getDepopStatus,
+  getAssistedSourceStatuses,
 };

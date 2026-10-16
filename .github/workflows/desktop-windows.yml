@@ -54,7 +54,7 @@ jobs:
         run: npm ci
 
       - name: Test backend, assisted import and release validation
-        run: node --test tests/desktopUpdates.test.js tests/requestPolicy.test.js tests/sourcesIntegration.test.js tests/updateShutdownControl.test.js tests/rescheduleFailedRadar.test.js tests/mobileFullSnapshot.test.js tests/assistedImport.test.js
+        run: node --test tests/desktopUpdates.test.js tests/requestPolicy.test.js tests/sourcesIntegration.test.js tests/updateShutdownControl.test.js tests/rescheduleFailedRadar.test.js tests/mobileFullSnapshot.test.js tests/mobilePagedSync.test.js tests/desktopBackupsAndVisual.test.js tests/assistedImport.test.js
 
       - name: Validate release tag matches app version
         if: startsWith(github.ref, 'refs/tags/v')

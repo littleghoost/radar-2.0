@@ -1827,7 +1827,7 @@ async function loadCatalogDiscoveries(radarId = "") {
             <div class="catalog-copy">
               <strong class="catalog-title">${escapeHtml(item.title)}</strong>
               <div class="catalog-meta">
-                <span class="catalog-kind">Produto de catálogo</span>
+                <span class="catalog-kind">Referência de produto (não é anúncio)</span>
                 ${item.radar_name ? `<span>${escapeHtml(item.radar_name)}</span>` : ""}
                 ${item.external_id ? `<span class="catalog-id">${escapeHtml(item.external_id)}</span>` : ""}
               </div>
@@ -1843,16 +1843,36 @@ async function loadCatalogDiscoveries(radarId = "") {
                 rel="noopener noreferrer"
                 target="_blank"
               >
-                Abrir no Mercado Livre
+                Abrir referência no Mercado Livre
                 <span aria-hidden="true">↗</span>
               </a>
             ` : `<span class="catalog-link-missing">Link do catálogo não disponível</span>`}
+            ${item.url ? `
+              <button type="button" class="catalog-copy-url secondary"
+                data-copy-catalog-url="${escapeAttr(item.url)}"
+                title="Copiar endereço da referência de catálogo">Copiar link</button>
+            ` : ""}
           </div>
         </article>
       `;
     })
     .join("");
 }
+
+// Link de catálogo é referência, não um anúncio individual.
+// Caso o navegador externo falhe, o usuário pode copiar o endereço.
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-copy-catalog-url]");
+  if (!button) return;
+  const value = safeExternalUrl(button.dataset.copyCatalogUrl);
+  if (!value) return notify("Link do catálogo inválido.", "error");
+  try {
+    await navigator.clipboard.writeText(value);
+    notify("Link da referência de catálogo copiado.");
+  } catch {
+    prompt("Copie o link da referência:", value);
+  }
+});
 
 /* =========================
    CARREGAR ANÚNCIOS
@@ -3035,6 +3055,16 @@ async function loadConnections() {
         <p>Limita requisições simultâneas, espaça as buscas e respeita pausas por bloqueio ou excesso de chamadas.</p>
         ${sourceProtection || "<p>Status temporariamente indisponível.</p>"}
         <small>Válido para as APIs oficiais conectadas; não inclui a Bridge do navegador.</small>
+      </article>
+      <article class="connection-card">
+        <div class="connection-top">
+          <span class="connection-name">Fontes por navegador</span>
+          <span class="connection-status connected">Assistida</span>
+        </div>
+        <p>OLX e Depop não têm busca geral homologada ativa neste Radar. Enjoei,
+        Facebook Marketplace e Vinted também dependem de importação assistida.
+        A Bridge coleta os anúncios visíveis sem contornar bloqueios.</p>
+        <small>Use anúncios individuais para comprar; pistas de catálogo são apenas referências.</small>
       </article>
       <article class="connection-card">
         <div class="connection-top">

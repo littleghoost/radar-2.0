@@ -6,6 +6,8 @@ const DESKTOP_ID_KEY = "mobile_relay_desktop_id";
 const DESKTOP_SECRET_KEY = "mobile_relay_desktop_key";
 const LAST_SNAPSHOT_KEY = "mobile_relay_last_snapshot_at";
 const LAST_PUSH_EVENT_KEY = "mobile_relay_last_push_event_id";
+const {paginateMobileListings} = require("./mobileSnapshotPages");
+const {randomUUID} = require("node:crypto");
 
 function dbGet(db, sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -277,7 +279,7 @@ function createMobileDesktopSync({
              updated_at
            FROM listings
            ORDER BY datetime(updated_at) DESC, id DESC
-           LIMIT 1000`,
+           LIMIT 10000`,
         ),
         dbAll(
           db,
@@ -365,12 +367,35 @@ function createMobileDesktopSync({
 
     try {
       const snapshot = await buildSnapshot();
-
+      const pagination = paginateMobileListings(snapshot.listings);
+      let committed = snapshot;
+      if (pagination.paged) {
+        const snapshotId = randomUUID();
+        const pageCount = pagination.pages.length;
+        // Upload before publishing metadata; failures preserve prior snapshot.
+        for (let i = 1; i < pageCount; i += 1) {
+          await relayRequest("/bridge/mobile/desktop/snapshot/page", {
+            method: "PUT",
+            body: JSON.stringify({
+              snapshot_id: snapshotId,
+              page_index: i,
+              page_count: pageCount,
+              listings: pagination.pages[i],
+            }),
+          });
+        }
+        committed = {
+          ...snapshot,
+          listings: pagination.pages[0],
+          snapshot_id: snapshotId,
+          page_count: pageCount,
+        };
+      }
       const result = await relayRequest(
         "/bridge/mobile/desktop/snapshot",
         {
           method: "PUT",
-          body: JSON.stringify(snapshot),
+          body: JSON.stringify(committed),
         },
       );
 

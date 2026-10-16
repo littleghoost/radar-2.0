@@ -12,9 +12,11 @@ const {
   validateEbayCredentials,
   getOlxStatus,
   getDepopStatus,
+  getAssistedSourceStatuses,
 } = require("./services/sources");
 const { createRadarRunner } = require("./services/radarRunner");
 const { createMobileDesktopSync } = require("./services/mobileDesktopSync");
+const { createDesktopBackupService } = require("./services/desktopBackups");
 const { checkDesktopUpdate } = require("./services/desktopUpdates");
 const { sourceRequestPolicy } = require("./services/sources/requestPolicy");
 const {
@@ -3217,6 +3219,7 @@ app.get("/api/sources/status", async (_req, res) => {
       ebay: getEbayStatus(ebayCredentials),
       olx: getOlxStatus(),
       depop: getDepopStatus(),
+      assisted: getAssistedSourceStatuses(),
       request_policy: {
         mercadolivre: sourceRequestPolicy.status("api.mercadolibre.com"),
         ebay: sourceRequestPolicy.status("api.ebay.com"),
@@ -6210,5 +6213,15 @@ app.listen(
   () => {
     console.log(`Radar 2.0 rodando em http://localhost:${PORT}`);
     mobileDesktopSync.start();
+    if (DESKTOP_MODE) {
+      const backupService = createDesktopBackupService({db,dataDir:DATA_ROOT});
+      const checkBackups = () => backupService.run().catch(error =>
+        console.error("Radar: backup SQLite local falhou:",error.message)
+      );
+      const initialBackup = setTimeout(checkBackups,45000);
+      const periodicBackup = setInterval(checkBackups,6*60*60*1000);
+      initialBackup.unref?.();
+      periodicBackup.unref?.();
+    }
   },
 );
