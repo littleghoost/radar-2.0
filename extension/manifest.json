@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Radar 2.0 Bridge",
-  "version": "0.3.12",
+  "version": "0.4.0",
   "description": "Sincroniza anúncios visíveis com a Inbox inteligente do Radar 2.0.",
   "permissions": [
     "activeTab",
@@ -22,6 +22,7 @@
     "*://*.facebook.com/marketplace/*",
     "*://facebook.com/marketplace/*"
   ],
+  "optional_host_permissions": ["https://*/*"],
   "background": {
     "service_worker": "background.js"
   },
@@ -38,6 +39,7 @@
         "*://*.depop.com/*"
       ],
       "js": [
+        "marketplaces.js",
         "collector.js"
       ],
       "run_at": "document_idle"

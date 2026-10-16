@@ -1,6 +1,6 @@
 # Extensão Radar 2.0 Bridge
 
-Bridge 0.3.12 para Opera GX e navegadores Chromium com Manifest V3. O Desktop precisa estar aberto ou executando em segundo plano. Toda importação é enviada ao serviço local em `http://127.0.0.1:3130`.
+Bridge 0.4.0 para Opera GX e navegadores Chromium com Manifest V3. O Desktop precisa estar aberto ou executando em segundo plano. Toda importação é enviada ao serviço local em `http://127.0.0.1:3130`.
 
 ## Modos de captura
 
@@ -19,3 +19,14 @@ A extensão não solicita cookies, senhas ou armazenamento dos marketplaces. Nã
 ## Verificação
 
 `npm test` inclui regressões de alterações de metadados, imagens lazy-loaded, recuperação offline, cancelamento e persistência da fila. `npm run test:collector-fixtures` prepara uma página local de fixtures para conferir DOM e extração em seis plataformas sem enviar anúncios ao catálogo. A extração continua heurística e deve ser reavaliada quando um marketplace altera seu layout.
+
+## Novidades da Bridge 0.4.0
+
+- Perfis de Mercari, Vinted, Grailed e Poshmark com links de itens individuais.
+- **Sites e buscas com sua conta** no popup: o usuário pode conceder acesso HTTPS somente ao site desejado, salvar até 20 URLs de resultados com nome, radar e intervalo de 1h a 7 dias, e removê-las quando necessário.
+- O Auto-Browse inclui essas buscas salvas, suspende fontes que peçam login ou verificação e permite reabrir a aba para continuar manualmente. Não automatiza autenticação, CAPTCHA ou restrições.
+- Permissões opcionais HTTPS são solicitadas no navegador ao ativar cada novo domínio, e os content scripts são registrados apenas para sites concedidos.
+- Em sites sem perfil específico, o coletor exige links com formato de anúncio individual, evitando categorias e páginas de pesquisa.
+- Testes de regressão adicionais verificam limites de permissão, agendamento, deduplicação das buscas salvas e filtros de link.
+
+A atualização do código não equivale à atualização da extensão carregada no navegador: recarregue-a em `opera://extensions` ou `chrome://extensions` após a instalação da versão de desenvolvimento.

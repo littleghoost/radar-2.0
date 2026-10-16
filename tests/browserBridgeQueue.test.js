@@ -9,6 +9,9 @@ function backgroundFixture() {
  const event=()=>({addListener(){},removeListener(){}});
  const chrome={storage:{local:{async get(keys){if(Array.isArray(keys))return Object.fromEntries(keys.map(k=>[k,state[k]]));return {...keys,...state};},async set(update){Object.assign(state,update);}}},alarms:{async get(){return {};},create(){},onAlarm:event()},runtime:{onInstalled:event(),onStartup:event(),onMessage:event(),getURL:p=>p},notifications:{async create(){}},tabs:{onUpdated:event()},windows:{}};
  const context=vm.createContext({console,URL,AbortSignal,Date,setTimeout,clearTimeout,chrome,fetch:async()=>({ok:true,json:async()=>({ok:true})})});
+ context.importScripts=(...files)=>{
+  for(const file of files) vm.runInContext(fs.readFileSync(path.join(__dirname,"../extension",file),"utf8"),context,{filename:file});
+ };
  vm.runInContext(fs.readFileSync(path.join(__dirname,"../extension/background.js"),"utf8"),context);
  vm.runInContext("delay = async () => {}",context);
  return {state,context,jobs};
