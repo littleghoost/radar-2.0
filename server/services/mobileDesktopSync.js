@@ -237,7 +237,7 @@ function createMobileDesktopSync({
   }
 
   async function buildSnapshot() {
-    const [radars, listings, activity, visualReferences] =
+    const [radars, listings, activity, visualReferences, totals] =
       await Promise.all([
         dbAll(
           db,
@@ -309,6 +309,7 @@ function createMobileDesktopSync({
                     id DESC
            LIMIT 60`,
         ).catch(() => []),
+        dbGet(db, "SELECT COUNT(*) AS count FROM listings"),
       ]);
 
     const countByRadar = new Map();
@@ -341,7 +342,8 @@ function createMobileDesktopSync({
     return {
       summary: {
         radar_count: radarRows.length,
-        listing_count: listings.length,
+        listing_count: Number(totals?.count) || listings.length,
+        synced_listing_count: listings.length,
         interesting_count: listings.filter(
           (listing) =>
             listing.status === "interessante",
@@ -555,6 +557,11 @@ function createMobileDesktopSync({
       typeof command.payload === "object"
         ? command.payload
         : {};
+
+    if (type === "sync_snapshot") {
+      const result = await syncSnapshot();
+      return { ok: true, result: { synced_at: result?.synced_at || null } };
+    }
 
     if (type === "run_radar") {
       const radarId = Number(payload.radar_id);

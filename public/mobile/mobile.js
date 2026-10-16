@@ -195,6 +195,8 @@ function applySnapshot(snapshot) {
   )
     ? safe.visual_references
     : [];
+  state.snapshotListingCount =
+    Number(safe.summary?.listing_count) || state.listings.length;
   state.snapshotSyncedAt =
     safe.synced_at ||
     safe.relay_updated_at ||
@@ -1066,6 +1068,15 @@ async function refreshRelay() {
   }
 
   const online = Boolean(status?.online);
+  const expected = state.snapshotListingCount ?? state.listings.length;
+  const syncedCount = state.listings.length;
+  const syncHealth = $("#syncHealth");
+  if (syncHealth) {
+    syncHealth.textContent = expected > syncedCount
+      ? "Sincronização parcial: " + syncedCount + " de " + expected + " anúncios. Refaça a sincronização pelo botão abaixo."
+      : syncedCount + " anúncios sincronizados" + (state.snapshotSyncedAt ? " no último snapshot." : " em cache.");
+    syncHealth.classList.toggle("sync-warning", expected > syncedCount);
+  }
   const synced = state.snapshotSyncedAt
     ? new Date(
         state.snapshotSyncedAt,
@@ -1316,6 +1327,22 @@ $("#refreshButton").addEventListener(
   "click",
   refresh,
 );
+
+$("#syncNowButton")?.addEventListener("click", async () => {
+  const button = $("#syncNowButton");
+  if (!hasRelayCredentials()) return toast("Primeiro conecte o celular ao Radar.");
+  button.disabled = true;
+  try {
+    await queueRelayCommand("sync_snapshot", {});
+    toast(state.online
+      ? "Sincronização solicitada. O Desktop vai processar a fila em instantes."
+      : "Desktop offline. A sincronização será solicitada quando ele reconectar.");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
 
 $("#statusFilter").addEventListener("change", () => {
   mobileListingsVisibleLimit = 60;

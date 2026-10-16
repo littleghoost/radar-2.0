@@ -6,6 +6,7 @@ const MAX_SNAPSHOT_BYTES = 1024 * 1024;
 const ONLINE_WINDOW_SECONDS = 90;
 const COMMAND_TYPES = new Set([
   "run_radar",
+  "sync_snapshot",
   "update_listing_status",
   "import_url",
   "import_visual_reference",
@@ -412,6 +413,7 @@ function sanitizeSnapshot(body) {
             radar_count: Number(input.summary.radar_count) || radars.length,
             listing_count:
               Number(input.summary.listing_count) || listings.length,
+            synced_listing_count: listings.length,
             interesting_count:
               Number(input.summary.interesting_count) ||
               listings.filter((item) => item.status === "interessante")
@@ -423,6 +425,7 @@ function sanitizeSnapshot(body) {
         : {
             radar_count: radars.length,
             listing_count: listings.length,
+            synced_listing_count: listings.length,
             interesting_count: listings.filter(
               (item) => item.status === "interessante",
             ).length,
@@ -444,6 +447,10 @@ function validateCommand(type, payload) {
 
   const data =
     payload && typeof payload === "object" ? payload : {};
+
+  if (type === "sync_snapshot") {
+    return { ok: true, payload: {} };
+  }
 
   if (type === "run_radar") {
     const radarId = Number(data.radar_id);

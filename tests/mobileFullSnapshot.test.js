@@ -21,3 +21,14 @@ test('Novo limite permite até mil anúncios sem cortes aos 250',()=>{
  const snapshot=sanitizeSnapshot({listings});
  assert.equal(snapshot.listings.length,1000);
 });
+
+test('Resumo distingue anúncios totais dos recebidos no snapshot parcial',()=>{
+ const snapshot=sanitizeSnapshot({summary:{listing_count:1200}, listings:Array.from({length:1000},(_,i)=>({id:i+1,title:'Item '+i}))});
+ assert.equal(snapshot.summary.listing_count,1200);
+ assert.equal(snapshot.summary.synced_listing_count,1000);
+});
+
+test('Comando remoto de sincronização é aceito sem parâmetros perigosos',()=>{
+ const {validateCommand}=require('../server/mobileRelay');
+ assert.deepEqual(validateCommand('sync_snapshot', {unexpected:'ignorado'}), {ok:true, payload:{}});
+});
