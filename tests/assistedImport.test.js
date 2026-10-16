@@ -24,13 +24,13 @@ function png(red, green, blue) {
   return PNG.sync.write(image);
 }
 
-async function api(route, method = "GET", body, expected = 200) {
+async function api(route, method = "GET", body, expected = 200, timeout = 15000) {
   const response = await fetch(baseUrl + route, {
     method,
     headers: body === undefined ? {} : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
     // Runner Windows pode estar compilando recursos pesados em paralelo.
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(timeout),
   });
   const result = await response.json();
   assert.equal(response.status, expected, `${method} ${route}: ${JSON.stringify(result)}`);
@@ -223,7 +223,8 @@ test("Reanálise paginada cobre mais de 500 anúncios sem repetir nem incluir ch
   } finally {await new Promise(resolve=>connection.close(resolve));}
   let afterId=0,throughId,analyzed=0,pages=0;
   while (true) {
-    const page = await api(`/api/radars/${target.id}/reindex-visual`,'POST',{after_id:afterId,through_id:throughId,limit:100});
+    // A hosted Windows runner can take longer for a batch of 100 SQLite writes.
+    const page = await api(`/api/radars/${target.id}/reindex-visual`,'POST',{after_id:afterId,through_id:throughId,limit:100},200,60000);
     assert.equal(page.total,503);assert.equal(page.failed,0);assert.ok(page.analyzed<=100);
     analyzed+=page.analyzed;pages++;
     assert.ok(page.next_after_id>afterId);
