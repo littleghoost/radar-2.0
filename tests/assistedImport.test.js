@@ -27,7 +27,8 @@ async function api(route, method = "GET", body, expected = 200) {
     method,
     headers: body === undefined ? {} : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(5000),
+    // Runner Windows pode estar compilando recursos pesados em paralelo.
+    signal: AbortSignal.timeout(15000),
   });
   const result = await response.json();
   assert.equal(response.status, expected, `${method} ${route}: ${JSON.stringify(result)}`);
