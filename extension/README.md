@@ -1,4 +1,4 @@
-# Radar 2.0 Bridge 0.4.4 (desenvolvimento)
+# Radar 2.0 Bridge 0.4.5 (desenvolvimento)
 
 Extensão Manifest V3 para Opera GX, Chrome e outros navegadores Chromium.
 Envia metadados de anúncios individuais para o Radar Desktop em
@@ -86,3 +86,7 @@ a Bridge não faz login automático, não resolve CAPTCHA nem contorna 403.
 - Na captura manual, você pode marcar **Incluir anúncios fora do filtro** se identificar uma classificação equivocada.
 - O backend do Radar aplica uma verificação compatível também a importações antigas.
 - Para ensinar o Radar a diferenciar peças raras, clique em **Treinar IA · Validar peças** no painel de anúncios do Desktop 0.2.12.
+
+
+### Refinamento 0.4.5
+O Auto-Browse usa o total de **candidatos válidos após a inspeção** para decidir se encontrou algo. Uma página só de peças rejeitadas não bloqueia a próxima pesquisa. O popup mostra quantos anúncios foram filtrados.

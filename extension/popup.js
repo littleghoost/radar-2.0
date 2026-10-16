@@ -83,6 +83,7 @@ async function loadAutoCaptureState() {
     lastAutoCaptureCount: 0,
     lastAutoCaptureImported: 0,
     lastAutoCaptureUpdated: 0,
+    lastAutoCaptureFiltered: 0,
     lastAutoCaptureAutoAssigned: 0,
     lastAutoCapturePriceDrops: 0,
     lastAutoCaptureError: null,
@@ -118,6 +119,7 @@ async function loadAutoCaptureState() {
       `${stored.lastAutoCaptureCount || 0} lidos • ` +
       `${stored.lastAutoCaptureImported || 0} novos • ` +
       `${stored.lastAutoCaptureUpdated || 0} atualizados • ` +
+      `${stored.lastAutoCaptureFiltered || 0} fora do filtro • ` +
       `${stored.lastAutoCaptureAutoAssigned || 0} organizados • ` +
       `${stored.lastAutoCapturePriceDrops || 0} quedas • ${time}`;
 
