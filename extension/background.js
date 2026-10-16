@@ -151,6 +151,10 @@ async function importAutoCapture(
     source_url:capture.source_url,
   });
   if (!screened.accepted.length) {
+    await chrome.storage.local.set({
+      lastAutoCaptureFiltered: screened.rejected.length,
+      lastAutoCaptureReview: screened.review.length,
+    });
     return {ok:true,skipped:true,reason:'screened_out',filtered:screened.rejected.length};
   }
 
@@ -191,7 +195,7 @@ async function importAutoCapture(
 
     await notifyAutoCapture(result).catch(() => {});
 
-    return { ok: !partialError, result, ...(partialError ? {error: partialError, retryable: true} : {}) };
+    return { ok: !partialError, result, filtered: screened.rejected.length, ...(partialError ? {error: partialError, retryable: true} : {}) };
   } catch (error) {
     await chrome.storage.local.set({
       lastAutoCaptureAt: new Date().toISOString(),
@@ -714,8 +718,9 @@ async function runAutoBrowseJob(job) {
 
     return {
       ok: Boolean(result?.ok),
-      capture_count:
-        capture?.items?.length || 0,
+      capture_count: Math.max(0,
+        Number(capture?.items?.length || 0) - Number(result?.filtered || 0)),
+      filtered_count: Number(result?.filtered || 0),
       imported:
         result?.result?.imported || 0,
       updated:

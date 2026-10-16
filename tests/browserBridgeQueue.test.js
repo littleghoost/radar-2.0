@@ -106,3 +106,37 @@ test('Busca BR fica na frente, com uma busca gringa a cada três nacionais',()=>
   assert.equal(input[0].source,'depop');
   assert.equal(ordered.length,input.length);
 });
+
+test('Inspeção automática envia só roupa JNCO e conta o anúncio JNC barrado',async()=>{
+ const f=backgroundFixture();
+ let sent=null;
+ f.context.fetch=async(_url,options)=>{
+   sent=JSON.parse(options.body);
+   return {ok:true,json:async()=>({imported:1,updated:0,failed:0})};
+ };
+ const capture={
+   source_url:'https://www.olx.com.br/brasil?q=JNCO',
+   items:[
+     {platform:'OLX',title:'Rodas JNC aro 15 furação 4x100',url:'https://pr.olx.com.br/autos-e-pecas/rodas-jnc-1480299257'},
+     {platform:'OLX',title:'JNCO baggy jeans',url:'https://pr.olx.com.br/roupas/jnco-baggy-1480299258'},
+   ],
+ };
+ const result=await f.context.importAutoCapture(capture,{});
+ assert.equal(result.ok,true);
+ assert.equal(result.filtered,1);
+ assert.equal(sent.items.length,1);
+ assert.equal(sent.items[0].title,'JNCO baggy jeans');
+});
+test('Página apenas com itens inválidos não importa nem fica repetindo tentativas',async()=>{
+ const f=backgroundFixture();
+ let calls=0;
+ f.context.fetch=async()=>{calls++;throw new Error('backend should not receive invalid items');};
+ const result=await f.context.importAutoCapture({
+   source_url:'https://www.olx.com.br/brasil?q=JNCO',
+   items:[{platform:'OLX',title:'Rodas JNC Aro 15',url:'https://pr.olx.com.br/autos-e-pecas/rodas-jnc-1480299257'}],
+ },{});
+ assert.equal(result.skipped,true);
+ assert.equal(result.reason,'screened_out');
+ assert.equal(result.filtered,1);
+ assert.equal(calls,0);
+});
