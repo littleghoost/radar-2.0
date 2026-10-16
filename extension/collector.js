@@ -10,6 +10,9 @@
     const host = String(hostname || '').toLowerCase();
     const providers = [
       ['olx', 'OLX'],
+      ['shopee', 'Shopee'],
+      ['repassa', 'Repassa'],
+      ['ebrecho', 'eBrecho'],
       ['enjoei', 'Enjoei'],
       ['depop', 'Depop'],
       ['vinted', 'Vinted'],
@@ -130,6 +133,16 @@
         const match = path.match(/\/marketplace\/item\/(\d+)/i);
         return match ? `facebook:${match[1]}` : cleanUrl(u.href);
       }
+      if (platform === 'Shopee') {
+        const match = path.match(/(?:-i\.|\/product\/)(\d+)\.(\d+)(?:\/|$)/i) ||
+          path.match(/\/product\/(\d+)\/(\d+)(?:\/|$)/i);
+        return match ? `shopee:${match[1]}:${match[2]}` : cleanUrl(u.href);
+      }
+
+      if (platform === 'Repassa') {
+        return `repassa:${path.toLowerCase().replace(/\/$/, '')}`;
+      }
+
       if (platform === 'Mercari') {
         const match = path.match(/\/items?\/(m?\d+)/i);
         return match ? `mercari:${u.hostname.startsWith('jp.') ? 'jp' : 'us'}:${match[1].toLowerCase()}` : cleanUrl(u.href);
@@ -313,6 +326,9 @@
       if (platform === 'Mercari') return /\/(?:us\/)?item\/(?:m)?\d{6,}/.test(path);
       if (platform === 'Grailed') return /\/listings\/\d+/.test(path);
       if (platform === 'Poshmark') return /\/listing\/[^/]+-[a-f\d]{12,}/i.test(path);
+      if (platform === 'Shopee') return /-i\.\d+\.\d+(?:\/|$)/i.test(path) ||
+        /\/product\/\d+\/\d+(?:\/|$)/i.test(path);
+      if (platform === 'Repassa') return /\/produtos\/[^/]+/.test(path);
       // Em sites sem perfil próprio, não confundir buscas e categorias com anúncios.
       // Exigimos um caminho de produto explícito ou slug com identificador.
       if (/\/(?:products?|produtos?|items?|listings?|anuncios?|p|dp|itm)\/[^/]+/.test(path)) return true;

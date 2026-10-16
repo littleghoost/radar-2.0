@@ -1,6 +1,9 @@
 (() => {
   const profiles = [
     {key:'olx', name:'OLX', hosts:['olx.com.br']},
+    {key:'shopee', name:'Shopee', hosts:['shopee.com.br']},
+    {key:'repassa', name:'Repassa', hosts:['repassa.com.br']},
+    {key:'ebrecho', name:'eBrecho', hosts:['ebrecho.com.br']},
     {key:'enjoei', name:'Enjoei', hosts:['enjoei.com.br']},
     {key:'mercadolivre', name:'Mercado Livre', hosts:['mercadolivre.com.br']},
     {key:'mercadolibre', name:'Mercado Libre', hosts:['mercadolibre.com','mercadolibre.com.ar','mercadolibre.com.mx','mercadolibre.cl','mercadolibre.com.co']},

@@ -136,3 +136,37 @@ test('Página real com bloqueio de segurança indica ação do usuário, sem inv
   assert.equal(capture.items.length,0);
   assert.equal(capture.diagnostics.requiresUserAction,'verification_required');
 });
+
+test('Novos perfis brasileiros reconhecem sites legítimos',()=>{
+  const {context}=fixture();
+  for(const [hostname,key] of [
+    ['shopee.com.br','shopee'],
+    ['www.repassa.com.br','repassa'],
+    ['www.ebrecho.com.br','ebrecho'],
+  ]) assert.equal(context.RadarSites.profile(hostname).key,key);
+  assert.equal(context.RadarSites.profile('fake-shopee.com.br').generic,true);
+});
+
+test('Shopee e Repassa aceitam somente links individuais, não categorias',()=>{
+  const document={body:{innerText:''},documentElement:{},querySelectorAll(){return []},addEventListener(){}};
+  const ctx=vm.createContext({URL,Date,console,
+    location:{href:'https://shopee.com.br/search?keyword=brecho',hostname:'shopee.com.br'},
+    document, MutationObserver:class{observe(){}},setTimeout(){},clearTimeout(){},addEventListener(){},
+    chrome:{runtime:{onMessage:{addListener(){}}},storage:{onChanged:{addListener(){}},local:{async get(){return {autoCaptureEnabled:false}}}}}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension/marketplaces.js'),'utf8'),ctx);
+  const collector=fs.readFileSync(path.join(__dirname,'../extension/collector.js'),'utf8')
+    .replace('  globalThis.__radarCollectVisibleListings = collectVisibleListings;',
+      '  globalThis.__testListingUrl = looksLikeListingUrl;\n  globalThis.__testIdentity = listingIdentity;\n  globalThis.__radarCollectVisibleListings = collectVisibleListings;');
+  vm.runInContext(collector,ctx);
+  const shop='https://shopee.com.br/Calca-vintage-i.928575714.22994509747';
+  const second='https://shopee.com.br/product/928575714/22994509747';
+  const repassa='https://www.repassa.com.br/produtos/calca-jeans-feminina-azul';
+  assert.equal(ctx.__testListingUrl(shop,'Shopee'),true);
+  assert.equal(ctx.__testListingUrl(second,'Shopee'),true);
+  assert.equal(ctx.__testIdentity(shop,'Shopee'),ctx.__testIdentity(second,'Shopee'));
+  assert.equal(ctx.__testListingUrl('https://shopee.com.br/search?keyword=calca','Shopee'),false);
+  assert.equal(ctx.__testListingUrl(repassa,'Repassa'),false); // Another site's links blocked on a Shopee page.
+  ctx.location.href='https://www.repassa.com.br/prod';ctx.location.hostname='www.repassa.com.br';
+  assert.equal(ctx.__testListingUrl(repassa,'Repassa'),true);
+  assert.equal(ctx.__testListingUrl('https://www.repassa.com.br/prod','Repassa'),false);
+});

@@ -3295,3 +3295,26 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .radar-tab:focus-v
   cursor: pointer;
 }
 .catalog-copy-url:hover { filter: brightness(1.15); }
+
+/* Origem do anúncio: moeda não equivale a país; confira a informação exibida no tooltip. */
+.region-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 7px;
+  border: 1px solid var(--line-soft);
+  padding: 3px 7px;
+  font-size: .64rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.region-tag.br { color: #84f0a5; background: rgba(65, 152, 94, .11); }
+.region-tag.international { color: #9cc1ff; background: rgba(88, 117, 200, .11); }
+.region-tag.unknown { color: var(--text-muted, #b6b6b6); }
+.region-summary { display: block; font-size: .72rem; opacity: .8; margin-top: 2px; }
+
+.national-source-grid {display: grid;grid-template-columns: repeat(auto-fit,minmax(185px,1fr));gap: 12px;}
+.national-source {display: flex;flex-direction: column;gap: 7px;border: 1px solid var(--line-soft);border-radius: 12px;padding: 15px;background: var(--panel);}
+.national-source strong {font-size: .94rem;}
+.national-source small {opacity: .77;flex: 1;line-height: 1.45;}
+.national-source button {align-self: flex-start;}

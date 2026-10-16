@@ -431,3 +431,28 @@ test("Feedback com embeddings existentes atualiza Grail e ordenação, e sua rem
     assert.equal(row.ranking_score, 50);
   }
 });
+
+test('Feed filtra origem brasileira, internacional e desconhecida sem depender da moeda', async()=>{
+  const marker='origin-regression-20261016';
+  const records=[
+    item('origin-br',{title:marker+' brasil',platform:'Mercado Livre',
+      url:'https://produto.mercadolivre.com.br/MLB-9988776655-_JM',
+      currency:'BRL'}),
+    item('origin-world',{title:marker+' importado',platform:'eBay',
+      url:'https://www.ebay.com/itm/998877665544',currency:'BRL'}),
+    item('origin-unknown',{title:marker+' vendedor-indefinido',platform:'Shopee',
+      url:'https://shopee.com.br/product/4567/89012',currency:'BRL'}),
+  ];
+  const imported=await importItems(null,records);
+  assert.equal(imported.imported,3);
+  const q=extra=>'/api/listings?search='+encodeURIComponent(marker)+'&'+extra;
+  const everything=await api(q(''));
+  assert.equal(everything.length,3);
+  assert.deepEqual(new Set(everything.map(a=>a.region)),new Set(['br','international','unknown']));
+  assert.equal((await api(q('region=br'))).length,1);
+  assert.equal((await api(q('region=international')))[0].platform,'eBay');
+  assert.equal((await api(q('region=unknown')))[0].platform,'Shopee');
+  assert.equal((await api(q('platform=eBay'))).length,1);
+  assert.equal((await api(q('region=br&platform=eBay'))).length,0);
+  assert.equal((await api(q('region=international&platform=eBay'))).length,1);
+});

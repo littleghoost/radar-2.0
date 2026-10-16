@@ -1,4 +1,4 @@
-# Radar 2.0 Bridge 0.4.0 (desenvolvimento)
+# Radar 2.0 Bridge 0.4.1 (desenvolvimento)
 
 Extensão Manifest V3 para Opera GX, Chrome e outros navegadores Chromium.
 Envia metadados de anúncios individuais para o Radar Desktop em
@@ -26,7 +26,9 @@ Esta versão é de desenvolvimento. Não há garantia de publicação automátic
   Em caso de login/verificação, a fonte fica pausada até ação do usuário.
 
 Fontes com suporte explícito: OLX, Enjoei, Mercado Livre, Mercado Libre,
-Depop, eBay, Facebook Marketplace, Mercari, Vinted, Grailed e Poshmark.
+Depop, eBay, Facebook Marketplace, Mercari, Vinted, Grailed Poshmark, Shopee e Repassa; eBrecho via captura conservadora.
+A Shopee pode incluir vendedores estrangeiros: o local do anúncio só é confirmado
+quando a plataforma informa o país. A captura não garante frete nacional.
 A coleta em novos sites usa heurísticas conservadoras de URLs de anúncios e
 pode precisar de ajustes. O Facebook costuma depender de aba visível e sessão.
 
