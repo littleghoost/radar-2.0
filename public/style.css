@@ -3283,3 +3283,15 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .radar-tab:focus-v
 @media(max-width:600px) {
   .mobile-nav-link { margin-left:0; width:100%; }
 }
+
+
+/* Ação alternativa para pistas de catálogo cujo link não abre na WebView */
+.catalog-copy-url {
+  background: transparent;
+  border: 1px solid var(--border, #434e5f);
+  color: inherit;
+  border-radius: 8px;
+  padding: 8px 11px;
+  cursor: pointer;
+}
+.catalog-copy-url:hover { filter: brightness(1.15); }

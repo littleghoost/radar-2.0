@@ -145,3 +145,15 @@ Testes cobrem 444 anúncios e o limite de 1.000.
 Para catálogos que crescerem além de 1.000 anúncios, migrar o snapshot para
 sincronização incremental/paginada com checkpoints; a solução atual não deve
 ser interpretada como um espelho ilimitado da base local.
+
+
+## Desktop 0.2.8 — catálogos maiores
+
+Quando há mais de 1.000 anúncios, o Desktop gera páginas de 200 registros,
+envia as páginas ao relay autenticado e só então publica o índice atualizado.
+O celular obtém as páginas em grupos de quatro requisições, valida a versão
+e a contagem e só substitui o estado/cache depois de obter todas. O servidor
+não aceita comandos ou leitura das páginas sem as credenciais de Desktop/celular.
+Até 10.000 anúncios podem ser enviados nesse protocolo. Acima disso, o
+usuário precisa de uma futura sincronização incremental com checkpoints.
+O snapshot legado de até 1.000 anúncios continua compatível.

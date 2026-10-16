@@ -1058,9 +1058,42 @@ async function refreshRelay() {
     snapshot = await relayApi(
       "/bridge/mobile/device/snapshot",
     );
+    if (snapshot.page_count > 1) {
+      const pageCount = Number(snapshot.page_count);
+      if (!snapshot.snapshot_id || !Number.isInteger(pageCount) || pageCount > 50) {
+        throw new Error("Snapshot paginado inválido.");
+      }
+      const collected = [...snapshot.listings];
+      // Four parallel requests at a time, only commit completed snapshots.
+      for (let start = 1; start < pageCount; start += 4) {
+        const indexes = Array.from(
+          {length: Math.min(4,pageCount-start)}, (_,i)=>start+i
+        );
+        const pages = await Promise.all(indexes.map(index =>
+          relayApi("/bridge/mobile/device/snapshot/page/" + index +
+            "?snapshot_id=" + encodeURIComponent(snapshot.snapshot_id))
+        ));
+        for (let i = 0; i < pages.length; i++) {
+          if (pages[i].snapshot_id !== snapshot.snapshot_id ||
+              pages[i].page_index !== indexes[i] ||
+              !Array.isArray(pages[i].listings)) {
+            throw new Error("Páginas do catálogo inconsistentes.");
+          }
+          collected.push(...pages[i].listings);
+        }
+      }
+      if (collected.length !== snapshot.summary.synced_listing_count &&
+          collected.length !== snapshot.summary.listing_count) {
+        throw new Error("Snapshot incompleto, mantendo a cópia anterior.");
+      }
+      snapshot.listings = collected;
+    }
     saveCachedSnapshot(snapshot);
-  } catch {
+  } catch (error) {
     snapshot = loadCachedSnapshot();
+    if (error.status !== 401 && !snapshot) {
+      toast("Não foi possível sincronizar: " + error.message);
+    }
   }
 
   if (snapshot) {

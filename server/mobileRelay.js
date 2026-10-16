@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const webpush = require("web-push");
+const {isSnapshotId, MAX_PAGES, PAGE_SIZE} = require("./services/mobileSnapshotPages");
 
 const PAIRING_TTL_MINUTES = 10;
 const MAX_SNAPSHOT_BYTES = 1024 * 1024;
@@ -111,6 +112,17 @@ function initializeMobileRelay(db) {
         desktop_id TEXT PRIMARY KEY,
         payload_json TEXT NOT NULL,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS mobile_snapshot_pages (
+        desktop_id TEXT NOT NULL,
+        snapshot_id TEXT NOT NULL,
+        page_index INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (desktop_id, snapshot_id, page_index)
       )
     `);
 
@@ -405,8 +417,11 @@ function sanitizeSnapshot(body) {
     : [];
 
   return {
-    version: 1,
+    version: 2,
     synced_at: new Date().toISOString(),
+    snapshot_id: isSnapshotId(input.snapshot_id) ? input.snapshot_id : null,
+    page_count: Number.isInteger(input.page_count) && input.page_count > 0 && input.page_count <= MAX_PAGES
+      ? input.page_count : 1,
     summary:
       input.summary && typeof input.summary === "object"
         ? {
@@ -1161,11 +1176,61 @@ function registerMobileRelay(app, db) {
   );
 
   app.put(
+    "/bridge/mobile/desktop/snapshot/page",
+    requireDesktop,
+    async (req,res) => {
+      try {
+        const snapshotId = req.body?.snapshot_id;
+        const pageIndex = req.body?.page_index;
+        const pageCount = req.body?.page_count;
+        const rows = req.body?.listings;
+        if (!isSnapshotId(snapshotId) || !Number.isInteger(pageIndex) ||
+            !Number.isInteger(pageCount) || pageCount < 2 || pageCount > MAX_PAGES ||
+            pageIndex < 1 || pageIndex >= pageCount ||
+            !Array.isArray(rows) || rows.length < 1 || rows.length > PAGE_SIZE) {
+          return res.status(400).json({error:"Página do snapshot inválida."});
+        }
+        const listings = sanitizeSnapshot({listings:rows}).listings;
+        const encoded = JSON.stringify(listings);
+        if (Buffer.byteLength(encoded,"utf8") > 512*1024) {
+          return res.status(413).json({error:"Página maior que 512 KiB."});
+        }
+        await dbRun(db,
+          `INSERT INTO mobile_snapshot_pages
+           (desktop_id, snapshot_id, page_index, payload_json)
+           VALUES (?,?,?,?)
+           ON CONFLICT(desktop_id, snapshot_id, page_index)
+           DO UPDATE SET payload_json=excluded.payload_json, created_at=CURRENT_TIMESTAMP`,
+          [req.mobileDesktop.id,snapshotId,pageIndex,encoded]
+        );
+        res.json({ok:true,page_index:pageIndex,count:listings.length});
+      } catch (error) {
+        res.status(500).json({error:error.message});
+      }
+    },
+  );
+
+  app.put(
     "/bridge/mobile/desktop/snapshot",
     requireDesktop,
     async (req, res) => {
       try {
         const snapshot = sanitizeSnapshot(req.body);
+        if (snapshot.page_count > 1) {
+          if (!isSnapshotId(snapshot.snapshot_id) || snapshot.listings.length > PAGE_SIZE) {
+            return res.status(400).json({error:"Snapshot paginado inválido."});
+          }
+          const found = await dbGet(db,
+            `SELECT COUNT(*) AS count, MIN(page_index) AS min_index, MAX(page_index) AS max_index
+             FROM mobile_snapshot_pages WHERE desktop_id = ? AND snapshot_id = ?`,
+            [req.mobileDesktop.id,snapshot.snapshot_id]
+          );
+          if (Number(found?.count) !== snapshot.page_count - 1 ||
+              Number(found?.min_index) !== 1 ||
+              Number(found?.max_index) !== snapshot.page_count - 1) {
+            return res.status(409).json({error:"Páginas incompletas. Snapshot anterior preservado."});
+          }
+        }
         const encoded = JSON.stringify(snapshot);
         const size = Buffer.byteLength(encoded, "utf8");
 
@@ -1185,7 +1250,10 @@ function registerMobileRelay(app, db) {
              updated_at = CURRENT_TIMESTAMP`,
           [req.mobileDesktop.id, encoded],
         );
-
+        await dbRun(db,
+          "DELETE FROM mobile_snapshot_pages WHERE desktop_id = ? AND snapshot_id != ?",
+          [req.mobileDesktop.id, snapshot.snapshot_id || ""]
+        );
         res.json({
           ok: true,
           bytes: size,
@@ -1508,6 +1576,37 @@ function registerMobileRelay(app, db) {
         });
       } catch (error) {
         res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  app.get(
+    "/bridge/mobile/device/snapshot/page/:index",
+    requireDevice,
+    async (req,res) => {
+      try {
+        const index = Number(req.params.index);
+        const snapshotId = String(req.query.snapshot_id || "");
+        if (!isSnapshotId(snapshotId) || !Number.isInteger(index) || index<1 || index>=MAX_PAGES) {
+          return res.status(400).json({error:"Referência de página inválida."});
+        }
+        const current = await dbGet(db,
+          "SELECT payload_json FROM mobile_snapshots WHERE desktop_id = ?",
+          [req.mobileDevice.desktop_id]
+        );
+        const committed = current ? JSON.parse(current.payload_json) : null;
+        if (committed?.snapshot_id !== snapshotId || index >= committed.page_count) {
+          return res.status(409).json({error:"Snapshot mudou, recarregue a lista."});
+        }
+        const row = await dbGet(db,
+          `SELECT payload_json FROM mobile_snapshot_pages
+           WHERE desktop_id=? AND snapshot_id=? AND page_index=?`,
+          [req.mobileDevice.desktop_id,snapshotId,index]
+        );
+        if (!row) return res.status(404).json({error:"Página não encontrada."});
+        res.json({snapshot_id:snapshotId,page_index:index,listings:JSON.parse(row.payload_json)});
+      } catch (error) {
+        res.status(500).json({error:error.message});
       }
     },
   );
