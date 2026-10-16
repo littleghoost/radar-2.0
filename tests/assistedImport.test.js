@@ -566,3 +566,40 @@ test("Avaliação de filmadora é bloqueada no radar de roupas, sem alterar regi
   const stillSaved=(await listings(radarClothes.id)).find(x=>x.id===row.id);
   assert.equal(stillSaved.status,"interessante");
 });
+
+test("Fila por dúvida retorna prioridade e modo recente preserva escolha",async()=>{
+ const target=await radar({category:"roupas",name:"Foco em roupas"});
+ const saved=await importItems(target.id,[
+   item("active-a",{title:"JNCO Dragon XXL Baggy Tribal Jeans"}),
+   item("active-b",{title:"Calça básica lisa"}),
+   item("active-c",{title:"Tapout caveira bordado"}),
+ ]);
+ assert.equal(saved.imported,3);
+ const uncertain=await api("/api/training/queue?radar_id="+target.id+"&mode=uncertain");
+ assert.equal(uncertain.mode,"uncertain");
+ assert.ok(uncertain.items.length>=3);
+ assert.ok(uncertain.items.every(row=>row.review_reason && Number.isFinite(row.review_priority)));
+ const recent=await api("/api/training/queue?radar_id="+target.id+"&mode=recent");
+ assert.equal(recent.mode,"recent");
+ assert.ok(recent.items.some(row=>!row.review_reason));
+});
+test("Conferência de duplicatas pode ocultar alerta, nunca excluir anúncios",async()=>{
+ const target=await radar({category:"roupas",name:"Catálogo seguro"});
+ const title="JNCO calça bordada dragon cargo cintura larga";
+ const saved=await importItems(target.id,[
+   item("review-dup-1",{title,platform:"OLX"}),
+   item("review-dup-2",{title,platform:"OLX"}),
+ ]);
+ assert.equal(saved.imported,2);
+ const before=await api("/api/catalog/review?radar_id="+target.id);
+ assert.ok(before.items.some(x=>x.code==="duplicate_title"));
+ const flagged=before.items.find(x=>x.code==="duplicate_title");
+ const result=await api("/api/catalog/review/dismiss","POST",{
+   listing_id:flagged.id,code:flagged.code,
+ });
+ assert.equal(result.listing_preserved,true);
+ const after=await api("/api/catalog/review?radar_id="+target.id);
+ assert.ok(!after.items.some(x=>x.id===flagged.id&&x.code==="duplicate_title"));
+ assert.equal((await listings(target.id)).length,2);
+ await api("/api/catalog/review/dismiss","POST",{listing_id:999999,code:"duplicate_title"},404);
+});

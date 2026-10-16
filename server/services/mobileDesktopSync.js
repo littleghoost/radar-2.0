@@ -5,6 +5,7 @@ const DEFAULT_CLOUD_URL =
 const DESKTOP_ID_KEY = "mobile_relay_desktop_id";
 const DESKTOP_SECRET_KEY = "mobile_relay_desktop_key";
 const LAST_SNAPSHOT_KEY = "mobile_relay_last_snapshot_at";
+const LAST_SNAPSHOT_COUNT_KEY = "mobile_relay_last_snapshot_listing_count";
 const LAST_PUSH_EVENT_KEY = "mobile_relay_last_push_event_id";
 const {paginateMobileListings} = require("./mobileSnapshotPages");
 const {randomUUID} = require("node:crypto");
@@ -404,6 +405,7 @@ function createMobileDesktopSync({
         LAST_SNAPSHOT_KEY,
         new Date().toISOString(),
       );
+      await setSetting(db,LAST_SNAPSHOT_COUNT_KEY,Math.min(snapshot.listings.length,10000));
 
       return result;
     } finally {
@@ -891,9 +893,13 @@ function createMobileDesktopSync({
     const [
       desktopId,
       lastSnapshotAt,
+      lastSnapshotCount,
+      liveCatalog,
     ] = await Promise.all([
       getSetting(db, DESKTOP_ID_KEY),
       getSetting(db, LAST_SNAPSHOT_KEY),
+      getSetting(db,LAST_SNAPSHOT_COUNT_KEY),
+      dbGet(db,"SELECT COUNT(*) AS count FROM listings"),
     ]);
 
     let devices = [];
@@ -922,6 +928,8 @@ function createMobileDesktopSync({
         ? devices
         : [],
       last_snapshot_at: lastSnapshotAt,
+      last_snapshot_listing_count: lastSnapshotCount===null ? null : Number(lastSnapshotCount),
+      desktop_listing_count: Number(liveCatalog?.count||0),
     };
   }
 

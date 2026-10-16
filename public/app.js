@@ -2824,6 +2824,7 @@ document.querySelectorAll(".nav-button").forEach((button) => {
 
     if (page === "connections") {
       loadConnections();
+      loadMobileSyncStatus().catch(()=>{});
     }
 
     if (page === "activity") {
@@ -3999,7 +4000,8 @@ async function refreshTrainerQueue() {
     return;
   }
   showTrainer("Preparando peças para sua avaliação...");
-  const result = await api("/api/training/queue?radar_id=" + id + "&limit=5");
+  const mode=$("#trainerMode")?.value || "uncertain";
+  const result = await api("/api/training/queue?radar_id=" + id + "&limit=5&mode=" + mode);
   if (id !== Number($("#trainerRadar").value) || $("#trainerPanel").hidden) return;
   trainerQueue = result.items || [];
   renderTrainer();
@@ -4025,6 +4027,7 @@ function renderTrainer() {
         <h4>${escapeHtml(item.title)}</h4>
         <strong>${money(item.current_price,item.currency)}</strong>
         <p>Você considera essa peça diferenciada e interessante para o seu radar? Não use só a marca como critério; observe modelagem, gráficos e detalhes.</p>
+        ${item.review_reason ? `<p class="training-reason"><strong>Por que esta peça?</strong> ${escapeHtml(item.review_reason)}</p>` : ""}
         ${item.visual_learning_ready
           ? '<p>Avaliação visual disponível: sua resposta contribui para o reconhecimento por similaridade.</p>'
           : '<p>Esta imagem ainda não tem embedding visual. Sua decisão ensina os sinais do título agora; a aprendizagem visual exige processar as fotos.</p>'}
@@ -4088,6 +4091,10 @@ $("#closeTrainer").addEventListener("click",()=>{
   $("#trainerPanel").hidden=true;
   $("#openTrainer").setAttribute("aria-expanded","false");
 });
+$("#trainerMode")?.addEventListener("change",()=>{
+  trainerReviewed=0;
+  refreshTrainerQueue().catch(error=>showTrainer(error.message || "Falha ao escolher modo."));
+});
 $("#trainerRadar").addEventListener("change",()=>{
   if (trainerVisualBusy) {
     notify("Termine o lote de imagens antes de mudar de radar.","error");
@@ -4096,4 +4103,88 @@ $("#trainerRadar").addEventListener("change",()=>{
   }
   trainerReviewed=0;
   refreshTrainerQueue().catch(error=>showTrainer(error.message || "Falha ao carregar as peças."));
+});
+
+
+// Revisão assistida: nenhum alerta exclui ou descarta anúncios automaticamente.
+async function refreshCatalogReview() {
+  const results=$("#catalogReviewContent");
+  const filter=$("#radarFilter")?.value;
+  const id=Number(filter);
+  results.textContent="Procurando anúncios para conferir...";
+  const path="/api/catalog/review"+(Number.isInteger(id)&&id>0?"?radar_id="+id:"");
+  const data=await api(path);
+  if ($("#catalogReviewPanel").hidden)return;
+  $("#catalogReviewSummary").textContent=`${data.total} alerta(s) · ${(data.counts?.category||0)} categorias · ${(data.counts?.duplicate_title||0)} possíveis duplicatas · ${(data.counts?.invalid_link||0)} links inválidos`;
+  if(!data.items?.length) {
+    results.textContent="Nenhum alerta pendente neste filtro. Suas avaliações continuam salvas.";
+    return;
+  }
+  results.innerHTML=data.items.map(item=>{
+    const link=safeExternalUrl(item.url);
+    return `<article class="review-issue" data-review-id="${item.id}">
+      <div class="training-meta">${escapeHtml(item.platform)} · #${item.id} · ${escapeHtml(item.status)}</div>
+      <h4>${escapeHtml(item.title)}</h4>
+      <p><strong>Conferir:</strong> ${escapeHtml(item.reason)}</p>
+      <div class="review-issue-actions">
+        ${link ? `<button class="secondary" type="button" data-review-open="${escapeAttr(link)}">Abrir anúncio individual</button>` : ""}
+        <button class="secondary" type="button" data-review-dismiss="${escapeAttr(item.code)}" data-review-item="${item.id}">Não mostrar este alerta</button>
+      </div></article>`;
+  }).join("");
+  results.querySelectorAll("[data-review-open]").forEach(b=>b.addEventListener("click",()=>openExternalUrl(b.dataset.reviewOpen)));
+  results.querySelectorAll("[data-review-dismiss]").forEach(b=>b.addEventListener("click",async()=>{
+    b.disabled=true;
+    try {
+      await api("/api/catalog/review/dismiss",{
+        method:"POST",
+        body:JSON.stringify({listing_id:Number(b.dataset.reviewItem),code:b.dataset.reviewDismiss}),
+      });
+      notify("Alerta ocultado. O anúncio continua salvo.");
+      await refreshCatalogReview();
+    }catch(error){notify(error.message,"error");b.disabled=false;}
+  }));
+}
+$("#openCatalogReview")?.addEventListener("click",()=>{
+  const panel=$("#catalogReviewPanel");
+  panel.hidden=!panel.hidden;
+  $("#openCatalogReview").setAttribute("aria-expanded",String(!panel.hidden));
+  if(!panel.hidden)refreshCatalogReview().catch(error=>{
+    $("#catalogReviewContent").textContent=error.message||"Falha na revisão.";
+  });
+});
+$("#closeCatalogReview")?.addEventListener("click",()=>{
+  $("#catalogReviewPanel").hidden=true;
+  $("#openCatalogReview").setAttribute("aria-expanded","false");
+});
+
+
+async function loadMobileSyncStatus() {
+  const target=$("#mobileSyncStatus");
+  if(!target)return;
+  try {
+    const data=await api("/api/mobile/status");
+    if(!data.enabled){target.textContent="Conectividade mobile disponível somente no Radar Desktop.";return;}
+    const count=Number(data.paired_devices||0);
+    const date=Date.parse(data.last_snapshot_at||"");
+    const age=Number.isFinite(date) ? (Date.now()-date)/60000 : Infinity;
+    const last=Number.isFinite(date) ? new Date(date).toLocaleString("pt-BR"):"Ainda não realizada";
+    const synced=data.last_snapshot_listing_count;
+    const current=data.desktop_listing_count;
+    const totals=synced===null||synced===undefined ? " · Contagem após a próxima sincronização" :
+      ` · ${synced}/${current} anúncios no último envio`;
+    target.textContent=`${count} celular(es) pareado(s) · Relay ${data.relay_ok?"conectado":"indisponível"} · Último envio: ${last}`+
+      totals+(age>30 || (synced!==null&&synced!==undefined && Number(synced)!==Number(current))
+        ? ". Catálogo pode estar desatualizado no celular; sincronize novamente." : "");
+  }catch(error){target.textContent="Não consegui consultar a sincronização: "+error.message;}
+}
+$("#syncMobileNow")?.addEventListener("click",async()=>{
+  const button=$("#syncMobileNow"),target=$("#mobileSyncStatus");
+  button.disabled=true;
+  target.textContent="Enviando catálogo e buscando mudanças do celular...";
+  try {
+    const response=await api("/api/mobile/sync-now",{method:"POST"});
+    await loadMobileSyncStatus();
+    notify(response?.snapshot===null?"A sincronização já estava em andamento. Confira novamente.":"Sincronização com celular solicitada.");
+  }catch(error){target.textContent="Falha na sincronização: "+error.message;notify(error.message,"error");}
+  finally {button.disabled=false;}
 });

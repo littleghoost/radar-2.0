@@ -140,3 +140,25 @@ test('Página apenas com itens inválidos não importa nem fica repetindo tentat
  assert.equal(result.filtered,1);
  assert.equal(calls,0);
 });
+
+test("Busca com anúncios só duplicados continua para próxima busca",async()=>{
+ const f=backgroundFixture();
+ let runs=0;
+ f.context.runAutoBrowseJob=async()=>{
+   runs+=1;
+   return runs===1
+     ? {ok:true,capture_count:6,imported:0,updated:0,price_drops:0}
+     : {ok:true,capture_count:3,imported:2,updated:0};
+ };
+ await f.context.processAutoBrowseTick();
+ assert.equal(runs,2);
+ assert.equal(f.state.autoBrowseQueue.length,0);
+ assert.equal(f.state.lastAutoBrowseImported,2);
+});
+test("Termos de busca de moda não dependem de palavras genéricas",()=>{
+ const f=backgroundFixture();
+ const clean=f.context.sourceOptimizedQuery("enjoei","JNCO vintage original raro baggy",{category:"roupas"});
+ assert.match(clean,/JNCO/);
+ assert.match(clean,/baggy/);
+ assert.doesNotMatch(clean,/original|vintage|raro/i);
+});
