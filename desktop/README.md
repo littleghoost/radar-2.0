@@ -210,3 +210,13 @@ Aumenta de 250 para 1.000 o limite de anúncios enviados ao Mobile. O
 relay valida e guarda o mesmo limite. Atualize tanto o Desktop quanto a
 nuvem; se apenas um dos lados estiver atualizado, a contagem seguirá 250.
 O Mobile renderiza os anúncios progressivamente em lotes de 60.
+
+## 0.2.7 — importação assistida e scores atualizados
+
+Ao reimportar um anúncio com título, preço ou imagem alterados, o Radar recalcula
+os scores e as regras do radar, preservando o estado e as notas do anúncio.
+O resumo da importação passa a mostrar também a quantidade de anúncios atualizados.
+
+O feedback de interessante/descartado agora atualiza a ordenação junto com o
+Grail Score, respeitando os termos de exclusão. A edição de anúncios também
+recusa estados inválidos para manter os filtros consistentes.

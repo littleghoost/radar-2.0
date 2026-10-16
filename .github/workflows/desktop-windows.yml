@@ -2,6 +2,16 @@ name: Radar 2.0 Desktop (Windows)
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/desktop-windows.yml"
+      - "desktop/**"
+      - "public/**"
+      - "server/**"
+      - "tests/**"
+      - "package.json"
+      - "package-lock.json"
   push:
     branches: [main]
     tags:
@@ -11,6 +21,7 @@ on:
       - "desktop/**"
       - "public/**"
       - "server/**"
+      - "tests/**"
       - "package.json"
       - "package-lock.json"
 
@@ -42,8 +53,8 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
 
-      - name: Test update checker and release validation
-        run: node --test tests/desktopUpdates.test.js tests/requestPolicy.test.js tests/sourcesIntegration.test.js tests/updateShutdownControl.test.js tests/rescheduleFailedRadar.test.js tests/mobileFullSnapshot.test.js
+      - name: Test backend, assisted import and release validation
+        run: node --test tests/desktopUpdates.test.js tests/requestPolicy.test.js tests/sourcesIntegration.test.js tests/updateShutdownControl.test.js tests/rescheduleFailedRadar.test.js tests/mobileFullSnapshot.test.js tests/assistedImport.test.js
 
       - name: Validate release tag matches app version
         if: startsWith(github.ref, 'refs/tags/v')
