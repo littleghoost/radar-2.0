@@ -137,6 +137,17 @@
               <option value="">Todos os radares</option>
             </select>
 
+            <select id="regionFilter" aria-label="Origem dos anúncios" title="País informado ou origem presumida pelo marketplace">
+              <option value="">Todas as origens</option>
+              <option value="br">Brasil</option>
+              <option value="international">Internacional</option>
+              <option value="unknown">Origem a confirmar</option>
+            </select>
+
+            <select id="platformFilter" aria-label="Filtrar por site">
+              <option value="">Todos os sites</option>
+            </select>
+
             <select id="statusFilter">
               <option value="todos">Todos os status</option>
 
@@ -173,6 +184,7 @@
             <div class="feed-toolbar-status">
               <span class="feed-live-dot" aria-hidden="true"></span>
               <span id="listingResultsInfo">Carregando anúncios...</span>
+              <small id="regionSummary" class="region-summary"></small>
             </div>
             <div class="feed-toolbar-actions">
               <button id="resetListingFilters" type="button" class="secondary compact">Limpar filtros</button>
@@ -278,6 +290,46 @@
           </div>
 
           <div id="connectionsGrid" class="connections-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <span class="eyebrow">GARIMPO BRASILEIRO</span>
+              <h2>Fontes nacionais</h2>
+              <p class="section-hint">Abra o marketplace no Opera GX, use a Bridge para analisar os anúncios visíveis e salve buscas por site. Acesso não significa coleta automática habilitada.</p>
+            </div>
+          </div>
+          <div class="national-source-grid">
+            <article class="national-source">
+              <strong>OLX</strong><small>Usados locais, peças raras e Handycams.</small>
+              <button class="secondary compact" type="button" data-national-site="https://www.olx.com.br/">Abrir OLX</button>
+            </article>
+            <article class="national-source">
+              <strong>Enjoei</strong><small>Moda usada, vintage e brechós.</small>
+              <button class="secondary compact" type="button" data-national-site="https://www.enjoei.com.br/">Abrir Enjoei</button>
+            </article>
+            <article class="national-source">
+              <strong>Mercado Livre</strong><small>Filmadoras, eletrônicos e peças de roupa.</small>
+              <button class="secondary compact" type="button" data-national-site="https://www.mercadolivre.com.br/">Abrir Mercado Livre</button>
+            </article>
+            <article class="national-source">
+              <strong>Facebook Marketplace</strong><small>Anúncios locais; confirme a região do vendedor.</small>
+              <button class="secondary compact" type="button" data-national-site="https://www.facebook.com/marketplace/">Abrir Facebook</button>
+            </article>
+            <article class="national-source">
+              <strong>Shopee</strong><small>Brechós e vendedores brasileiros ou internacionais.</small>
+              <button class="secondary compact" type="button" data-national-site="https://shopee.com.br/search?keyword=brech%C3%B3">Abrir Shopee</button>
+            </article>
+            <article class="national-source">
+              <strong>Repassa</strong><small>Brechó com peças de segunda mão, sobretudo femininas.</small>
+              <button class="secondary compact" type="button" data-national-site="https://www.repassa.com.br/prod">Abrir Repassa</button>
+            </article>
+            <article class="national-source">
+              <strong>eBrecho</strong><small>Vitrines de brechós; suporte de captura experimental.</small>
+              <button class="secondary compact" type="button" data-national-site="https://www.ebrecho.com.br/">Abrir eBrecho</button>
+            </article>
+          </div>
         </section>
       </section>
 

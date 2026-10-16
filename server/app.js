@@ -19,6 +19,7 @@ const { createMobileDesktopSync } = require("./services/mobileDesktopSync");
 const { createDesktopBackupService } = require("./services/desktopBackups");
 const { checkDesktopUpdate } = require("./services/desktopUpdates");
 const { sourceRequestPolicy } = require("./services/sources/requestPolicy");
+const { listingRegion } = require("./services/listingRegion");
 const {
   createSearchPlanner,
 } = require("./services/searchPlanner");
@@ -3247,7 +3248,7 @@ app.get(
 
   async (req, res) => {
     try {
-      const { radar_id, status, search } = req.query;
+      const { radar_id, status, search, region, platform } = req.query;
 
       const filters = [];
 
@@ -3279,6 +3280,14 @@ app.get(
         const q = `%${search}%`;
 
         params.push(q, q, q);
+      }
+
+      if (typeof platform === "string" && platform.length <= 80) {
+        const selectedPlatform = platform.trim();
+        if (selectedPlatform) {
+          filters.push("l.platform = ?");
+          params.push(selectedPlatform);
+        }
       }
 
       const where = filters.length
@@ -3382,6 +3391,12 @@ app.get(
         params,
       );
 
+      const selectedRegion = ["br", "international", "unknown"].includes(region)
+        ? region : null;
+      const matchingRows = selectedRegion
+        ? rows.filter(row => listingRegion(row).region === selectedRegion)
+        : rows;
+
       const internationalSettings =
         await getInternationalCostSettings().catch(
           () => null,
@@ -3391,7 +3406,7 @@ app.get(
 
       if (
         internationalSettings?.enabled &&
-        rows.some((row) =>
+        matchingRows.some((row) =>
           shouldEstimateInternationalCost(row),
         )
       ) {
@@ -3403,7 +3418,7 @@ app.get(
       }
 
       res.json(
-        rows.map((row) => {
+        matchingRows.map((row) => {
           let internationalCost = null;
 
           if (
@@ -3443,6 +3458,7 @@ app.get(
 
           return {
             ...row,
+            ...listingRegion(row),
             ...deriveListingInsights(row),
             international_cost: internationalCost,
           };
@@ -3502,6 +3518,20 @@ function inferBrowserSourceIdentity(platform, url) {
       /\/marketplace\/item\/(\d+)/i,
     );
     if (match) externalId = match[1];
+  } else if (platformText.includes("shopee") || lowerUrl.includes("shopee.com.br")) {
+    sourceKey = "shopee";
+    const pathname = new URL(urlText).pathname;
+    const match = pathname.match(/-i\.(\d+)\.(\d+)(?:\/|$)/i) ||
+      pathname.match(/\/product\/(\d+)\/(\d+)(?:\/|$)/i);
+    if (match) externalId = `${match[1]}:${match[2]}`;
+  } else if (platformText.includes("repassa") || lowerUrl.includes("repassa.com.br")) {
+    sourceKey = "repassa";
+    const pathname = new URL(urlText).pathname;
+    if (/^\/produtos\/[^/]+/.test(pathname)) externalId = pathname.toLowerCase();
+  } else if (platformText.includes("ebrecho") || lowerUrl.includes("ebrecho.com.br")) {
+    sourceKey = "ebrecho";
+    const pathname = new URL(urlText).pathname;
+    if (/^\/(?:produto|products?|items?)\/[^/]+/.test(pathname)) externalId = pathname.toLowerCase();
   } else if (platformText.includes("depop") || lowerUrl.includes("depop.com")) {
     sourceKey = "depop";
     const match = new URL(urlText).pathname.match(

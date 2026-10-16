@@ -1899,6 +1899,9 @@ async function loadListings() {
 
   const radar = $("#radarFilter").value;
 
+  const region = $("#regionFilter")?.value || "";
+  const platform = $("#platformFilter")?.value || "";
+
   const status = $("#statusFilter").value;
 
   const search = $("#searchInput").value.trim();
@@ -1914,6 +1917,9 @@ async function loadListings() {
   if (search) {
     params.set("search", search);
   }
+
+  if (region) params.set("region", region);
+  if (platform) params.set("platform", platform);
 
   const fetchedListings = await api(`/api/listings?${params.toString()}`);
 
@@ -1990,6 +1996,25 @@ async function loadListings() {
   const allListings = await api("/api/listings");
   if (requestId !== listingRequestId) return;
   updateFeedCount(state.listings.length);
+
+  const siteFilter = $("#platformFilter");
+  if (siteFilter) {
+    const previous = siteFilter.value;
+    const platforms = [...new Set(allListings.map(item => item.platform).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "pt-BR"));
+    siteFilter.replaceChildren(new Option("Todos os sites", ""),
+      ...platforms.map(value => new Option(value, value)));
+    siteFilter.value = platforms.includes(previous) ? previous : "";
+  }
+  const originCounts = { br: 0, international: 0, unknown: 0 };
+  allListings.forEach(item => {
+    const origin = item.region || "unknown";
+    if (origin in originCounts) originCounts[origin]++;
+  });
+  const originInfo = $("#regionSummary");
+  if (originInfo) {
+    originInfo.textContent = `Brasil ${originCounts.br} · Internacional ${originCounts.international} · A confirmar ${originCounts.unknown}`;
+  }
 
   $("#statListings").textContent = allListings.length;
 
@@ -2094,6 +2119,15 @@ async function loadListings() {
 
                   </span>
 
+                  <span class="region-tag ${escapeAttr(listing.region || "unknown")}"
+                    title="${listing.region_basis === "item_country"
+                      ? "País informado na origem do anúncio"
+                      : listing.region_basis === "marketplace"
+                        ? "Origem presumida pela plataforma — confirme o vendedor e o envio"
+                        : "O anúncio não informa onde o item está localizado"}">
+                    ${listing.region === "br" ? "BRASIL"
+                      : listing.region === "international" ? "EXTERIOR" : "A CONFIRMAR"}
+                  </span>
 
                   <span
 
@@ -2695,6 +2729,13 @@ $("#radarFilter").onchange = (event) => {
   loadListings();
 };
 
+document.querySelectorAll("[data-national-site]").forEach(button => {
+  button.addEventListener("click", () => openExternalUrl(button.dataset.nationalSite));
+});
+
+$("#regionFilter").onchange = loadListings;
+$("#platformFilter").onchange = loadListings;
+
 $("#statusFilter").onchange = loadListings;
 
 $("#inboxFilter").onchange = loadListings;
@@ -2707,6 +2748,8 @@ $("#resetListingFilters")?.addEventListener("click", () => {
     if (input) input.value = "";
   });
   $("#statusFilter").value = "todos";
+  $("#regionFilter").value = "";
+  $("#platformFilter").value = "";
   $("#sortFilter").value = "default";
   state.activeRadar = "";
   loadRadars();
