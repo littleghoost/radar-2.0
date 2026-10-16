@@ -551,7 +551,7 @@
       const gated = /\/(?:login|signin|sign-in|auth|captcha|challenge)(?:\/|[?#]|$)/i.test(location.href);
       const password = document.querySelector?.('input[type="password"]');
       const challenge = document.querySelector?.('iframe[src*="captcha"], iframe[src*="challenges.cloudflare.com"]');
-      diagnostics.requiresUserAction = visible(challenge) || /verifique que voc[eê] [eé] humano|verify you are human|access denied|acesso negado/i.test(bodyText)
+      diagnostics.requiresUserAction = visible(challenge) || /verifique que voc[eê] [eé] humano|verify you are human|access denied|acesso negado|performing security verification|this website uses a security service|checking your browser|just a moment/i.test(bodyText)
         ? 'verification_required' : gated || visible(password) ? 'login_required' : null;
     }
     return {

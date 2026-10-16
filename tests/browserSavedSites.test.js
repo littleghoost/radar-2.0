@@ -123,3 +123,16 @@ test('Sites genéricos não confundem páginas de categoria com anúncios indivi
     assert.equal(context.__testListingUrl('https://www.loja-exemplo.com'+pathPart,'www.loja-exemplo.com'),true,pathPart);
   }
 });
+
+test('Página real com bloqueio de segurança indica ação do usuário, sem inventar anúncios',()=>{
+  const document={body:{innerText:'www.grailed.com Performing security verification. This website uses a security service to protect against malicious bots.'},
+    documentElement:{},querySelectorAll(){return []},addEventListener(){}};
+  const ctx=vm.createContext({URL,Date,console,location:{href:'https://www.grailed.com/shop?query=jnco',hostname:'www.grailed.com'},document,
+    MutationObserver:class{observe(){}},setTimeout(){return 1},clearTimeout(){},addEventListener(){},
+    chrome:{runtime:{onMessage:{addListener(){}}},storage:{local:{async get(){return {autoCaptureEnabled:false}}},onChanged:{addListener(){}}}}});
+  for(const name of ['marketplaces.js','collector.js'])
+    vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension',name),'utf8'),ctx);
+  const capture=ctx.__radarCollectVisibleListings(100);
+  assert.equal(capture.items.length,0);
+  assert.equal(capture.diagnostics.requiresUserAction,'verification_required');
+});

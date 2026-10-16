@@ -532,6 +532,62 @@ async function collectFromAutoBrowseTab(
     new Error('Não consegui coletar a busca.');
 }
 
+// Páginas virtualizadas podem substituir cards durante a rolagem. Guardamos
+// os anúncios vistos, sem repetir links, e aproveitamos imagens carregadas depois.
+async function collectProgressivelyFromTab(tabId, source = '') {
+  const first = await collectFromAutoBrowseTab(tabId, source);
+  if (!first?.items?.length || first.diagnostics?.requiresUserAction) return first;
+  if (!['mercari', 'vinted', 'poshmark'].includes(source)) return first;
+
+  const found = new Map();
+  const merge = (capture) => {
+    for (const item of capture?.items || []) {
+      if (!item?.url) continue;
+      const previous = found.get(item.url);
+      if (!previous) found.set(item.url, item);
+      else found.set(item.url, {
+        ...previous,
+        ...item,
+        image_url: item.image_url || previous.image_url,
+      });
+    }
+  };
+  merge(first);
+  let passes = 0;
+  let latest = first;
+  for (let step = 0; step < 4 && found.size < 100; step++) {
+    try {
+      const [scroll] = await chrome.scripting.executeScript({
+        target: {tabId},
+        func: () => {
+          const before = window.scrollY;
+          window.scrollBy(0, Math.max(450, Math.round(window.innerHeight * 0.85)));
+          return {moved: window.scrollY > before};
+        },
+      });
+      if (!scroll?.result?.moved) break;
+      await delay(1100);
+      const response = await chrome.tabs.sendMessage(tabId, {
+        type: 'radar-collect-now',
+        limit: 100,
+      });
+      if (!response?.capture) break;
+      latest = response.capture;
+      if (latest.diagnostics?.requiresUserAction) {
+        return {...first, items: [...found.values()].slice(0, 100),
+          diagnostics: {...first.diagnostics, requiresUserAction: latest.diagnostics.requiresUserAction}};
+      }
+      merge(latest);
+      passes++;
+    } catch {
+      // A coleta inicial continua válida se a aba não permitir scroll/injeção.
+      break;
+    }
+  }
+  return {...first, items: [...found.values()].slice(0, 100),
+    diagnostics: {...first.diagnostics, progressivePasses: passes, progressiveUnique: found.size}};
+}
+
 let currentAutoBrowseWorker = null;
 
 async function createAutoBrowseWorker(url) {
@@ -613,7 +669,7 @@ async function runAutoBrowseJob(job) {
     await waitForTabComplete(tab);
 
     const capture =
-      await collectFromAutoBrowseTab(
+      await collectProgressivelyFromTab(
         tab.id,
         job.source,
       );

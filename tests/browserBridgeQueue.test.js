@@ -54,3 +54,34 @@ test("Falha parcial de importação permanece visível e permite nova tentativa"
  assert.equal(result.ok,false);assert.equal(result.retryable,true);assert.equal(result.result.imported,2);
  assert.match(f.state.lastAutoCaptureError,/1 anúncio/);
 });
+
+test('Coleta progressiva mantém cards de páginas virtualizadas e recupera imagens',async()=>{
+  const f=backgroundFixture();
+  let scrolls=0, captures=0;
+  const item=(id,image=null)=>({url:'https://jp.mercari.com/item/m'+id,title:'Sony Handycam',current_price:3000,image_url:image});
+  f.context.collectFromAutoBrowseTab=async()=>({items:[item('11111111111')],diagnostics:{noResults:false}});
+  f.context.chrome.scripting={executeScript:async()=>[{result:{moved:++scrolls<=2}}]};
+  f.context.chrome.tabs.sendMessage=async()=>{
+    captures++;
+    return {capture:{items:captures===1?
+      [item('11111111111','https://example.com/camera.jpg'),item('22222222222')]:
+      [item('22222222222'),item('33333333333')]}}
+  };
+  f.context.delay=async()=>{};
+  const capture=await f.context.collectProgressivelyFromTab(55,'mercari');
+  assert.equal(capture.items.length,3);
+  assert.equal(capture.items[0].image_url,'https://example.com/camera.jpg');
+  assert.equal(capture.diagnostics.progressivePasses,2);
+  assert.equal(capture.diagnostics.progressiveUnique,3);
+});
+
+test('Bloqueio durante scroll suspende a coleta, sem perder diagnóstico',async()=>{
+  const f=backgroundFixture();
+  f.context.collectFromAutoBrowseTab=async()=>({items:[{url:'https://www.vinted.fr/items/12345'}],diagnostics:{}});
+  f.context.chrome.scripting={executeScript:async()=>[{result:{moved:true}}]};
+  f.context.chrome.tabs.sendMessage=async()=>({capture:{items:[],diagnostics:{requiresUserAction:'verification_required'}}});
+  f.context.delay=async()=>{};
+  const capture=await f.context.collectProgressivelyFromTab(55,'vinted');
+  assert.equal(capture.diagnostics.requiresUserAction,'verification_required');
+  assert.equal(capture.items.length,1);
+});

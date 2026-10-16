@@ -30,3 +30,9 @@ A extensão não solicita cookies, senhas ou armazenamento dos marketplaces. Nã
 - Testes de regressão adicionais verificam limites de permissão, agendamento, deduplicação das buscas salvas e filtros de link.
 
 A atualização do código não equivale à atualização da extensão carregada no navegador: recarregue-a em `opera://extensions` ou `chrome://extensions` após a instalação da versão de desenvolvimento.
+
+### Verificações com páginas reais (16/10/2026)
+
+Em um perfil temporário do Edge, fora da sessão do Opera GX, o coletor extraiu links individuais no Mercari JP (15), Vinted FR (96) e Poshmark (8 inicialmente, 15 após rolagem). O Mercari carrega imagens tardiamente; a rolagem recuperou imagens visíveis, mas o site virtualiza cards e pode descartar os anteriores do DOM. A Bridge passou a acumular os cards durante até quatro rolagens limitadas, guardando a foto quando for carregada. No Grailed a página apresentou verificação de segurança e não houve coleta; agora isso é indicado como `verification_required`, sem tentativa de contorno.
+
+Testamos também a instalação isolada da extensão no Edge: o popup da versão 0.4.0 carregou com os controles de sites e buscas salvas. **Ainda são necessários testes manuais com permissões concedidas e sessões autenticadas no navegador habitual** antes de declarar compatibilidade completa com todas as plataformas. A página de teste e o banco da instalação Windows são mantidos separados.
