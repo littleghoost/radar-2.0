@@ -53,11 +53,14 @@ Campos do anúncio:
 - `GET /api/radars/:id/reference-image` exibe a referência.
 - `DELETE /api/radars/:id/reference-image` remove a referência visual e o embedding associado.
 - `POST /api/radars/:id/reindex-visual` recalcula os anúncios já salvos, incluindo IA semântica quando disponível.
+- A reanálise retorna um lote de até 100 itens (50 por padrão). Envie `after_id`, `through_id` e `limit` no JSON; a primeira chamada pode omitir `through_id`. Continue usando `next_after_id` e o mesmo `through_id` enquanto `has_more` for verdadeiro. A resposta também contém `analyzed`, `failed` e `total`.
 - `GET /api/semantic/status` informa se o motor semântico está ativo, carregado e qual modelo está sendo usado.
 
 ## Score
 
 O `visual_weight` define quanto o conjunto visual pesa contra texto e preço. Dentro da parte visual, `semantic_weight` define quanto o embedding semântico pesa contra a assinatura clássica. Isso deixa o usuário escolher entre fidelidade visual literal e semelhança de estilo/conceito.
+
+Zero é um valor válido para esses pesos e para `criteria_weight`. Exclusões continuam obrigatórias mesmo com peso de regras zero. Falhas de download/inferência deixam o score correspondente nulo, distinguindo ausência de análise de uma comparação negativa. O limite visual só exclui quando há um score disponível abaixo do limite; as regras de texto/categoria continuam aplicadas. A reimportação pode recuperar uma imagem anteriormente indisponível.
 
 ## Web x desktop
 

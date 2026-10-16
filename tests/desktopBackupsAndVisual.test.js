@@ -5,7 +5,7 @@ const path=require("node:path"),fs=require("node:fs/promises");
 const os=require("node:os");
 const sqlite3=require("sqlite3");
 const {createDesktopBackupService}=require("../server/services/desktopBackups");
-const {extractVisualFeatures,visualSimilarity,hybridScore}=require("../server/services/visualSimilarity");
+const {extractVisualFeatures,visualSimilarity,hybridScore,passesVisualThreshold}=require("../server/services/visualSimilarity");
 const {evaluateRadarCriteria,blendCriteriaScore}=require("../server/services/radarCriteria");
 const {getAssistedSourceStatuses}=require("../server/services/sources/assisted");
 const {PNG}=require("pngjs");
@@ -60,4 +60,18 @@ test("Fontes sem APIs públicas não são anunciadas como busca automática",()=
   assert.equal(sources[key].automatic_api,false);
   assert.equal(sources[key].assisted_import,true);
  }
+});
+
+test("Peso de regras zero preserva score base sem liberar exclusões",()=>{
+ const radar={query:"camisa vintage",criteria_weight:0,priority_terms_json:'["vintage"]',exclude_terms_json:'["defeito"]'};
+ const normal=evaluateRadarCriteria(radar,{title:"Camisa vintage",current_price:80});
+ assert.equal(blendCriteriaScore(42,normal,radar),42);
+ const excluded=evaluateRadarCriteria(radar,{title:"Camisa vintage com defeito",current_price:80});
+ assert.equal(blendCriteriaScore(42,excluded,radar),0);
+});
+
+test("Limite visual distingue imagem indisponível de comparação negativa",()=>{
+ assert.equal(passesVisualThreshold({visual_score:null,semantic_score:null},0.45),true);
+ assert.equal(passesVisualThreshold({visual_score:0,semantic_score:null},0.45),false);
+ assert.equal(passesVisualThreshold({visual_score:20,semantic_score:80},0.45),true);
 });

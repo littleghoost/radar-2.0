@@ -193,10 +193,19 @@ function hybridScore({ visual = null, semantic = null, query, title, price, maxP
   return Math.round((visualBlend * vw + text * remaining * 0.7 + priceComponent * remaining * 0.3) * 100);
 }
 
+function passesVisualThreshold(listing, minimum) {
+  const available = [listing.visual_score, listing.semantic_score]
+    .filter((score) => score !== null && score !== undefined && Number.isFinite(Number(score)))
+    .map(Number);
+  // A network/model failure is missing evidence, not evidence of a mismatch.
+  return available.length === 0 || Math.max(...available) >= minimum * 100;
+}
+
 module.exports = {
   extractVisualFeatures,
   extractVisualFeaturesFromFile,
   downloadImage,
   visualSimilarity,
   hybridScore,
+  passesVisualThreshold,
 };

@@ -1,7 +1,7 @@
 const fs = require('fs/promises');
 const { searchAllSources, checkListingAvailability } = require('./sources');
 const { createUpdateShutdownControl } = require("./updateShutdownControl");
-const { downloadImage, extractVisualFeatures, visualSimilarity, hybridScore } = require('./visualSimilarity');
+const { downloadImage, extractVisualFeatures, visualSimilarity, hybridScore, passesVisualThreshold } = require('./visualSimilarity');
 const { embedImage, cosineSimilarity: semanticSimilarity } = require('./semanticVision');
 const { buildPreferenceProfile, preferenceScore, grailScore } = require('./preferenceLearning');
 const {
@@ -883,10 +883,10 @@ function createRadarRunner({
                 ),
               );
             } catch {
-              visualScore = 0;
+              visualScore = null;
             }
           } else {
-            visualScore = 0;
+            visualScore = null;
           }
         }
 
@@ -904,10 +904,10 @@ function createRadarRunner({
                 ),
               );
             } catch {
-              semanticScore = 0;
+              semanticScore = null;
             }
           } else {
-            semanticScore = 0;
+            semanticScore = null;
           }
         }
 
@@ -1003,7 +1003,7 @@ function createRadarRunner({
 
       if (visualEnabled || semanticEnabled) {
         results = results
-          .filter((item) => Math.max(Number(item.visual_score) || 0, Number(item.semantic_score) || 0) >= minVisualSimilarity * 100)
+          .filter((item) => passesVisualThreshold(item, minVisualSimilarity))
           .sort((a, b) => Number(b.ranking_score ?? b.grail_score ?? b.hybrid_score ?? 0) - Number(a.ranking_score ?? a.grail_score ?? a.hybrid_score ?? 0));
       } else {
         results.sort((a, b) => Number(b.ranking_score ?? b.grail_score ?? b.hybrid_score ?? 0) - Number(a.ranking_score ?? a.grail_score ?? a.hybrid_score ?? 0));

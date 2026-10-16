@@ -240,3 +240,15 @@ As melhorias de IA CLIP foram exercitadas por testes de comparação perceptual
 e filtros com imagens sintéticas; precisão com anúncios reais ainda requer
 uma amostra avaliada manualmente. Sincronização paginada não é incremental:
 o Desktop ainda envia um novo snapshot completo a cada atualização.
+
+## Desktop 0.2.9 — análise visual e Bridge confiável
+
+- Pesos visuais, semânticos e de regras aceitam zero e preservam esse valor ao editar outros campos.
+- Uma imagem indisponível não é tratada como comparação de 0%. Texto, preço e regras continuam disponíveis; a reimportação tenta recuperar a análise que faltava.
+- Alterações apenas de preço ou título reutilizam a análise da mesma foto. Trocar a URL da foto invalida essa reutilização.
+- Reanálise visual em lotes com progresso, cobrindo também catálogos com mais de 500 anúncios. Anúncios que chegam durante a operação ficam para a próxima reanálise.
+- Bridge 0.3.12 captura mudanças de título/foto, imagens lazy-loaded e alterações de atributos. Falhas temporárias são tentadas novamente com intervalo crescente, até um minuto.
+- Auto-Browse preserva buscas com falha temporária de importação e a busca em andamento ao cancelar; desligá-lo não restaura uma fila descartada.
+- Dependências Rust dos plugins usam a mesma versão menor dos pacotes JavaScript, e `Cargo.lock` mantém o conjunto validado para evitar incompatibilidades em uma nova compilação.
+
+`npm test` inclui regressões do coletor, fila, pesos, recuperação de imagens e reanálise de 503 anúncios. As fixtures manuais de DOM para seis plataformas ficam em `npm run test:collector-fixtures`, acessíveis somente por loopback. Elas não enviam anúncios ao catálogo.

@@ -13,6 +13,8 @@ const { PNG } = require("pngjs");
 
 let directory, baseUrl, imageUrl, imageServer, child;
 let output = "";
+const unavailableImages = new Set(["/unavailable.png"]);
+const imageRequests = new Map();
 
 function png(red, green, blue) {
   const image = new PNG({ width: 16, height: 16 });
@@ -22,13 +24,13 @@ function png(red, green, blue) {
   return PNG.sync.write(image);
 }
 
-async function api(route, method = "GET", body, expected = 200) {
+async function api(route, method = "GET", body, expected = 200, timeout = 15000) {
   const response = await fetch(baseUrl + route, {
     method,
     headers: body === undefined ? {} : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
     // Runner Windows pode estar compilando recursos pesados em paralelo.
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(timeout),
   });
   const result = await response.json();
   assert.equal(response.status, expected, `${method} ${route}: ${JSON.stringify(result)}`);
@@ -42,7 +44,9 @@ async function start() {
   const port = reservation.address().port;
   await new Promise((resolve) => reservation.close(resolve));
   baseUrl = `http://127.0.0.1:${port}`;
-  child = spawn(process.execPath, ["server/app.js"], {
+  const backend = process.env.RADAR_TEST_BACKEND;
+  child = spawn(backend || process.execPath, backend ? [] : ["server/app.js"], {
+    windowsHide: true,
     cwd: path.join(__dirname, ".."),
     env: {
       ...process.env,
@@ -120,6 +124,10 @@ async function listings(radarId) {
 before(async () => {
   directory = await fs.mkdtemp(path.join(os.tmpdir(), "radar-assisted-test-"));
   imageServer = http.createServer((req, res) => {
+    imageRequests.set(req.url, (imageRequests.get(req.url) || 0) + 1);
+    if (unavailableImages.has(req.url)) {
+      res.writeHead(503);res.end("Image temporarily unavailable");return;
+    }
     res.writeHead(200, { "content-type": "image/png" });
     res.end(req.url === "/blue.png" ? png(0, 0, 255) : png(255, 0, 0));
   });
@@ -134,6 +142,100 @@ after(async () => {
   await stop();
   if (imageServer) await new Promise((resolve) => imageServer.close(resolve));
   if (directory) await fs.rm(directory, { recursive: true, force: true });
+});
+
+test("Pesos e limites zerados persistem na criação e em edições parciais", async () => {
+  const zero = {visual_weight:0,semantic_weight:0,criteria_weight:0,min_visual_similarity:0,alert_min_score:0,alert_price_drop_percent:0};
+  const target = await radar(zero);
+  for (const [key,value] of Object.entries(zero)) assert.equal(target[key],value,key);
+  const renamed = await api(`/api/radars/${target.id}`, "PATCH", {name:"Radar renomeado"});
+  for (const [key,value] of Object.entries(zero)) assert.equal(renamed[key],value,key);
+  const defaults = await radar();
+  const updated = await api(`/api/radars/${defaults.id}`, "PATCH", zero);
+  for (const [key,value] of Object.entries(zero)) assert.equal(updated[key],value,key);
+});
+
+test("Peso visual zero usa apenas texto e preço na importação e reanálise", async () => {
+  const target = await radar({visual_enabled:true,visual_weight:0,semantic_enabled:false,criteria_weight:0});
+  const reference = await fetch(`${baseUrl}/api/radars/${target.id}/reference-image`, {method:"PUT",headers:{"content-type":"image/png"},body:png(255,0,0)});
+  assert.equal(reference.status,200);
+  const result = await importItems(target.id,[item("zero-visual",{image_url:imageUrl+"/blue.png"})]);
+  const {hybridScore} = require("../server/services/visualSimilarity");
+  const expected = hybridScore({visual:0,query:target.query,title:"Camisa vintage",price:80,maxPrice:200,currency:"BRL",visualWeight:0});
+  assert.equal(result.listings[0].hybrid_score,expected);
+  await api(`/api/radars/${target.id}/reindex-visual`,"POST");
+  assert.equal((await listings(target.id))[0].hybrid_score,expected);
+});
+
+test("Falha ao baixar imagem não é apresentada como similaridade zero", async () => {
+  const target = await radar({visual_enabled:true,semantic_enabled:false});
+  const reference = await fetch(`${baseUrl}/api/radars/${target.id}/reference-image`, {method:"PUT",headers:{"content-type":"image/png"},body:png(255,0,0)});
+  assert.equal(reference.status,200);
+  const result = await importItems(target.id,[item("missing-image",{image_url:imageUrl+"/unavailable.png"})]);
+  assert.equal(result.imported,1);
+  assert.equal(result.listings[0].visual_score,null);
+  assert.equal(result.listings[0].hybrid_score,100);
+});
+
+test("Imagem indisponível é reanalisada quando volta, mesmo sem outra alteração", async () => {
+  unavailableImages.add('/recoverable.png');
+  const target = await radar({visual_enabled:true,semantic_enabled:false});
+  const reference = await fetch(`${baseUrl}/api/radars/${target.id}/reference-image`, {method:"PUT",headers:{"content-type":"image/png"},body:png(255,0,0)});
+  assert.equal(reference.status,200);
+  const original = item('recover-image',{image_url:imageUrl+'/recoverable.png'});
+  const first = await importItems(target.id,[original]);
+  assert.equal(first.listings[0].visual_score,null);
+  unavailableImages.delete('/recoverable.png');
+  const retry = await importItems(target.id,[original]);
+  assert.equal(retry.updated,1);assert.equal(retry.imported,0);
+  assert.equal(retry.listings[0].visual_score,100);
+  const duplicate = await importItems(target.id,[original]);
+  assert.equal(duplicate.duplicates,1);
+});
+
+test("Alterar apenas preço ou título reutiliza a análise da mesma foto", async () => {
+  const target = await radar({visual_enabled:true,semantic_enabled:false});
+  await fetch(`${baseUrl}/api/radars/${target.id}/reference-image`, {method:"PUT",headers:{"content-type":"image/png"},body:png(255,0,0)});
+  const original = item('cached-image',{image_url:imageUrl+'/cached.png'});
+  const first = await importItems(target.id,[original]);
+  assert.equal(first.listings[0].visual_score,100);
+  const requestsBefore = imageRequests.get('/cached.png');
+  unavailableImages.add('/cached.png');
+  try {
+    const updated = await importItems(target.id,[{...original,title:'Camisa vintage estampada',current_price:70}]);
+    assert.equal(updated.updated,1);assert.equal(updated.listings[0].visual_score,100);
+    assert.equal(imageRequests.get('/cached.png'),requestsBefore);
+  } finally {unavailableImages.delete('/cached.png');}
+});
+
+test("Reanálise paginada cobre mais de 500 anúncios sem repetir nem incluir chegadas novas", async () => {
+  const target = await radar({semantic_enabled:false});
+  const connection = await new Promise((resolve,reject)=>{
+    const db = new sqlite3.Database(path.join(directory,'radar.db'),error=>error?reject(error):resolve(db));
+  });
+  try {
+    await new Promise((resolve,reject)=>connection.run(
+      `WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<503)
+       INSERT INTO listings(radar_id,title,platform,url,current_price,status,hybrid_score)
+       SELECT ?, 'Camisa vintage', 'Teste local', 'https://marketplace.example/reindex/'||n, 80, 'novo', 0 FROM seq`,
+      [target.id],error=>error?reject(error):resolve(),
+    ));
+  } finally {await new Promise(resolve=>connection.close(resolve));}
+  let afterId=0,throughId,analyzed=0,pages=0;
+  while (true) {
+    // A hosted Windows runner can take longer for a batch of 100 SQLite writes.
+    const page = await api(`/api/radars/${target.id}/reindex-visual`,'POST',{after_id:afterId,through_id:throughId,limit:100},200,60000);
+    assert.equal(page.total,503);assert.equal(page.failed,0);assert.ok(page.analyzed<=100);
+    analyzed+=page.analyzed;pages++;
+    assert.ok(page.next_after_id>afterId);
+    afterId=page.next_after_id;throughId=page.through_id;
+    if (pages===1) await importItems(target.id,[item('arrived-during-reindex')]);
+    if (!page.has_more) break;
+    assert.ok(pages<10,'pagination should finish');
+  }
+  assert.equal(analyzed,503);assert.equal(pages,6);
+  assert.equal((await listings(target.id)).filter(row=>row.hybrid_score===100).length,504);
+  await api(`/api/radars/${target.id}/reindex-visual`,'POST',{after_id:-1},400);
 });
 
 test("Importação preserva título, preço, imagem e link, com scores e histórico", async () => {

@@ -29,6 +29,17 @@
     }
   }
 
+  function imageUrlFor(image) {
+    if (!image) return null;
+    const candidates = [
+      image.currentSrc, image.src,
+      image.getAttribute('data-src'), image.getAttribute('data-lazy-src'),
+    ].map(absoluteUrl).filter((url) => /^https?:/i.test(url || ''));
+    return candidates.find((url) =>
+      !/\/(?:placeholder|spacer|transparent)(?:[./?_-]|$)/i.test(new URL(url).pathname),
+    ) || candidates[0] || null;
+  }
+
   function cleanUrl(value) {
     try {
       const url = new URL(value);
@@ -55,16 +66,15 @@
           ? 'GBP'
           : 'USD';
 
-    if (currency === 'BRL' || currency === 'EUR') {
-      if (raw.includes(',')) {
-        raw = raw.replace(/\./g, '').replace(',', '.');
-      } else if (/^\d{1,3}(?:\.\d{3})+$/.test(raw)) {
-        raw = raw.replace(/\./g, '');
-      }
-    } else if (raw.includes('.') && raw.includes(',')) {
-      raw = raw.replace(/,/g, '');
-    } else if ((raw.match(/,/g) || []).length === 1 && /,[0-9]{2}$/.test(raw)) {
+    // Marketplaces can display a currency with either locale's separators.
+    if (raw.includes('.') && raw.includes(',')) {
+      raw = raw.lastIndexOf(',') > raw.lastIndexOf('.')
+        ? raw.replace(/\./g, '').replace(',', '.')
+        : raw.replace(/,/g, '');
+    } else if ((raw.match(/,/g) || []).length === 1 && /,[0-9]{1,2}$/.test(raw)) {
       raw = raw.replace(',', '.');
+    } else if (/^\d{1,3}(?:\.\d{3})+$/.test(raw)) {
+      raw = raw.replace(/\./g, '');
     } else {
       raw = raw.replace(/,/g, '');
     }
@@ -298,7 +308,7 @@
 
     const html = String(card.outerHTML || '');
     const embedded = html.match(
-      /(?:https?:\/\/www\.enjoei\.com\.br)?(\/p\/[^"'<>\\s]+-\d{6,})(?:[?"'<>\\s]|$)/i,
+      /(?:https?:\/\/www\.enjoei\.com\.br)?(\/p\/[^"'<>\s]+-\d{6,})(?:[?"'<>\s]|$)/i,
     );
     if (embedded?.[1]) {
       return cleanUrl(
@@ -379,12 +389,7 @@
       diagnostics.passedUrl += 1;
 
       const { price, currency } = parsePrice(text);
-      const imageUrl = absoluteUrl(
-        image.currentSrc ||
-          image.src ||
-          image.getAttribute('data-src') ||
-          image.getAttribute('data-lazy-src'),
-      );
+      const imageUrl = imageUrlFor(image);
 
       seen.add(identity);
       items.push({
@@ -485,9 +490,7 @@
       diagnostics.passedTitle += 1;
 
       const { price, currency } = parsePrice(text);
-      const imageUrl = absoluteUrl(
-        image.currentSrc || image.src || image.getAttribute('data-src') || image.getAttribute('data-lazy-src'),
-      );
+      const imageUrl = imageUrlFor(image);
 
       seen.add(identity);
       items.push({
@@ -550,15 +553,20 @@
   let autoTimer = null;
   let lastAutoFingerprint = '';
   let lastAutoSentAt = 0;
+  let autoCaptureInFlight = false;
+  let retryDelay = 15_000;
 
   function captureFingerprint(capture) {
     return capture.items
-      .map((item) => `${item.url}:${item.current_price ?? ''}`)
+      .map((item) => JSON.stringify([
+        item.url, item.current_price, item.currency, item.title, item.image_url,
+      ]))
       .sort()
       .join('|');
   }
 
   async function runAutoCapture() {
+    if (autoCaptureInFlight) return;
     if (!autoPlatforms.has(detectPlatform(location.hostname))) {
       return;
     }
@@ -584,14 +592,13 @@
     const fingerprint = captureFingerprint(capture);
     const now = Date.now();
 
-    if (
-      fingerprint === lastAutoFingerprint ||
-      now - lastAutoSentAt < 15_000
-    ) {
+    if (fingerprint === lastAutoFingerprint) return;
+    if (now - lastAutoSentAt < 15_000) {
+      scheduleAutoCapture(15_000 - (now - lastAutoSentAt));
       return;
     }
 
-    lastAutoFingerprint = fingerprint;
+    autoCaptureInFlight = true;
     lastAutoSentAt = now;
 
     try {
@@ -600,12 +607,24 @@
         capture,
       });
 
-      if (!response?.ok) {
-        lastAutoFingerprint = '';
+      if (response?.ok && !response.skipped) {
+        lastAutoFingerprint = fingerprint;
+        retryDelay = 15_000;
+        // Changes during the request must not be lost behind the in-flight guard.
+        scheduleAutoCapture(15_000);
+      } else if (response?.retryable === false) {
+        // Invalid/obsolete captures need a changed page or a collector update.
+        lastAutoFingerprint = fingerprint;
+      } else if (response?.reason !== 'auto_capture_disabled') {
+        scheduleAutoCapture(retryDelay);
+        retryDelay = Math.min(60_000, retryDelay * 2);
       }
     } catch {
-      // O Radar pode estar fechado; a próxima alteração da página tenta novamente.
-      lastAutoFingerprint = '';
+      // Retry a static page after Desktop starts again, without busy polling.
+      scheduleAutoCapture(retryDelay);
+      retryDelay = Math.min(60_000, retryDelay * 2);
+    } finally {
+      autoCaptureInFlight = false;
     }
   }
 
@@ -623,6 +642,18 @@
   observer.observe(document.documentElement, {
     childList: true,
     subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['src', 'srcset', 'data-src', 'data-lazy-src', 'href', 'alt', 'hidden'],
+  });
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes.autoCaptureEnabled) return;
+    if (changes.autoCaptureEnabled.newValue) {
+      scheduleAutoCapture(1200);
+    } else {
+      clearTimeout(autoTimer);
+    }
   });
 
   addEventListener(

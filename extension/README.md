@@ -1,6 +1,6 @@
 # Radar 2.0 Bridge — extensão Chromium
 
-Extensão Manifest V3 para Chrome/Chromium/Opera GX. Ela lê, somente quando o usuário clica em **Analisar página atual**, os cards já carregados na aba ativa e envia os anúncios escolhidos para o Radar Desktop local em `http://127.0.0.1:3130`.
+Extensão Manifest V3 para Chrome/Chromium/Opera GX. Possui captura manual, Auto-Capture em páginas visíveis (ligado por padrão) e Auto-Browse beta (desligado por padrão). Envia anúncios para o Radar Desktop local em `http://127.0.0.1:3130`.
 
 ## Instalar no Opera GX
 
@@ -33,9 +33,11 @@ Desligado por padrão. Quando ativado, o Bridge consulta o Search Planner dos ra
 
 ## Privacidade e limites
 
-- Não lê cookies, senhas, sessões ou armazenamento do marketplace.
+- Não solicita cookies, senhas ou armazenamento do marketplace.
 - Não faz login em nome do usuário.
 - Não tenta contornar CAPTCHA, 403, anti-bot ou páginas não carregadas.
-- Usa `activeTab`, então só recebe acesso temporário à aba quando o usuário interage com a extensão.
+- Usa `activeTab`, `scripting`, `storage`, `notifications` e `alarms`, além dos acessos de host às plataformas declarados no manifesto. O coletor automático pode ler cards em páginas visíveis mesmo sem um clique no popup.
 - A comunicação com o Radar é restrita aos hosts locais `127.0.0.1:3130` e `localhost:3130`.
 - A extração é heurística e pode precisar de ajustes se um marketplace alterar seu layout.
+
+Na 0.3.12, título/foto alterados também geram nova captura, imagens lazy-loaded usam a foto disponível e falhas temporárias são tentadas novamente. Cancelar preserva a busca em andamento; desligar Auto-Browse limpa a fila. Consulte `docs/browser-extension.md` para os modos, intervalos e permissões completos.

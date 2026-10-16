@@ -40,6 +40,7 @@ const {
 } = require("./services/storedFilePath");
 
 const app = express();
+const {boundedNumber} = require("./services/numericSettings");
 const LISTING_STATUSES = new Set(["novo", "interessante", "descartado", "vendido"]);
 
 const PORT = process.env.PORT || 3000;
@@ -921,6 +922,8 @@ async function scoreListingForRadar({
   notes = null,
   sourceKey = null,
   itemCountry = null,
+  cachedFeatures = null,
+  cachedEmbedding = null,
 }) {
   if (!radarId) {
     return {
@@ -974,7 +977,18 @@ async function scoreListingForRadar({
   let embedding = null;
   let imageBuffer = null;
 
-  if (imageUrl && (visualEnabled || semanticEnabled)) {
+  if (imageUrl) {
+    try {
+      const parsed = JSON.parse(cachedFeatures);
+      if (visualEnabled && parsed?.dhash && Array.isArray(parsed.histogram)) features = parsed;
+    } catch {}
+    try {
+      const parsed = JSON.parse(cachedEmbedding);
+      if (semanticEnabled && Array.isArray(parsed) && parsed.length === referenceSets.embeddings[0]?.length && parsed.every(Number.isFinite)) embedding = parsed;
+    } catch {}
+  }
+
+  if (imageUrl && ((visualEnabled && !features) || (semanticEnabled && !embedding))) {
     try {
       imageBuffer = await downloadImage(imageUrl);
     } catch {
@@ -983,11 +997,9 @@ async function scoreListingForRadar({
   }
 
   if (visualEnabled) {
-    if (imageBuffer) {
+    if (imageBuffer || features) {
       try {
-        features = await extractVisualFeatures(
-          imageBuffer,
-        );
+        features ||= await extractVisualFeatures(imageBuffer);
         visual = Math.max(
           ...referenceSets.features.map(
             (reference) =>
@@ -998,17 +1010,17 @@ async function scoreListingForRadar({
           ),
         );
       } catch {
-        visual = 0;
+        visual = null;
       }
     } else {
-      visual = 0;
+      visual = null;
     }
   }
 
   if (semanticEnabled) {
-    if (imageBuffer) {
+    if (imageBuffer || embedding) {
       try {
-        embedding = await embedImage(imageBuffer);
+        embedding ||= await embedImage(imageBuffer);
         semantic = Math.max(
           ...referenceSets.embeddings.map(
             (reference) =>
@@ -1019,10 +1031,10 @@ async function scoreListingForRadar({
           ),
         );
       } catch {
-        semantic = 0;
+        semantic = null;
       }
     } else {
-      semantic = 0;
+      semantic = null;
     }
   }
 
@@ -1043,8 +1055,8 @@ async function scoreListingForRadar({
       ? null
       : radar.max_price,
     currency,
-    visualWeight: radar.visual_weight || 70,
-    semanticWeight: radar.semantic_weight || 70,
+    visualWeight: boundedNumber(radar.visual_weight, 70),
+    semanticWeight: boundedNumber(radar.semantic_weight, 70),
   });
 
   const profile = await getPreferenceProfile(radar.category || "geral");
@@ -1176,7 +1188,18 @@ async function reapplyCriteriaForRadar(radar) {
   return summary;
 }
 
-async function applyRadarToListing(listing, radarId) {
+async function needsImageAnalysis(listing) {
+  if (!listing.image_url || !listing.radar_id) return false;
+  const radar = await get("SELECT * FROM radars WHERE id = ?", [listing.radar_id]);
+  if (!radar) return false;
+  const visualMissing = radar.visual_enabled && listing.visual_score === null;
+  const semanticMissing = radar.semantic_enabled && semanticStatus().enabled && listing.semantic_score === null;
+  if (!visualMissing && !semanticMissing) return false;
+  const references = await loadVisualReferenceSets(radar);
+  return Boolean((visualMissing && references.features.length) || (semanticMissing && references.embeddings.length));
+}
+
+async function applyRadarToListing(listing, radarId, {reuseImageAnalysis = true} = {}) {
   const intelligence = await scoreListingForRadar({
     radarId,
     title: listing.title,
@@ -1188,6 +1211,8 @@ async function applyRadarToListing(listing, radarId) {
     notes: listing.notes || null,
     sourceKey: listing.source_key || null,
     itemCountry: listing.item_country || null,
+    cachedFeatures: reuseImageAnalysis ? listing.image_features_json : null,
+    cachedEmbedding: reuseImageAnalysis ? listing.image_embedding_json : null,
   });
 
   const radar = radarId
@@ -1919,15 +1944,15 @@ app.post(
 
           category || "geral",
           visual_enabled ? 1 : 0,
-          Math.min(100, Math.max(0, Number(visual_weight) || 70)),
-          Math.min(1, Math.max(0, Number(min_visual_similarity) || 0.45)),
+          boundedNumber(visual_weight, 70),
+          boundedNumber(min_visual_similarity, 0.45, 0, 1),
           semantic_enabled === undefined ? 1 : (semantic_enabled ? 1 : 0),
-          Math.min(100, Math.max(0, Number(semantic_weight) || 70)),
+          boundedNumber(semantic_weight, 70),
           termsJson(priority_terms),
           termsJson(penalized_terms),
           termsJson(required_terms),
           termsJson(exclude_terms),
-          Math.min(100, Math.max(0, Number(criteria_weight) || 65)),
+          boundedNumber(criteria_weight, 65),
           ["BRL", "USD", "EUR", "GBP", "JPY"].includes(
             String(budget_currency || "BRL").toUpperCase(),
           )
@@ -1938,20 +1963,8 @@ app.post(
             : smart_alerts_enabled
               ? 1
               : 0,
-          Math.min(
-            100,
-            Math.max(
-              0,
-              Number(alert_min_score ?? 78) || 78,
-            ),
-          ),
-          Math.min(
-            100,
-            Math.max(
-              0,
-              Number(alert_price_drop_percent ?? 10) || 10,
-            ),
-          ),
+          boundedNumber(alert_min_score, 78),
+          boundedNumber(alert_price_drop_percent, 10),
         ],
       );
 
@@ -2026,9 +2039,20 @@ app.post("/api/radars/:id/reindex-visual", async (req, res) => {
     const radar = await get("SELECT * FROM radars WHERE id = ?", [req.params.id]);
     if (!radar) return res.status(404).json({ error: "Radar não encontrado." });
 
+    const afterId = Number(req.body?.after_id ?? 0);
+    const requestedThrough = req.body?.through_id;
+    if (!Number.isSafeInteger(afterId) || afterId < 0 ||
+        (requestedThrough !== undefined && (!Number.isSafeInteger(Number(requestedThrough)) || Number(requestedThrough) < afterId))) {
+      return res.status(400).json({error: "Cursor de reanálise inválido."});
+    }
+    const throughId = requestedThrough === undefined
+      ? (await get("SELECT COALESCE(MAX(id), 0) AS id FROM listings WHERE radar_id = ?", [radar.id])).id
+      : Number(requestedThrough);
+    const limit = Math.floor(boundedNumber(req.body?.limit, 50, 1, 100));
+    const {total} = await get("SELECT COUNT(*) AS total FROM listings WHERE radar_id = ? AND id <= ?", [radar.id, throughId]);
     const listings = await all(
-      "SELECT * FROM listings WHERE radar_id = ? ORDER BY updated_at DESC LIMIT 500",
-      [radar.id],
+      "SELECT * FROM listings WHERE radar_id = ? AND id > ? AND id <= ? ORDER BY id ASC LIMIT ?",
+      [radar.id, afterId, throughId, limit],
     );
 
     let analyzed = 0;
@@ -2085,7 +2109,9 @@ app.post("/api/radars/:id/reindex-visual", async (req, res) => {
       }
     }
 
-    res.json({ ok: true, analyzed, failed });
+    const nextAfterId = listings.at(-1)?.id ?? afterId;
+    const remaining = await get("SELECT 1 AS found FROM listings WHERE radar_id = ? AND id > ? AND id <= ? LIMIT 1", [radar.id, nextAfterId, throughId]);
+    res.json({ok: true, analyzed, failed, total, through_id: throughId, next_after_id: nextAfterId, has_more: Boolean(remaining)});
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2163,13 +2189,13 @@ app.patch(
         visual_enabled:
           req.body.visual_enabled !== undefined ? Boolean(req.body.visual_enabled) : Boolean(radar.visual_enabled),
         visual_weight:
-          req.body.visual_weight !== undefined ? Math.min(100, Math.max(0, Number(req.body.visual_weight) || 70)) : Number(radar.visual_weight || 70),
+          boundedNumber(req.body.visual_weight ?? radar.visual_weight, 70),
         min_visual_similarity:
-          req.body.min_visual_similarity !== undefined ? Math.min(1, Math.max(0, Number(req.body.min_visual_similarity) || 0.45)) : Number(radar.min_visual_similarity || 0.45),
+          boundedNumber(req.body.min_visual_similarity ?? radar.min_visual_similarity, 0.45, 0, 1),
         semantic_enabled:
           req.body.semantic_enabled !== undefined ? Boolean(req.body.semantic_enabled) : Boolean(radar.semantic_enabled),
         semantic_weight:
-          req.body.semantic_weight !== undefined ? Math.min(100, Math.max(0, Number(req.body.semantic_weight) || 70)) : Number(radar.semantic_weight || 70),
+          boundedNumber(req.body.semantic_weight ?? radar.semantic_weight, 70),
         priority_terms_json:
           req.body.priority_terms !== undefined
             ? termsJson(req.body.priority_terms)
@@ -2187,9 +2213,7 @@ app.patch(
             ? termsJson(req.body.exclude_terms)
             : radar.exclude_terms_json || "[]",
         criteria_weight:
-          req.body.criteria_weight !== undefined
-            ? Math.min(100, Math.max(0, Number(req.body.criteria_weight) || 65))
-            : Number(radar.criteria_weight || 65),
+          boundedNumber(req.body.criteria_weight ?? radar.criteria_weight, 65),
         budget_currency:
           req.body.budget_currency !== undefined &&
           ["BRL", "USD", "EUR", "GBP", "JPY"].includes(
@@ -2202,25 +2226,9 @@ app.patch(
             ? Boolean(req.body.smart_alerts_enabled)
             : Boolean(radar.smart_alerts_enabled),
         alert_min_score:
-          req.body.alert_min_score !== undefined
-            ? Math.min(
-                100,
-                Math.max(
-                  0,
-                  Number(req.body.alert_min_score) || 78,
-                ),
-              )
-            : Number(radar.alert_min_score ?? 78),
+          boundedNumber(req.body.alert_min_score ?? radar.alert_min_score, 78),
         alert_price_drop_percent:
-          req.body.alert_price_drop_percent !== undefined
-            ? Math.min(
-                100,
-                Math.max(
-                  0,
-                  Number(req.body.alert_price_drop_percent) || 10,
-                ),
-              )
-            : Number(radar.alert_price_drop_percent ?? 10),
+          boundedNumber(req.body.alert_price_drop_percent ?? radar.alert_price_drop_percent, 10),
       };
 
       if (!next.name || !next.query) {
@@ -3750,6 +3758,9 @@ app.post("/api/import/assisted", async (req, res) => {
           );
 
           let assignment = null;
+          let analysisChanged = false;
+          const analysisMissing = !priceChanged && !metadataChanged && !identityChanged
+            && await needsImageAnalysis(refreshed);
 
           if (
             autoAssignRequested &&
@@ -3772,13 +3783,18 @@ app.post("/api/import/assisted", async (req, res) => {
 
           if (
             !assignment &&
-            (priceChanged || metadataChanged || identityChanged)
+            (priceChanged || metadataChanged || identityChanged || analysisMissing)
           ) {
-            await applyRadarToListing(refreshed, refreshed.radar_id);
+            const beforeAnalysis = refreshed;
+            await applyRadarToListing(refreshed, refreshed.radar_id, {
+              reuseImageAnalysis: existing.image_url === refreshed.image_url,
+            });
             refreshed = await get(
               "SELECT * FROM listings WHERE id = ?",
               [existing.id],
             );
+            analysisChanged = analysisMissing && ["visual_score", "semantic_score", "hybrid_score", "preference_score", "grail_score", "ranking_score"]
+              .some((key) => beforeAnalysis[key] !== refreshed[key]);
           }
 
           if (wasUnavailable) {
@@ -3835,7 +3851,7 @@ app.post("/api/import/assisted", async (req, res) => {
             metadataChanged ||
             identityChanged ||
             wasUnavailable ||
-            assignment
+            assignment || analysisChanged
           ) {
             summary.updated += 1;
             summary.listings.push(refreshed);
