@@ -2838,7 +2838,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "radar-2-0-desktop"
-version = "0.2.12"
+version = "0.2.13"
 dependencies = [
  "serde",
  "serde_json",

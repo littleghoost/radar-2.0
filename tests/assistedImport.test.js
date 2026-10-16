@@ -514,3 +514,30 @@ test('Avaliação Comum gera feedback negativo e melhora classificação textual
   assert.ok(candidate.preference_score>50);
   assert.equal(examples.find(x=>x.id===bad.listings[0].id).status,'descartado');
 });
+
+test('Status visual por radar e lote proibido em ambiente sem CLIP',async()=>{
+  const target=await radar({category:'roupas',semantic_enabled:false});
+  const saved=await importItems(target.id,[
+    item('trainer-visual-new',{title:'JNCO embroidered baggy pants'}),
+    item('trainer-visual-positive',{title:'MCD rare vintage dragon'}),
+  ]);
+  await api('/api/training/feedback','POST',{
+    radar_id:target.id,listing_id:saved.listings[1].id,verdict:'rare',
+  });
+  const status=await api('/api/training/images/status?radar_id='+target.id);
+  assert.equal(status.with_image,2);
+  assert.equal(status.indexed,0);
+  assert.equal(status.pending,2);
+  assert.equal(status.reviewed_pending,1);
+  assert.equal(status.model.enabled,false);
+  assert.equal(status.busy,false);
+  await api('/api/training/images/batch','POST',{
+    radar_id:target.id,scope:'reviewed',after_id:0,limit:1,
+  },409);
+  await api('/api/training/images/batch','POST',{
+    radar_id:target.id,scope:'all',after_id:-5,limit:1,
+  },400);
+  await api('/api/training/images/status?radar_id=0',undefined,undefined,400);
+  const untouched=await listings(target.id);
+  assert.equal(untouched.filter(x=>x.image_embedding_json).length,0);
+});
