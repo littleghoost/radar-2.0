@@ -519,6 +519,16 @@ db.serialize(() => {
     )
   `);
 
+  // Ocultar alerta de revisão não altera nem remove o anúncio.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS listing_review_dismissals (
+      listing_id INTEGER NOT NULL,
+      reason_code TEXT NOT NULL,
+      dismissed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (listing_id,reason_code)
+    )
+  `);
+
   /* =========================
      EXECUÇÕES DO RADAR
   ========================= */

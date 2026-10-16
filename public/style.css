@@ -3346,3 +3346,13 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .radar-tab:focus-v
 .training-visual-tools label {font-size:.75rem;display:grid;gap:4px;}
 .training-visual-tools select {border-radius:8px;background:var(--panel);color:var(--text);
   padding:7px;border:1px solid var(--line-soft);}
+
+.training-reason {padding:9px 11px;border-left:3px solid var(--accent);
+  background:rgba(170,170,190,.07);border-radius:7px;margin-top:8px;}
+
+.review-issue {padding:12px 4px;border-top:1px solid var(--line-soft);
+  display:grid;gap:6px;}
+.review-issue h4 {margin:0;font-size:.92rem;overflow-wrap:anywhere;}
+.review-issue p {font-size:.8rem;}
+.review-issue-actions {display:flex;gap:9px;flex-wrap:wrap;}
+.review-issue-actions button {font-size:.79rem;}

@@ -54,3 +54,20 @@ A versão 0.2.14 ajusta exclusivamente o timeout do teste de carga Windows (100 
 - A API não permite gravar novos rótulos em uma categoria explicitamente errada.
 - Itens classificados fora da categoria não são processados pelo indexador visual
   desse radar. Nenhum status ou voto antigo é apagado por essa atualização.
+
+
+## Aprendizado ativo + revisão de catálogo — Desktop 0.2.16
+- **Treinar IA → Dúvidas da IA** ordena o próximo lote por utilidade de avaliação
+  (pontuação intermediária, presença de imagem CLIP, diversificação de títulos,
+  e oportunidades de equilibrar o perfil). A explicação é apenas um indício de
+  seleção — a IA não autentica nem garante raridade. A opção **Anúncios recentes**
+  preserva o fluxo antigo.
+- **Conferir catálogo** lista possíveis duplicatas por título/plataforma,
+  categorias incompatíveis, links inválidos, imagens ausentes e anúncios
+  sinalizados indisponíveis. O Radar não exclui nada; é possível ocultar um alerta
+  mantendo anúncio, status e avaliação. Alertas ocultos são persistidos.
+- **Conexões → Radar Mobile** mostra pareamento, relay, data do último snapshot,
+  contagem enviada / atual, e botão de sincronização manual. O backend só grava
+  a contagem após confirmação do upload de todas as páginas.
+- **Bridge 0.4.6** melhora consultas brasileiras e continua a busca quando os
+  cards encontrados já eram conhecidos; a fila, pausas e login são respeitados.

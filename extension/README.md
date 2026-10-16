@@ -1,4 +1,4 @@
-# Radar 2.0 Bridge 0.4.5 (desenvolvimento)
+# Radar 2.0 Bridge 0.4.6 (desenvolvimento)
 
 Extensão Manifest V3 para Opera GX, Chrome e outros navegadores Chromium.
 Envia metadados de anúncios individuais para o Radar Desktop em
@@ -90,3 +90,10 @@ a Bridge não faz login automático, não resolve CAPTCHA nem contorna 403.
 
 ### Refinamento 0.4.5
 O Auto-Browse usa o total de **candidatos válidos após a inspeção** para decidir se encontrou algo. Uma página só de peças rejeitadas não bloqueia a próxima pesquisa. O popup mostra quantos anúncios foram filtrados.
+
+
+## Bridge 0.4.6
+- Presets adicionais para JNCO Kangaroo/Rhino, Southpole, Ecko, MCD Circo dos Horrores, flare, Sony DCR-SR68 e NightShot HDD. Facebook continua assistido (login humano).
+- Termos genéricos removidos das consultas nacionais (OLX/Enjoei/Mercado Livre), preservando modelos e detalhes.
+- Uma busca que encontra apenas anúncios já conhecidos **não encerra** mais a rodada inteira: continua para o próximo site/termo dentro dos limites da fila.
+- Busca nunca inventa links de anúncios. O coletor importa apenas cards de anúncio individual.

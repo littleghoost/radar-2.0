@@ -21,6 +21,8 @@ const { checkDesktopUpdate } = require("./services/desktopUpdates");
 const { sourceRequestPolicy } = require("./services/sources/requestPolicy");
 const { listingRegion } = require("./services/listingRegion");
 const { trainingCategoryMismatch } = require("./services/trainingEligibility");
+const { rankTrainingCandidates } = require("./services/activeLearning");
+const { catalogReviewReport } = require("./services/catalogReview");
 const { downloadTrainingImage } = require("./services/visualTrainingImages");
 const { inspectListing, inspectBatch } = require("./services/listingPreflight");
 const {
@@ -2966,6 +2968,39 @@ app.post("/api/training/images/batch", async (req,res) => {
   }
 });
 
+// Diagnósticos do catálogo: sinalizações, sem remoções nem HEAD em marketplaces.
+app.get("/api/catalog/review", async (req,res) => {
+  try {
+    const id=req.query.radar_id ? Number(req.query.radar_id) : null;
+    if (id!==null && (!Number.isSafeInteger(id)||id<=0))
+      return res.status(400).json({error:"Radar inválido."});
+    const [radars,rows,old]=await Promise.all([
+      all("SELECT id,category FROM radars"),
+      id ? all("SELECT * FROM listings WHERE radar_id=? ORDER BY id DESC",[id]) :
+        all("SELECT * FROM listings ORDER BY id DESC"),
+      all("SELECT listing_id,reason_code FROM listing_review_dismissals"),
+    ]);
+    const indexed=new Map(radars.map(row=>[row.id,row]));
+    const ignored=new Set(old.map(row=>String(row.listing_id)+":"+row.reason_code));
+    const report=catalogReviewReport(rows,indexed,ignored);
+    res.json({...report,items:report.items.slice(0,30)});
+  } catch(error) {res.status(500).json({error:error.message});}
+});
+app.post("/api/catalog/review/dismiss", async (req,res) => {
+  try {
+    const listingId=Number(req.body?.listing_id);
+    const code=String(req.body?.code||"");
+    if (!Number.isSafeInteger(listingId)||listingId<=0 ||
+        !["category","duplicate_title","invalid_link","no_image","unavailable"].includes(code))
+      return res.status(400).json({error:"Alerta inválido."});
+    if (!(await get("SELECT id FROM listings WHERE id=?",[listingId])))
+      return res.status(404).json({error:"Anúncio não encontrado."});
+    await run(`INSERT OR IGNORE INTO listing_review_dismissals(listing_id,reason_code)
+      VALUES (?,?)`,[listingId,code]);
+    res.json({ok:true,listing_id:listingId,code,listing_preserved:true});
+  } catch(error) {res.status(500).json({error:error.message});}
+});
+
 // Treinamento assistido: voluntário, rotaciona exemplos ainda não avaliados.
 // Nenhum item é ocultado do catálogo só porque a pessoa escolheu "Não sei".
 app.get("/api/training/queue", async (req, res) => {
@@ -2984,10 +3019,9 @@ app.get("/api/training/queue", async (req, res) => {
          AND tf.listing_id IS NULL
          AND l.image_url IS NOT NULL AND l.image_url <> ''
          AND (l.radar_id = ? OR l.radar_id IS NULL)
-       ORDER BY CASE WHEN l.image_embedding_json IS NOT NULL THEN 0 ELSE 1 END,
-                CASE WHEN l.radar_id = ? THEN 0 ELSE 1 END,
+       ORDER BY CASE WHEN l.radar_id = ? THEN 0 ELSE 1 END,
                 l.created_at DESC, l.id DESC
-       LIMIT 300`,
+       LIMIT 800`,
       [radarId,radarId],
     );
     const eligible = rows.filter(listing => {
@@ -2997,16 +3031,24 @@ app.get("/api/training/queue", async (req, res) => {
       return check.verdict !== "rejected" &&
         (listing.radar_id === radarId || check.verdict === "candidate");
     });
+    const profile=await getPreferenceProfile(radar.category||"geral");
+    const mode=req.query.mode === "recent" ? "recent" : "uncertain";
+    const selected=mode==="recent"
+      ? eligible.slice(0,limit)
+      : rankTrainingCandidates(eligible,profile,limit);
     res.json({
       radar_id:radarId,
+      mode,
       pending:eligible.length,
-      items:eligible.slice(0,limit).map(row => ({
+      items:selected.map(row => ({
         id:row.id, title:row.title, image_url:row.image_url,
         platform:row.platform, url:row.url,
         current_price:row.current_price, currency:row.currency,
         radar_id:row.radar_id,
         grail_score:row.grail_score,
         preference_score:row.preference_score,
+        review_reason:row.review_reason||null,
+        review_priority:row.review_priority??null,
         visual_learning_ready:Boolean(row.image_embedding_json),
       })),
     });
@@ -4270,6 +4312,7 @@ app.post("/api/listings/bulk", async (req, res) => {
         `DELETE FROM listing_training_feedback WHERE listing_id IN (${placeholders})`,
         ids,
       );
+      await run(`DELETE FROM listing_review_dismissals WHERE listing_id IN (${placeholders})`,ids);
       await run(
         `DELETE FROM price_history WHERE listing_id IN (${placeholders})`,
         ids,
@@ -4728,6 +4771,7 @@ app.delete(
         "DELETE FROM listing_training_feedback WHERE listing_id = ?",
         [req.params.id],
       );
+      await run("DELETE FROM listing_review_dismissals WHERE listing_id=?",[req.params.id]);
       await run(
         `
         DELETE FROM price_history

@@ -217,7 +217,7 @@ function sourceOptimizedQuery(
 
   if (!clean) return '';
 
-  if (source === 'olx') {
+  if (['olx','enjoei','mercadolivre'].includes(source)) {
     const category = String(
       radar.category || '',
     ).toLowerCase();
@@ -229,7 +229,7 @@ function sourceOptimizedQuery(
     ) {
       clean = clean
         .replace(
-          /\b(?:vintage|original|rare|raro|raridade)\b/gi,
+          /\b(?:vintage|original|rare|raro|raridade|autentica|autentico|100%)\b/gi,
           ' ',
         )
         .replace(/\s+/g, ' ')
@@ -1019,17 +1019,24 @@ async function processAutoBrowseTick(
       }
 
       if (captureCount > 0) {
+        const discovered=Number(result?.imported||0);
         await setAutoBrowseProgress({
           running: true,
-          percent: 96,
-          message: `${captureCount} anúncio(s) encontrado(s)`,
+          percent: discovered>0 ? 96 : Math.min(92,Math.round((jobsTried/progressTotal)*90)),
+          message: discovered>0
+            ? `${discovered} anúncio(s) novo(s) encontrado(s)`
+            : 'Somente anúncios já conhecidos — buscando novos',
           detail: `${job.source} • ${currentQuery}`,
-          found: captureCount,
+          found: totalFound,
           tried: jobsTried,
           total: progressTotal,
           empty: emptyJobsSkipped,
         });
-        break;
+        // Don't stop the entire garimpo just because all listings were duplicates.
+        // Price drops still merit a stop so that important changes are surfaced.
+        if (discovered>0 || Number(result?.price_drops||0)>0) break;
+        await delay(350);
+        continue;
       }
 
       if (result?.error) {

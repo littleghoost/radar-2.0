@@ -1,8 +1,16 @@
 "use strict";
 (() => {
   const terms = {
-    roupas: ['JNCO', 'calça baggy vintage', 'calça tribal', 'MCD vintage', 'Tapout', 'jorts bordada'],
-    cameras: ['Sony Handycam DCR-SR', 'Sony Handycam NightShot', 'filmadora Sony HDD', 'Sony DCR-SR47'],
+    roupas: [
+      'JNCO', 'JNCO Kangaroo', 'JNCO Rhino', 'calça baggy vintage',
+      'calça tribal', 'MCD Circo dos Horrores', 'Tapout', 'Southpole baggy',
+      'Ecko bordada', 'jorts bordada', 'calça flare vintage',
+    ],
+    cameras: [
+      'Sony Handycam DCR-SR', 'Sony Handycam NightShot',
+      'filmadora Sony HDD', 'Sony DCR-SR47', 'Sony DCR-SR68',
+      'filmadora NightShot HDD',
+    ],
   };
   const sources = ['olx','enjoei','mercadolivre','facebook'];
   function buildUrl(source, query) {
