@@ -803,9 +803,9 @@ $("#importForm")?.addEventListener("submit", async (event) => {
         items: data.items,
       }),
     });
-    $("#importPreview").innerHTML = `<strong>${result.imported} importado(s)</strong> • ${result.duplicates} duplicado(s) • ${result.invalid} inválido(s) • ${result.failed} falha(s)`;
+    $("#importPreview").innerHTML = `<strong>${result.imported} importado(s)</strong> • ${result.updated} atualizado(s) • ${result.duplicates} duplicado(s) • ${result.invalid} inválido(s) • ${result.failed} falha(s)`;
     await Promise.all([loadListings(), loadRadars(), loadActivity().catch(() => {})]);
-    if (result.imported > 0) setTimeout(() => importModal.close(), 1200);
+    if (result.imported > 0 || result.updated > 0) setTimeout(() => importModal.close(), 1200);
   } catch (err) {
     alert(err.message);
   } finally {

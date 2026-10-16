@@ -38,6 +38,7 @@ const {
 } = require("./services/storedFilePath");
 
 const app = express();
+const LISTING_STATUSES = new Set(["novo", "interessante", "descartado", "vendido"]);
 
 const PORT = process.env.PORT || 3000;
 const DATA_ROOT = process.env.DB_PATH
@@ -403,7 +404,7 @@ async function rebuildPreferenceScores(category = null) {
     params.push(category);
   }
   const listings = await all(
-    `SELECT l.id, l.hybrid_score, l.image_embedding_json, COALESCE(r.category, 'geral') AS category
+    `SELECT l.*, COALESCE(r.category, 'geral') AS category
      FROM listings l
      LEFT JOIN radars r ON r.id = l.radar_id
      ${filter}`,
@@ -412,6 +413,9 @@ async function rebuildPreferenceScores(category = null) {
   const categories = [...new Set(listings.map((row) => row.category || "geral"))];
   const profiles = new Map();
   for (const key of categories) profiles.set(key, await getPreferenceProfile(key));
+  const radars = new Map(
+    (await all("SELECT * FROM radars")).map((radar) => [radar.id, radar]),
+  );
 
   let updated = 0;
   for (const listing of listings) {
@@ -422,7 +426,14 @@ async function rebuildPreferenceScores(category = null) {
     const profile = profiles.get(listing.category || "geral");
     const learned = preferenceScore(embedding, profile);
     const grail = grailScore(listing.hybrid_score, learned, profile?.total_feedback || 0);
-    await run("UPDATE listings SET preference_score = ?, grail_score = ? WHERE id = ?", [learned, grail, listing.id]);
+    const radar = radars.get(listing.radar_id);
+    const ranking = radar
+      ? blendCriteriaScore(grail, evaluateRadarCriteria(radar, listing), radar)
+      : grail;
+    await run(
+      "UPDATE listings SET preference_score = ?, grail_score = ?, ranking_score = ? WHERE id = ?",
+      [learned, grail, ranking, listing.id],
+    );
     updated += 1;
   }
   return { updated, profiles: [...profiles.values()].map(({ positive_centroid, negative_centroid, ...rest }) => rest) };
@@ -3689,6 +3700,8 @@ app.post("/api/import/assisted", async (req, res) => {
             (existing.currency || "BRL") === currency;
           const metadataChanged =
             existing.title !== title ||
+            existing.platform !== platform ||
+            (existing.currency || "BRL") !== currency ||
             Boolean(imageUrl && existing.image_url !== imageUrl);
           const identityChanged =
             Boolean(sourceKey && existing.source_key !== sourceKey) ||
@@ -3752,6 +3765,17 @@ app.post("/api/import/assisted", async (req, res) => {
                 [existing.id],
               );
             }
+          }
+
+          if (
+            !assignment &&
+            (priceChanged || metadataChanged || identityChanged)
+          ) {
+            await applyRadarToListing(refreshed, refreshed.radar_id);
+            refreshed = await get(
+              "SELECT * FROM listings WHERE id = ?",
+              [existing.id],
+            );
           }
 
           if (wasUnavailable) {
@@ -3994,9 +4018,8 @@ app.post("/api/listings/bulk", async (req, res) => {
 
     if (action === "status") {
       const status = String(req.body?.status || "").trim();
-      const allowed = new Set(["novo", "interessante", "descartado", "vendido"]);
 
-      if (!allowed.has(status)) {
+      if (!LISTING_STATUSES.has(status)) {
         return res.status(400).json({ error: "Status inválido." });
       }
 
@@ -4290,6 +4313,10 @@ app.patch(
         return res.status(404).json({
           error: "Anúncio não encontrado.",
         });
+      }
+
+      if (req.body.status !== undefined && !LISTING_STATUSES.has(req.body.status)) {
+        return res.status(400).json({ error: "Status inválido." });
       }
 
       const next = {
