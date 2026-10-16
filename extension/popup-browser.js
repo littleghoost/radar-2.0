@@ -77,3 +77,25 @@ $('#saveSearch').addEventListener('click',()=>browserAction(async()=>{
     radar_id:$('#radarSelect').value || null,label:$('#savedSearchLabel').value,
     interval_minutes:$('#savedSearchInterval').value}});
 }));
+
+function populateBrazilTerms() {
+  const category = $('#brazilCategory').value;
+  const target = $('#brazilTerm');
+  const terms = RadarBrazilPresets.terms[category] || [];
+  target.replaceChildren(...terms.map(term => new Option(term, term)));
+}
+$('#brazilCategory').addEventListener('change', populateBrazilTerms);
+populateBrazilTerms();
+$('#openBrazilSearch').addEventListener('click', async () => {
+  const source = $('#brazilSource').value;
+  const query = $('#brazilTerm').value;
+  const url = RadarBrazilPresets.buildUrl(source, query);
+  const message = $('#brazilSearchStatus');
+  if (!url) { message.textContent = 'Selecione uma busca válida.'; return; }
+  try {
+    await chrome.tabs.create({url});
+    message.textContent = 'Busca aberta. Nessa aba, use Analisar página atual e Salvar busca.';
+  } catch (error) {
+    message.textContent = 'Não consegui abrir a pesquisa: ' + error.message;
+  }
+});

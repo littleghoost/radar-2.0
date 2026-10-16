@@ -1,4 +1,4 @@
-# Radar 2.0 Bridge 0.4.2 (desenvolvimento)
+# Radar 2.0 Bridge 0.4.3 (desenvolvimento)
 
 Extensão Manifest V3 para Opera GX, Chrome e outros navegadores Chromium.
 Envia metadados de anúncios individuais para o Radar Desktop em
@@ -67,3 +67,13 @@ a Bridge não faz login automático, não resolve CAPTCHA nem contorna 403.
 - `npm run test:collector-fixtures` inicia fixtures locais do coletor
   para inspeção em um navegador Chromium.
 - Os testes unitários não substituem validação em marketplaces reais.
+
+## Garimpo brasileiro — Bridge 0.4.3
+
+- O Auto-Browse gera buscas padrão de roupas e Handycams na OLX, no Enjoei e no Mercado Livre. O Depop não é incluído automaticamente.
+- Buscas salvas voluntariamente em sites internacionais continuam na fila. Quando uma fila nova contém origens diferentes, a ordem intercala até três buscas brasileiras para cada uma estrangeira.
+- Em **Garimpo brasileiro: buscas prontas**, escolha Roupas raras/Handycams, site e termo. O botão **Abrir pesquisa brasileira** só abre uma página de resultados; não inicia importação, nem ativa monitoramento sem sua permissão.
+- Ao abrir a página, use a Bridge para **Analisar página atual**, escolher o radar e enviar apenas anúncios individuais. Para repetir periodicamente, use **Sites e buscas com sua conta** e **Salvar busca desta página**.
+- Facebook Marketplace depende da localização definida no próprio site e pode pedir login/verificação. O bloqueio não é contornado.
+- A origem brasileira do marketplace não significa necessariamente que o vendedor/entrega esteja no Brasil; confira a informação no anúncio.
+- A atualização da Bridge não modifica o banco do Radar e não exige atualizar o Desktop 0.2.11.

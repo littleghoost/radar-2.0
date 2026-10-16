@@ -98,6 +98,20 @@
           <small>Mercado Livre, OLX, Enjoei, Depop, Mercari, Vinted, Grailed, Poshmark e outros. Para um novo site, abra a página e ative a coleta. O Auto-Browse precisa estar ligado para repetir buscas.</small>
         </details>
 
+        <details class="browser-tools" id="brazilSearchTools">
+          <summary>Garimpo brasileiro: buscas prontas</summary>
+          <p>Abra uma pesquisa na OLX, Enjoei, Mercado Livre ou Facebook. Depois, nessa página, analise e salve a busca na Bridge.</p>
+          <label>Radar
+            <select id="brazilCategory"><option value="roupas">Roupas raras</option><option value="cameras">Handycams</option></select>
+          </label>
+          <label>Site
+            <select id="brazilSource"><option value="olx">OLX</option><option value="enjoei">Enjoei</option><option value="mercadolivre">Mercado Livre</option><option value="facebook">Facebook Marketplace</option></select>
+          </label>
+          <label>Pesquisa <select id="brazilTerm"></select></label>
+          <button id="openBrazilSearch" class="secondary" type="button">Abrir pesquisa brasileira</button>
+          <small id="brazilSearchStatus" role="status"></small>
+        </details>
+
         <div id="preview" class="preview muted">Nenhuma página analisada ainda.</div>
 
         <button id="sendItems" class="primary" disabled>Enviar para o Radar</button>
@@ -109,6 +123,7 @@
       </footer>
     </main>
     <script src="marketplaces.js"></script>
+    <script src="brazilPresets.js"></script>
     <script src="popup.js"></script>
     <script src="popup-browser.js"></script>
   </body>
