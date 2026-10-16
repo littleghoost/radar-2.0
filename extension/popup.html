@@ -85,6 +85,19 @@
 
         <button id="scanPage" class="primary">Analisar página atual</button>
 
+        <details class="browser-tools">
+          <summary>Sites e buscas com sua conta</summary>
+          <p>Entre no site pelo navegador, ajuste a busca e salve esta página. O Radar usa essa sessão, inclusive em sites sem API.</p>
+          <button id="enableSite" class="secondary">Ativar coleta neste site</button>
+          <label>Nome da busca <input id="savedSearchLabel" maxlength="100" placeholder="Ex.: Handycam no Mercari" /></label>
+          <label>Repetir a cada <select id="savedSearchInterval"><option value="60">1 hora</option><option value="240" selected>4 horas</option><option value="720">12 horas</option><option value="1440">1 dia</option></select></label>
+          <button id="saveSearch" class="secondary">Salvar busca desta página</button>
+          <div id="browserMessage" role="status" class="auto-status"></div>
+          <div id="savedSearches" class="saved-searches"></div>
+          <div id="pendingSources" class="saved-searches"></div>
+          <small>Mercado Livre, OLX, Enjoei, Depop, Mercari, Vinted, Grailed, Poshmark e outros. Para um novo site, abra a página e ative a coleta. O Auto-Browse precisa estar ligado para repetir buscas.</small>
+        </details>
+
         <div id="preview" class="preview muted">Nenhuma página analisada ainda.</div>
 
         <button id="sendItems" class="primary" disabled>Enviar para o Radar</button>
@@ -95,6 +108,8 @@
         <span>somente conteúdo visível</span>
       </footer>
     </main>
+    <script src="marketplaces.js"></script>
     <script src="popup.js"></script>
+    <script src="popup-browser.js"></script>
   </body>
 </html>

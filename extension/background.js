@@ -1,4 +1,5 @@
 const RADAR_URL = 'http://127.0.0.1:3130';
+importScripts('marketplaces.js', 'browserSearches.js');
 
 async function radarApi(path, options = {}) {
   const response = await fetch(`${RADAR_URL}${path}`, {
@@ -130,7 +131,7 @@ async function notifyAutoCapture(result) {
 async function importAutoCapture(
   capture,
   sender,
-  { ignoreAutoCaptureToggle = false } = {},
+  { ignoreAutoCaptureToggle = false, radarId = null } = {},
 ) {
   const stored = await chrome.storage.local.get({
     autoCaptureEnabled: true,
@@ -151,8 +152,8 @@ async function importAutoCapture(
     const result = await radarApi('/api/import/assisted', {
       method: 'POST',
       body: JSON.stringify({
-        radar_id: null,
-        auto_assign: true,
+        radar_id: radarId,
+        auto_assign: !radarId,
         capture_mode: 'auto',
         capture_version: Number(capture.version || 5),
         source_url: capture.source_url,
@@ -328,7 +329,7 @@ async function buildDueAutoBrowseJobs({
   const now = Date.now();
   const lastMap =
     stored.autoBrowseLastEnqueuedByRadar || {};
-  const jobs = [];
+  const jobs = await dueSavedBrowserJobs(radars, force);
 
   for (const radar of radars) {
     if (!radar.schedule_enabled) continue;
@@ -497,6 +498,7 @@ async function collectFromAutoBrowseTab(
         if (lastCapture.items?.length) {
           return lastCapture;
         }
+        if (lastCapture.diagnostics?.requiresUserAction) return lastCapture;
 
         if (
           lastCapture.diagnostics?.noResults
@@ -528,6 +530,62 @@ async function collectFromAutoBrowseTab(
 
   throw lastError ||
     new Error('Não consegui coletar a busca.');
+}
+
+// Páginas virtualizadas podem substituir cards durante a rolagem. Guardamos
+// os anúncios vistos, sem repetir links, e aproveitamos imagens carregadas depois.
+async function collectProgressivelyFromTab(tabId, source = '') {
+  const first = await collectFromAutoBrowseTab(tabId, source);
+  if (!first?.items?.length || first.diagnostics?.requiresUserAction) return first;
+  if (!['mercari', 'vinted', 'poshmark'].includes(source)) return first;
+
+  const found = new Map();
+  const merge = (capture) => {
+    for (const item of capture?.items || []) {
+      if (!item?.url) continue;
+      const previous = found.get(item.url);
+      if (!previous) found.set(item.url, item);
+      else found.set(item.url, {
+        ...previous,
+        ...item,
+        image_url: item.image_url || previous.image_url,
+      });
+    }
+  };
+  merge(first);
+  let passes = 0;
+  let latest = first;
+  for (let step = 0; step < 4 && found.size < 100; step++) {
+    try {
+      const [scroll] = await chrome.scripting.executeScript({
+        target: {tabId},
+        func: () => {
+          const before = window.scrollY;
+          window.scrollBy(0, Math.max(450, Math.round(window.innerHeight * 0.85)));
+          return {moved: window.scrollY > before};
+        },
+      });
+      if (!scroll?.result?.moved) break;
+      await delay(1100);
+      const response = await chrome.tabs.sendMessage(tabId, {
+        type: 'radar-collect-now',
+        limit: 100,
+      });
+      if (!response?.capture) break;
+      latest = response.capture;
+      if (latest.diagnostics?.requiresUserAction) {
+        return {...first, items: [...found.values()].slice(0, 100),
+          diagnostics: {...first.diagnostics, requiresUserAction: latest.diagnostics.requiresUserAction}};
+      }
+      merge(latest);
+      passes++;
+    } catch {
+      // A coleta inicial continua válida se a aba não permitir scroll/injeção.
+      break;
+    }
+  }
+  return {...first, items: [...found.values()].slice(0, 100),
+    diagnostics: {...first.diagnostics, progressivePasses: passes, progressiveUnique: found.size}};
 }
 
 let currentAutoBrowseWorker = null;
@@ -592,8 +650,18 @@ async function closeAutoBrowseWorker(worker) {
 }
 
 async function runAutoBrowseJob(job) {
-  const worker =
-    await createAutoBrowseWorker(job.url);
+  const pattern = RadarSites.originPattern(job.url);
+  const {disabledBrowserOrigins=[]}=await chrome.storage.local.get({disabledBrowserOrigins:[]});
+  if (disabledBrowserOrigins.includes(new URL(job.url).origin)) return {ok:false,retryable:false,error:'Coleta desativada neste site.'};
+  if (!pattern || !await chrome.permissions.contains({origins:[pattern]})) {
+    return {ok:false,requires_user_action:true,reason:'permission_required',retryable:false,
+      error:'Ative a coleta neste site pelo popup da Bridge.',source_url:job.url};
+  }
+  let worker;
+  if (job.resume_tab_id) {
+    try { worker = {tab:await chrome.tabs.get(job.resume_tab_id),windowId:job.resume_window_id || null}; } catch {}
+  }
+  worker ||= await createAutoBrowseWorker(job.url);
   currentAutoBrowseWorker = worker;
   const tab = worker.tab;
 
@@ -601,15 +669,22 @@ async function runAutoBrowseJob(job) {
     await waitForTabComplete(tab);
 
     const capture =
-      await collectFromAutoBrowseTab(
+      await collectProgressivelyFromTab(
         tab.id,
         job.source,
       );
+    if (capture.diagnostics?.requiresUserAction) {
+      worker.keepOpen = true;
+      return {ok:false,requires_user_action:true,retryable:false,
+        reason:capture.diagnostics.requiresUserAction,
+        error:'A página pede login ou verificação. Abra a página pendente e continue após concluir.',
+        source_url:job.url,tab_id:tab.id,window_id:worker.windowId};
+    }
 
     const result = await importAutoCapture(
       capture,
       { tab },
-      { ignoreAutoCaptureToggle: true },
+      { ignoreAutoCaptureToggle: true, radarId:job.radar_id },
     );
 
     return {
@@ -630,7 +705,7 @@ async function runAutoBrowseJob(job) {
       source_url: capture?.source_url || job.url,
     };
   } finally {
-    await closeAutoBrowseWorker(worker);
+    if (!worker.keepOpen) await closeAutoBrowseWorker(worker);
     if (
       currentAutoBrowseWorker === worker
     ) {
@@ -687,7 +762,9 @@ async function processAutoBrowseTick(
     const stored = await chrome.storage.local.get({
       autoBrowseEnabled: false,
       autoBrowseQueue: [],
+      browserSourcePauses: {},
     });
+    const pausedSources = stored.browserSourcePauses || {};
 
     if (!stored.autoBrowseEnabled) {
       await setAutoBrowseProgress({
@@ -800,13 +877,13 @@ async function processAutoBrowseTick(
       queue.length &&
       jobsTried < maxJobs
     ) {
-      let jobIndex = queue.findIndex((candidate) => !attemptedJobs.has(candidate.id));
+      let jobIndex = queue.findIndex((candidate) => !attemptedJobs.has(candidate.id) && !pausedSources[candidate.source]);
 
       if (preferredSource) {
         const preferredIndex =
           queue.findIndex(
             (candidate) =>
-              candidate.source === preferredSource && !attemptedJobs.has(candidate.id),
+              candidate.source === preferredSource && !attemptedJobs.has(candidate.id) && !pausedSources[candidate.source],
           );
 
         if (preferredIndex >= 0) {
@@ -846,6 +923,12 @@ async function processAutoBrowseTick(
 
       try {
         result = await runAutoBrowseJob(job);
+        if (result?.requires_user_action) {
+          pausedSources[job.source] = {reason:result.reason,url:job.url,tab_id:result.tab_id || null};
+          queue = [...queueWithoutJob,{...job,resume_tab_id:result.tab_id,resume_window_id:result.window_id}];
+          await chrome.storage.local.set({browserSourcePauses:pausedSources,autoBrowseQueue:queue});
+          break;
+        }
         if (!result?.ok && result?.retryable !== false) {
           throw Object.assign(new Error(result?.error || 'Não consegui salvar a captura.'), {result});
         }
@@ -894,9 +977,10 @@ async function processAutoBrowseTick(
         result?.auto_assigned || 0,
       );
 
-      const latest = await chrome.storage.local.get({autoBrowseEnabled: false});
+      const latest = await chrome.storage.local.get({autoBrowseEnabled: false,browserSearches:[]});
       autoBrowseDisabled = !latest.autoBrowseEnabled;
       if (autoBrowseDisabled) queue = [];
+      queue = queue.filter(candidate=>!candidate.search_id || latest.browserSearches.some(s=>s.id===candidate.search_id));
       // Persist each completed attempt before the service worker can sleep.
       await chrome.storage.local.set({autoBrowseQueue: queue});
 
@@ -967,7 +1051,11 @@ async function processAutoBrowseTick(
       await delay(350);
     }
 
-    if (!job || !result) {
+    if (!job && queue.length && Object.keys(pausedSources).length) {
+      result = {ok:true,requires_user_action:true,capture_count:0,
+        error:'Conclua a etapa pendente pelo painel Sites e buscas com sua conta.'};
+    }
+    if (!result) {
       result = {
         ok: true,
         capture_count: 0,
@@ -982,7 +1070,7 @@ async function processAutoBrowseTick(
       '';
 
     const finalFound = totalFound;
-    const finalMessage = autoBrowseDisabled
+    const finalMessage = result?.requires_user_action ? 'Busca aguardando você' : autoBrowseDisabled
       ? 'Busca desativada'
       : autoBrowseCancelRequested
       ? 'Busca cancelada'
@@ -1080,11 +1168,13 @@ async function processAutoBrowseTick(
 }
 
 chrome.runtime.onInstalled.addListener(() => {
+  registerBrowserSites().catch(() => {});
   ensureDefaults().catch(() => {});
   ensureAutoBrowseAlarm().catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  registerBrowserSites().catch(() => {});
   ensureDefaults().catch(() => {});
   ensureAutoBrowseAlarm().catch(() => {});
 });
@@ -1104,6 +1194,16 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const browserActions = {
+    'radar-register-sites':()=>registerBrowserSites(),
+    'radar-save-search':()=>saveBrowserSearch(message.search || {}),
+    'radar-resume-source':()=>resumeBrowserSource(String(message.source || '')),
+  };
+  if (browserActions[message?.type] && sender.id === chrome.runtime.id && !sender.tab) {
+    browserActions[message.type]().then(result=>sendResponse({ok:true,result}))
+      .catch(error=>sendResponse({ok:false,error:error.message}));
+    return true;
+  }
   if (message?.type === 'radar-auto-capture') {
     importAutoCapture(message.capture, sender)
       .then(sendResponse)
@@ -1171,3 +1271,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 ensureDefaults().catch(() => {});
 ensureAutoBrowseAlarm().catch(() => {});
+registerBrowserSites().catch(() => {});

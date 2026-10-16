@@ -6,12 +6,16 @@
   globalThis.__radarCollectorLoaded = true;
 
   function detectPlatform(hostname) {
+    if (globalThis.RadarSites) return RadarSites.profile(hostname).name;
     const host = String(hostname || '').toLowerCase();
     const providers = [
       ['olx', 'OLX'],
       ['enjoei', 'Enjoei'],
       ['depop', 'Depop'],
       ['vinted', 'Vinted'],
+      ['mercari', 'Mercari'],
+      ['grailed', 'Grailed'],
+      ['poshmark', 'Poshmark'],
       ['facebook', 'Facebook Marketplace'],
       ['ebay', 'eBay'],
       ['mercadolivre', 'Mercado Livre'],
@@ -43,6 +47,13 @@
   function cleanUrl(value) {
     try {
       const url = new URL(value);
+      if (/mercadolivre\.com\.br$/.test(url.hostname)) {
+        const fragment = new URLSearchParams(url.hash.slice(1));
+        const item = url.searchParams.get('wid') || fragment.get('wid');
+        if (/^MLB\d{6,}$/i.test(item || '')) {
+          return `https://produto.mercadolivre.com.br/MLB-${item.slice(3)}-_JM`;
+        }
+      }
       url.hash = '';
       ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'fbclid', 'gclid']
         .forEach((key) => url.searchParams.delete(key));
@@ -53,12 +64,12 @@
   }
 
   function parsePrice(text) {
-    const match = String(text || '').match(/(?:R\$|US\$|USD|EUR|€|GBP|£|\$)\s*([0-9][0-9.,\s]*)/i);
+    const match = String(text || '').match(/(?:R\$|US\$|USD|EUR|€|GBP|£|JPY|￥|¥|\$)\s*([0-9][0-9.,\s]*)/i);
     if (!match) return { price: null, currency: 'BRL' };
 
     const prefix = match[0].slice(0, match[0].indexOf(match[1])).trim().toUpperCase();
     let raw = match[1].replace(/\s/g, '');
-    const currency = prefix.includes('R$')
+    const currency = /JPY|￥|¥/.test(prefix) ? 'JPY' : prefix.includes('R$')
       ? 'BRL'
       : prefix.includes('€') || prefix.includes('EUR')
         ? 'EUR'
@@ -118,6 +129,14 @@
       if (platform === 'Facebook Marketplace') {
         const match = path.match(/\/marketplace\/item\/(\d+)/i);
         return match ? `facebook:${match[1]}` : cleanUrl(u.href);
+      }
+      if (platform === 'Mercari') {
+        const match = path.match(/\/items?\/(m?\d+)/i);
+        return match ? `mercari:${u.hostname.startsWith('jp.') ? 'jp' : 'us'}:${match[1].toLowerCase()}` : cleanUrl(u.href);
+      }
+      if (platform === 'Vinted' || platform === 'Grailed' || platform === 'Poshmark') {
+        const match = path.match(/\/(?:items|listings|listing)\/([^/?#]+)/i);
+        return match ? `${u.hostname}:${match[1].split('-')[0]}` : cleanUrl(u.href);
       }
 
       return cleanUrl(u.href);
@@ -234,7 +253,7 @@
 
       const images = node.querySelectorAll?.('img')?.length || 0;
       if (!images || images > 8) continue;
-      if (!/(?:R\$|US\$|USD|EUR|€|GBP|£|\$)\s*\d/i.test(text)) continue;
+      if (!/(?:R\$|US\$|USD|EUR|€|GBP|£|JPY|￥|¥|\$)\s*\d/i.test(text)) continue;
 
       const identities = new Set(
         [...(node.querySelectorAll?.('a[href]') || [])]
@@ -262,7 +281,9 @@
 
     if (
       platform === 'Enjoei' ||
-      platform === 'Facebook Marketplace'
+      platform === 'Facebook Marketplace' ||
+      ['Mercari','Vinted','Grailed','Poshmark'].includes(platform) ||
+      globalThis.RadarSites?.profile(location.hostname).generic
     ) {
       return isolatedCardFor(anchor, platform, anchorUrl);
     }
@@ -277,14 +298,25 @@
     try {
       const u = new URL(url);
       const path = u.pathname.toLowerCase();
+      const pageProfile = globalThis.RadarSites?.profile(location.hostname);
+      const sameMarketplace = pageProfile && !pageProfile.generic && RadarSites.profile(u.hostname).key === pageProfile.key;
+      if (u.hostname !== location.hostname && !sameMarketplace && !(
+        /(?:^|\.)mercadolivre\.com\.br$/.test(u.hostname) && /(?:^|\.)mercadolivre\.com\.br$/.test(location.hostname)
+      )) return false;
       if (platform === 'OLX') return /\/d\/|\/item\/|\/anuncio\//.test(path) || /-[0-9]{6,}(?:\/|$)/.test(path);
-      if (platform === 'Mercado Livre') return /\/mlb-?[0-9]+|\/p\/mlb/i.test(path);
+      if (platform === 'Mercado Livre' || platform === 'Mercado Libre') return /\/(?:mlb|mla|mlm|mlc|mco)-?\d{6,}/i.test(path);
       if (platform === 'eBay') return /\/itm\//.test(path);
       if (platform === 'Depop') return /\/products\//.test(path);
       if (platform === 'Enjoei') return /\/p\/[^/]+-\d{6,}(?:\/|$)/.test(path);
       if (platform === 'Facebook Marketplace') return /\/marketplace\/item\/\d+/.test(path);
       if (platform === 'Vinted') return /\/items\//.test(path);
-      return true;
+      if (platform === 'Mercari') return /\/(?:us\/)?item\/(?:m)?\d{6,}/.test(path);
+      if (platform === 'Grailed') return /\/listings\/\d+/.test(path);
+      if (platform === 'Poshmark') return /\/listing\/[^/]+-[a-f\d]{12,}/i.test(path);
+      // Em sites sem perfil próprio, não confundir buscas e categorias com anúncios.
+      // Exigimos um caminho de produto explícito ou slug com identificador.
+      if (/\/(?:products?|produtos?|items?|listings?|anuncios?|p|dp|itm)\/[^/]+/.test(path)) return true;
+      return /^\/[^/]+-\d{6,}\/?$/.test(path);
     } catch { return false; }
   }
 
@@ -406,6 +438,7 @@
   }
 
   function collectVisibleListings(limit = 100) {
+    limit = Math.max(1, Math.min(100, Number(limit) || 100));
     const platform = detectPlatform(location.hostname);
     const anchors = [...document.querySelectorAll('a[href]')];
     const bodyText = String(
@@ -470,7 +503,7 @@
       diagnostics.passedImage += 1;
 
       const text = String(card.innerText || anchor.innerText || '').replace(/\s+/g, ' ').trim();
-      if (text.length < 8) continue;
+      if (text.length < 8 && parsePrice(text).price === null) continue;
       diagnostics.passedText += 1;
 
       const heading = card.querySelector('h1,h2,h3,h4,h5,h6,[role="heading"]');
@@ -489,7 +522,17 @@
 
       diagnostics.passedTitle += 1;
 
-      const { price, currency } = parsePrice(text);
+      let { price, currency } = parsePrice(text);
+      if (platform === 'Mercado Livre' || platform === 'Mercado Libre') {
+        const fraction = card.querySelector('[class*="money-amount__fraction"]');
+        const cents = card.querySelector('[class*="money-amount__cents"]');
+        if (fraction) {
+          const amount = Number(String(fraction.innerText || '').replace(/\D/g,''));
+          const decimal = Number(String(cents?.innerText || '0').replace(/\D/g,''));
+          if (Number.isFinite(amount) && amount > 0) price = amount + decimal / 100;
+        }
+      }
+      if (globalThis.RadarSites?.profile(location.hostname).generic && price === null) continue;
       const imageUrl = imageUrlFor(image);
 
       seen.add(identity);
@@ -503,8 +546,16 @@
       });
     }
 
+    if (!items.length) {
+      const visible = el => el && (!el.getBoundingClientRect || el.getBoundingClientRect().width > 0);
+      const gated = /\/(?:login|signin|sign-in|auth|captcha|challenge)(?:\/|[?#]|$)/i.test(location.href);
+      const password = document.querySelector?.('input[type="password"]');
+      const challenge = document.querySelector?.('iframe[src*="captcha"], iframe[src*="challenges.cloudflare.com"]');
+      diagnostics.requiresUserAction = visible(challenge) || /verifique que voc[eê] [eé] humano|verify you are human|access denied|acesso negado|performing security verification|this website uses a security service|checking your browser|just a moment/i.test(bodyText)
+        ? 'verification_required' : gated || visible(password) ? 'login_required' : null;
+    }
     return {
-      version: 9,
+      version: 10,
       source_url: location.href,
       platform,
       captured_at: new Date().toISOString(),
@@ -548,6 +599,7 @@
     'Mercado Libre',
     'eBay',
     'Depop',
+    'Mercari', 'Vinted', 'Grailed', 'Poshmark',
   ]);
 
   let autoTimer = null;
@@ -567,9 +619,6 @@
 
   async function runAutoCapture() {
     if (autoCaptureInFlight) return;
-    if (!autoPlatforms.has(detectPlatform(location.hostname))) {
-      return;
-    }
 
     if (document.visibilityState !== 'visible') {
       return;
@@ -577,7 +626,12 @@
 
     const stored = await chrome.storage.local.get({
       autoCaptureEnabled: true,
+      browserSites: [],
+      disabledBrowserOrigins: [],
     });
+    if ((stored.disabledBrowserOrigins || []).includes(new URL(location.href).origin)) return;
+    if (!autoPlatforms.has(detectPlatform(location.hostname)) &&
+        !(stored.browserSites || []).includes(new URL(location.href).origin)) return;
 
     if (!stored.autoCaptureEnabled) {
       return;

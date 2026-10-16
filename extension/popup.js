@@ -43,6 +43,7 @@ async function loadRadarStatus() {
     loadRadars(),
     loadAutoCaptureState(),
     loadAutoBrowseState(),
+    loadBrowserSearches(),
   ]);
 
   const failed = results.find((result) => result.status === 'rejected');
@@ -306,7 +307,7 @@ async function scanPage() {
   if (!/^https?:/i.test(tab.url || '')) throw new Error('Abra uma página normal de marketplace para analisar.');
   $('#pageHost').textContent = new URL(tab.url).hostname;
 
-  await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['collector.js'] });
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['marketplaces.js','collector.js'] });
   const [result] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: () => globalThis.__radarCollectVisibleListings?.(100) || null,
@@ -322,6 +323,11 @@ function renderPreview() {
   const send = $('#sendItems');
   if (!lastCapture?.items?.length) {
     const d = lastCapture && lastCapture.diagnostics ? lastCapture.diagnostics : {};
+    if (d.requiresUserAction) {
+      preview.textContent = 'Esta página pede login ou verificação. Conclua no site e analise novamente.';
+      send.disabled = true;
+      return;
+    }
     preview.innerHTML = '<strong>0 anúncios detectados</strong>' + 'URLs: ' + (d.listingUrls ?? '?') + ' → válidas: ' + (d.passedUrl ?? '?') + ' → visíveis: ' + (d.passedVisible ?? '?') + ' → c/ imagem: ' + (d.passedImage ?? '?') + ' → c/ texto: ' + (d.passedText ?? '?') + ' → c/ título: ' + (d.passedTitle ?? '?') + '<br><small>Links: ' + (d.anchors ?? '?') + ' • Imagens pág.: ' + (d.images ?? '?') + ' • Preços pág.: ' + (d.priceTexts ?? '?') + '</small>';
     send.disabled = true;
     return;
@@ -445,6 +451,8 @@ $('#runAutoBrowseNow')?.addEventListener(
           preferredSource = 'mercadolivre';
         } else if (host.includes('depop')) {
           preferredSource = 'depop';
+        } else {
+          preferredSource = RadarSites.profile(host).key;
         }
       } catch {}
 
@@ -509,6 +517,7 @@ chrome.storage.onChanged.addListener(
     if (areaName !== 'local') return;
 
     const keys = Object.keys(changes);
+    if (keys.some(key=>['browserSearches','browserSourcePauses','browserSites'].includes(key))) loadBrowserSearches().catch(()=>{});
     if (
       keys.some(
         (key) =>
