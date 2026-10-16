@@ -1,4 +1,4 @@
-# Radar 2.0 Bridge 0.4.3 (desenvolvimento)
+# Radar 2.0 Bridge 0.4.4 (desenvolvimento)
 
 Extensão Manifest V3 para Opera GX, Chrome e outros navegadores Chromium.
 Envia metadados de anúncios individuais para o Radar Desktop em
@@ -77,3 +77,12 @@ a Bridge não faz login automático, não resolve CAPTCHA nem contorna 403.
 - Facebook Marketplace depende da localização definida no próprio site e pode pedir login/verificação. O bloqueio não é contornado.
 - A origem brasileira do marketplace não significa necessariamente que o vendedor/entrega esteja no Brasil; confira a informação no anúncio.
 - A atualização da Bridge não modifica o banco do Radar e não exige atualizar o Desktop 0.2.11.
+
+
+## Inspeção antes da importação — Bridge 0.4.4
+- Ao analisar uma página, há contadores separados de **candidatos**, **revisar** e **fora do filtro**.
+- O reconhecimento é conservador: itens obviamente fora de categoria (rodas JNC em JNCO, mini systems em Handycam) deixam de ser importados automaticamente.
+- Regras incertas são enviadas para revisão, sem declarar que a peça é rara.
+- Na captura manual, você pode marcar **Incluir anúncios fora do filtro** se identificar uma classificação equivocada.
+- O backend do Radar aplica uma verificação compatível também a importações antigas.
+- Para ensinar o Radar a diferenciar peças raras, clique em **Treinar IA · Validar peças** no painel de anúncios do Desktop 0.2.12.

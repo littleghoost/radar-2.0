@@ -3318,3 +3318,20 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .radar-tab:focus-v
 .national-source strong {font-size: .94rem;}
 .national-source small {opacity: .77;flex: 1;line-height: 1.45;}
 .national-source button {align-self: flex-start;}
+
+.training-panel {border:1px solid var(--line-soft);border-radius:16px;padding:18px;margin:0 0 18px;background:var(--panel);}
+.training-header {display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px;}
+.training-header h3 {margin:4px 0 6px;font-size:1.14rem;}
+.training-header p {max-width:680px;opacity:.72;line-height:1.4;font-size:.85rem;}
+.training-radar-picker {display:grid;gap:6px;font-size:.82rem;max-width:360px;margin:0 0 15px;}
+.training-radar-picker select {padding:9px;background:var(--panel-raised);color:inherit;border:1px solid var(--line-soft);border-radius:10px;}
+.training-card {display:grid;grid-template-columns:minmax(160px,250px) 1fr;gap:18px;align-items:start;}
+.training-card img {width:100%;aspect-ratio:4/5;object-fit:contain;background:#101014;border:1px solid var(--line-soft);border-radius:12px;}
+.training-card h4 {font-size:1.12rem;margin:3px 0 9px;overflow-wrap:anywhere;}
+.training-card p {font-size:.85rem;opacity:.75;line-height:1.5;}
+.training-buttons {display:flex;flex-wrap:wrap;gap:8px;margin-top:17px;}
+.training-buttons button {min-height:38px;padding:8px 14px;border-radius:10px;}
+.training-buttons .training-rare {border:1px solid rgba(110,225,145,.5);background:rgba(110,225,145,.13);color:#8ff5aa;}
+.training-buttons .training-common {border:1px solid var(--line-strong);background:var(--panel-raised);color:var(--text);}
+.training-meta {font-size:.76rem;opacity:.65;margin-bottom:9px;}
+@media(max-width:650px){.training-card {grid-template-columns:1fr;}.training-card img {max-width:320px;}}

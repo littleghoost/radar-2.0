@@ -685,6 +685,8 @@
         retryDelay = 15_000;
         // Changes during the request must not be lost behind the in-flight guard.
         scheduleAutoCapture(15_000);
+      } else if (response?.reason === 'screened_out') {
+        lastAutoFingerprint = fingerprint;
       } else if (response?.retryable === false) {
         // Invalid/obsolete captures need a changed page or a collector update.
         lastAutoFingerprint = fingerprint;

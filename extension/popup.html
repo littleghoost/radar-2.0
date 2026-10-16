@@ -113,6 +113,13 @@
         </details>
 
         <div id="preview" class="preview muted">Nenhuma página analisada ainda.</div>
+        <label class="auto-capture-row" id="includeRejectedRow" hidden>
+          <span>
+            <strong>Incluir anúncios fora do filtro</strong>
+            <small>Opcional: só use se a inspeção rejeitou uma peça válida.</small>
+          </span>
+          <input id="includeRejected" type="checkbox" />
+        </label>
 
         <button id="sendItems" class="primary" disabled>Enviar para o Radar</button>
       </section>
@@ -123,6 +130,7 @@
       </footer>
     </main>
     <script src="marketplaces.js"></script>
+    <script src="listingPreflight.js"></script>
     <script src="brazilPresets.js"></script>
     <script src="popup.js"></script>
     <script src="popup-browser.js"></script>

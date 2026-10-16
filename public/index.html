@@ -117,6 +117,7 @@
             </div>
 
             <div class="listing-actions">
+              <button id="openTrainer" class="secondary" type="button" aria-expanded="false">Treinar IA · Validar peças</button>
               <button id="openImportModal" class="secondary">Importar página</button>
               <button id="openListingModal" class="primary">
                 + Adicionar anúncio
@@ -179,6 +180,22 @@
               <option value="score_desc">Maior score</option>
             </select>
           </div>
+
+          <section class="training-panel" id="trainerPanel" hidden aria-label="Treinamento assistido do Radar">
+            <div class="training-header">
+              <div>
+                <span class="eyebrow">APRENDE COM VOCÊ</span>
+                <h3>Essa peça é rara ou comum?</h3>
+                <p>Escolha o que vale guardar. O Radar usa suas respostas para ajustar a classificação dos próximos anúncios.</p>
+              </div>
+              <button id="closeTrainer" type="button" class="secondary compact">Fechar</button>
+            </div>
+            <label class="training-radar-picker">
+              Radar a treinar
+              <select id="trainerRadar"></select>
+            </label>
+            <div id="trainerContent" role="status" aria-live="polite">Escolha um radar para começar.</div>
+          </section>
 
           <div class="feed-toolbar" aria-live="polite">
             <div class="feed-toolbar-status">

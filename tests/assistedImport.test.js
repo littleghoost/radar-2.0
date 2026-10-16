@@ -456,3 +456,61 @@ test('Feed filtra origem brasileira, internacional e desconhecida sem depender d
   assert.equal((await api(q('region=br&platform=eBay'))).length,0);
   assert.equal((await api(q('region=international&platform=eBay'))).length,1);
 });
+
+test('Pré-inspeção corta JNC automotivo, mantém JNCO e não perde a contagem',async()=>{
+  const clothes = await radar({
+    name:'Treino JNCO',
+    query:'JNCO | baggy jeans',
+    category:'roupas',
+    max_price:200,
+  });
+  const source_url='https://www.olx.com.br/brasil?q=JNCO';
+  const input=[
+    item('jnc-wheels',{title:'Rodas JNC aro 15 Furação 4x100',
+      platform:'OLX',url:'https://pr.olx.com.br/autos-e-pecas/rodas-jnc-1461234567'}),
+    item('jnco-real',{title:'JNCO wide leg embroidered baggy jeans',
+      platform:'OLX',url:'https://pr.olx.com.br/roupas/jnco-jeans-1461234568'}),
+  ];
+  const saved=await importItems(clothes.id,input,{source_url});
+  assert.equal(saved.filtered,1);
+  assert.equal(saved.imported,1);
+  assert.equal(saved.listings[0].title,input[1].title);
+  const queued=await api('/api/training/queue?radar_id='+clothes.id+'&limit=12');
+  assert.ok(queued.items.some(row=>row.id===saved.listings[0].id));
+  assert.ok(!queued.items.some(row=>row.title.startsWith('Rodas JNC')));
+  const vote=await api('/api/training/feedback','POST',
+    {listing_id:saved.listings[0].id,radar_id:clothes.id,verdict:'rare'});
+  assert.equal(vote.ok,true);
+  const reviewed=await listings(clothes.id);
+  assert.equal(reviewed.find(row=>row.id===saved.listings[0].id).status,'interessante');
+  const next=await api('/api/training/queue?radar_id='+clothes.id);
+  assert.ok(!next.items.some(row=>row.id===saved.listings[0].id));
+  await api('/api/training/feedback','POST',
+    {listing_id:saved.listings[0].id,radar_id:clothes.id,verdict:'rare'},409);
+});
+
+test('Treinar com Não sei não descarta a peça e não a repete',async()=>{
+  const target=await radar({category:'roupas',query:'MCD vintage'});
+  const saved=await importItems(target.id,[item('trainer-unsure',{title:'MCD caveira embroidered jacket'})]);
+  const row=saved.listings[0];
+  const response=await api('/api/training/feedback','POST',
+    {listing_id:row.id,radar_id:target.id,verdict:'unsure'});
+  assert.equal(response.verdict,'unsure');
+  assert.equal((await listings(target.id)).find(x=>x.id===row.id).status,'novo');
+  assert.ok(!(await api('/api/training/queue?radar_id='+target.id)).items.some(x=>x.id===row.id));
+});
+
+test('Avaliação Comum gera feedback negativo e melhora classificação textual sem embedding',async()=>{
+  const target=await radar({category:'roupas',query:'JNCO vintage'});
+  const good=await importItems(target.id,[item('trainer-good',{title:'JNCO dragon rhinestone baggy pants',image_url:imageUrl+'/red.png'})]);
+  const bad=await importItems(target.id,[item('trainer-bad',{title:'Jeans liso básico skinny',image_url:imageUrl+'/red.png'})]);
+  const third=await importItems(target.id,[item('trainer-third',{title:'JNCO dragon embroidered baggy',image_url:imageUrl+'/red.png'})]);
+  await api('/api/training/feedback','POST',{listing_id:good.listings[0].id,radar_id:target.id,verdict:'rare'});
+  const negative=await api('/api/training/feedback','POST',{listing_id:bad.listings[0].id,radar_id:target.id,verdict:'common'});
+  assert.equal(negative.verdict,'common');
+  const examples=await listings(target.id);
+  const candidate=examples.find(x=>x.id===third.listings[0].id);
+  assert.ok(Number.isFinite(candidate.preference_score));
+  assert.ok(candidate.preference_score>50);
+  assert.equal(examples.find(x=>x.id===bad.listings[0].id).status,'descartado');
+});
