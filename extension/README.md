@@ -1,4 +1,4 @@
-# Radar 2.0 Bridge 0.4.6 (desenvolvimento)
+# Radar 2.0 Bridge 0.4.7 (desenvolvimento)
 
 Extensão Manifest V3 para Opera GX, Chrome e outros navegadores Chromium.
 Envia metadados de anúncios individuais para o Radar Desktop em
@@ -97,3 +97,15 @@ O Auto-Browse usa o total de **candidatos válidos após a inspeção** para dec
 - Termos genéricos removidos das consultas nacionais (OLX/Enjoei/Mercado Livre), preservando modelos e detalhes.
 - Uma busca que encontra apenas anúncios já conhecidos **não encerra** mais a rodada inteira: continua para o próximo site/termo dentro dos limites da fila.
 - Busca nunca inventa links de anúncios. O coletor importa apenas cards de anúncio individual.
+
+
+## Bridge 0.4.7 — prévia de novos e repetidos
+- Após **Analisar página**, a Bridge consulta /api/import/preview sem criar nem editar anúncios.
+- Mostra números distintos: candidatos, para revisar, fora do filtro, novos,
+  já cadastrados e quedas de preço. A identidade do anúncio é a mesma do importador.
+- Se apenas itens já conhecidos aparecem, o botão diz **Atualizar conhecidos**;
+  não promete novos achados. Importar conhecidos ainda atualiza preço/disponibilidade.
+- O botão de importação continua funcionando mesmo quando a prévia estiver
+  indisponível: o importador segue fazendo a deduplicação.
+- Foram adicionados termos mais específicos (JNCO Ying Yang, MCD caveira,
+  Tapout tribal, Diablo skinny, bolsos gigantes, patchwork).

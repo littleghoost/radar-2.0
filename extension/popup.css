@@ -133,3 +133,7 @@ footer { display: flex; justify-content: space-between; gap: 10px; font-size: 10
 .saved-searches>div { border-top:1px solid #344039; padding:8px 0; }
 .saved-searches span { display:block; font-size:11px; overflow-wrap:anywhere; }
 .saved-searches button { min-height:28px; padding:5px; font-size:10px; margin:4px 4px 0 0; }
+
+.import-preview-count {margin-top:9px;padding:8px;border-radius:9px;
+background:rgba(112,226,155,.07);border:1px solid rgba(112,226,155,.15);font-size:11px;}
+.import-preview-count strong{color:#b2f1c2;}

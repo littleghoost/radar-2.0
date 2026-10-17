@@ -2968,6 +2968,28 @@ app.post("/api/training/images/batch", async (req,res) => {
   }
 });
 
+// Contagem real por origem. Não confundir títulos reconhecidos com anúncios novos.
+app.get("/api/sources/brazil-summary", async (_req,res) => {
+  try {
+    const rows=await all(`SELECT source_key,platform,COUNT(*) AS total,
+      SUM(CASE WHEN created_at>=datetime('now','-7 days') THEN 1 ELSE 0 END) AS new_7d,
+      SUM(CASE WHEN status='interessante' THEN 1 ELSE 0 END) AS approved
+      FROM listings
+      WHERE source_key IN ('olx','enjoei','mercadolivre','facebook')
+      GROUP BY source_key,platform`);
+    const keys=["olx","enjoei","mercadolivre","facebook"];
+    const sources=Object.fromEntries(keys.map(key=>[key,{total:0,new_7d:0,approved:0}]));
+    for(const r of rows) {
+      if(!sources[r.source_key])continue;
+      sources[r.source_key].total+=Number(r.total||0);
+      sources[r.source_key].new_7d+=Number(r.new_7d||0);
+      sources[r.source_key].approved+=Number(r.approved||0);
+    }
+    res.json({sources,window_days:7,
+      note:"Contagens locais; páginas autenticadas dependem da Bridge, não de API oficial."});
+  }catch(error){res.status(500).json({error:error.message});}
+});
+
 // Diagnósticos do catálogo: sinalizações, sem remoções nem HEAD em marketplaces.
 app.get("/api/catalog/review", async (req,res) => {
   try {
@@ -3049,6 +3071,7 @@ app.get("/api/training/queue", async (req, res) => {
         preference_score:row.preference_score,
         review_reason:row.review_reason||null,
         review_priority:row.review_priority??null,
+        taste_explanation:row.taste_explanation??null,
         visual_learning_ready:Boolean(row.image_embedding_json),
       })),
     });
@@ -3851,6 +3874,84 @@ function validateAutoCaptureBatch(items) {
 
   return { ok: true };
 }
+
+/* =========================
+   PRÉVIA DA IMPORTAÇÃO (SEM MODIFICAR O CATÁLOGO)
+========================= */
+
+app.post("/api/import/preview", async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items.slice(0,100) : [];
+    if (!items.length) return res.status(400).json({error:"Nenhum anúncio para conferir."});
+    const radarId = req.body?.radar_id ? Number(req.body.radar_id) : null;
+    if (radarId && (!Number.isSafeInteger(radarId) || radarId <= 0))
+      return res.status(400).json({error:"Radar inválido."});
+    const radar = radarId
+      ? await get("SELECT category FROM radars WHERE id = ?",[radarId])
+      : null;
+    if (radarId && !radar)return res.status(404).json({error:"Radar não encontrado."});
+    const context={source_url:req.body?.source_url,radar_category:radar?.category||""};
+    const rows=[];
+    const seen=new Set();
+    for (const raw of items) {
+      const title=String(raw?.title||"").trim();
+      const platform=String(raw?.platform||"Importação assistida").trim();
+      const url=String(raw?.url||"").trim();
+      let parsed;
+      try {parsed=new URL(url);}catch {}
+      if (!title || !parsed || !["https:","http:"].includes(parsed.protocol)) {
+        rows.push({url,status:"invalid",reason:"Link ou título inválido"});
+        continue;
+      }
+      const inspection=inspectListing(raw,context);
+      if (inspection.verdict==="rejected" && req.body?.include_rejected!==true) {
+        rows.push({url,status:"filtered",reason:inspection.reason});
+        continue;
+      }
+      const {sourceKey,externalId}=inferBrowserSourceIdentity(platform,url);
+      if (sourceKey==="enjoei" && !externalId) {
+        rows.push({url,status:"invalid",reason:"Link do Enjoei sem identificador de produto"});
+        continue;
+      }
+      const key=sourceKey&&externalId ? sourceKey+":"+externalId : url;
+      if (seen.has(key)) {
+        rows.push({url,status:"duplicate_batch",reason:"Repetido na mesma página"});
+        continue;
+      }
+      seen.add(key);
+      let existing=null;
+      if (sourceKey&&externalId) existing=await get(
+        "SELECT id,title,current_price,currency,status,availability_status FROM listings WHERE source_key=? AND external_id=?",
+        [sourceKey,externalId]);
+      if (!existing)existing=await get(
+        "SELECT id,title,current_price,currency,status,availability_status FROM listings WHERE url=?",
+        [url]);
+      if (!existing) {
+        rows.push({url,status:"new",reason:inspection.reason||"Novo candidato"});
+        continue;
+      }
+      const price=Number(raw?.current_price??raw?.price);
+      const hasPrice=raw?.current_price!=null || raw?.price!=null;
+      const changed=hasPrice && Number.isFinite(price) && existing.current_price!=null &&
+        Number(existing.current_price)!==price;
+      const priceDrop=changed && price<Number(existing.current_price) &&
+        String(existing.currency||"BRL").toUpperCase()===String(raw?.currency||"BRL").toUpperCase();
+      rows.push({url,status:"existing",listing_id:existing.id,
+        existing_status:existing.status,price_changed:changed,price_drop:priceDrop,
+        previous_price:existing.current_price,
+        reason:priceDrop?"Preço caiu":changed?"Preço alterado":"Já está no catálogo"});
+    }
+    const counts={new:0,existing:0,filtered:0,invalid:0,duplicate_batch:0,price_drops:0,price_changes:0};
+    for (const row of rows) {
+      counts[row.status]=(counts[row.status]||0)+1;
+      if(row.price_drop)counts.price_drops++;
+      if(row.price_changed)counts.price_changes++;
+    }
+    res.json({counts,items:rows});
+  } catch(error) {
+    res.status(500).json({error:error.message});
+  }
+});
 
 /* =========================
    IMPORTAÇÃO ASSISTIDA

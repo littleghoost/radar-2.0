@@ -1040,6 +1040,7 @@ async function refreshLocal() {
 async function refreshRelay() {
   let status = null;
   let snapshot = null;
+  let networkSnapshotConfirmed = false;
 
   try {
     status = await relayApi(
@@ -1088,6 +1089,7 @@ async function refreshRelay() {
       }
       snapshot.listings = collected;
     }
+    networkSnapshotConfirmed = true;
     saveCachedSnapshot(snapshot);
   } catch (error) {
     snapshot = loadCachedSnapshot();
@@ -1105,10 +1107,15 @@ async function refreshRelay() {
   const syncedCount = state.listings.length;
   const syncHealth = $("#syncHealth");
   if (syncHealth) {
+    const ageMs=state.snapshotSyncedAt ? Date.now()-new Date(state.snapshotSyncedAt).getTime() : Infinity;
+    const stale=Number.isFinite(ageMs) && ageMs>30*60*1000;
     syncHealth.textContent = expected > syncedCount
-      ? "Sincronização parcial: " + syncedCount + " de " + expected + " anúncios. Refaça a sincronização pelo botão abaixo."
-      : syncedCount + " anúncios sincronizados" + (state.snapshotSyncedAt ? " no último snapshot." : " em cache.");
-    syncHealth.classList.toggle("sync-warning", expected > syncedCount);
+      ? "Sincronização parcial: " + syncedCount + " de " + expected + " anúncios. Refaça a sincronização."
+      : syncedCount + " de " + expected + " anúncios no último snapshot" +
+        (!networkSnapshotConfirmed ? " (cópia em cache; conexão não confirmada)" :
+          stale ? " (último envio com mais de 30 min)" : " (recebidos agora)");
+    syncHealth.classList.toggle("sync-warning", expected > syncedCount ||
+      !networkSnapshotConfirmed || stale);
   }
   const synced = state.snapshotSyncedAt
     ? new Date(
