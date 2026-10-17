@@ -5,6 +5,8 @@
       'JNCO', 'JNCO Kangaroo', 'JNCO Rhino', 'calça baggy vintage',
       'calça tribal', 'MCD Circo dos Horrores', 'Tapout', 'Southpole baggy',
       'Ecko bordada', 'jorts bordada', 'calça flare vintage',
+      'JNCO Ying Yang', 'MCD caveira bordada', 'Tapout tribal',
+      'calça skinny Diablo', 'jeans bolso gigante', 'baggy patchwork',
     ],
     cameras: [
       'Sony Handycam DCR-SR', 'Sony Handycam NightShot',

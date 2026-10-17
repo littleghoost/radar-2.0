@@ -42,3 +42,17 @@ test('Interface apresenta filtros e treino opcional sem interromper navegação'
   for(const snippet of ['listingPreflight.js','includeRejectedRow'])assert.ok(popup.includes(snippet));
   for(const snippet of ['trainerPanel','trainerRadar','Treinar IA'])assert.ok(feed.includes(snippet));
 });
+
+test("Roupa básica vai para revisão, enquanto baggy com bordado tem evidências descritas",()=>{
+ const context={source_url:"https://www.olx.com.br/brasil?q=JNCO",radar_category:"roupas"};
+ const {inspectListing}=require("../server/services/listingPreflight");
+ const basic=inspectListing({title:"Calça jeans azul lisa",url:"https://sp.olx.com.br/roupas/calca-jeans-1543363638"},context);
+ assert.equal(basic.verdict,"review");
+ assert.match(basic.reason,/avaliar a foto/);
+ const standout=inspectListing({title:"JNCO baggy dragon embroidered jeans",
+   url:"https://sp.olx.com.br/roupas/jnco-baggy-1543363631"},context);
+ assert.equal(standout.verdict,"candidate");
+ assert.ok(standout.evidence.includes("Bordado"));
+ assert.ok(standout.evidence.includes("Modelagem larga"));
+ assert.ok(standout.evidence.includes("Grafismo marcante"));
+});

@@ -20,6 +20,19 @@ function preflightKind({source_url="", radar_category=""}={}) {
   if (/\b(handycam|filmadora|nightshot|camcorder|dcr sr|hdr xr)\b/.test(text)) return "cameras";
   return "unknown";
 }
+// Signals are derived from product descriptions, NOT the actual image. A
+// borderline title stays available for the person's visual judgement.
+function rarityTitleEvidence(value) {
+  const text=normalizePreflight(value);
+  const matches=[
+    ["Modelagem larga",/\b(baggy|wide leg|wideleg|ultra wide|oversized|pantalona|flare|boca de sino|super wide)\b/],
+    ["Bordado",/\b(bordad[oa]|embroider(?:ed|y)|bordados)\b/],
+    ["Grafismo marcante",/\b(tribal|dragon|dragao|caveira|skull|all over|allover|giant print|grafico grande|big graphic|rhinestones?|strass)\b/],
+    ["Construção diferenciada",/\b(patchwork|patches|bolso gigante|giant pocket|kanga(?:roo)?|applique|aplicac[ao]|remendos)\b/],
+    ["Marca procurada",/\b(jnco|tapout|mcd|tripside|kikwear|southpole|ecko|diablo)\b/],
+  ].filter(([,regex])=>regex.test(text)).map(([label])=>label);
+  return matches;
+}
 function inspectListing(item={},context={}) {
   const text=normalizePreflight(item.title);
   const path=normalizePreflight((()=>{try {return new URL(item.url).pathname}catch{return ""}})());
@@ -37,8 +50,12 @@ function inspectListing(item={},context={}) {
     if (/\bjnco\b/.test(source) && !/\bjnco\b/.test(text) && !garment) {
       return fail("Pesquisa JNCO: anúncio sem marca e sem sinal de roupa");
     }
-    return garment ? {verdict:"candidate",reason:"Parece uma peça de roupa"} :
-      review("Não foi possível confirmar pelo título");
+    const evidence=rarityTitleEvidence(item.title);
+    if (garment && evidence.length) return {verdict:"candidate",
+      reason:"Sinais no título: "+evidence.join(", "),evidence};
+    if (garment) return {verdict:"review",
+      reason:"Parece roupa, mas sem detalhes raros no título: avaliar a foto",evidence};
+    return review("Não foi possível confirmar pelo título");
   }
   if (kind==="cameras") {
     if (/\b(mini system|micro system|home theater|caixa de som|televisao|controle remoto|bateria avulsa|carregador avulso|cabo usb|fone de ouvido)\b/.test(text) ||
@@ -60,6 +77,6 @@ function inspectBatch(items=[],context={}) {
     candidates:entries.filter(x=>x.verdict==="candidate"),
   };
 }
-const ListingPreflight={inspectListing,inspectBatch,preflightKind};
+const ListingPreflight={inspectListing,inspectBatch,preflightKind,rarityTitleEvidence};
 if(typeof globalThis!=="undefined")globalThis.ListingPreflight=ListingPreflight;
 if(typeof module!=="undefined")module.exports=ListingPreflight;

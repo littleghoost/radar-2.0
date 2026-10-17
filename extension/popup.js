@@ -1,5 +1,7 @@
 const RADAR_URL = 'http://127.0.0.1:3130';
 let lastCapture = null;
+let lastImportPreview = null;
+let previewRequestId = 0;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -319,8 +321,10 @@ async function scanPage() {
 
   if (!result?.result) throw new Error('Não consegui ler esta página.');
   lastCapture = result.result;
+  lastImportPreview=null;
   $('#includeRejected').checked = false;
   renderPreview();
+  await refreshImportPreview();
 }
 
 function renderPreview() {
@@ -347,9 +351,51 @@ function renderPreview() {
   const items = includeRejected ? lastCapture.items : screened.accepted;
   const images = items.filter((item) => item.image_url).length;
   const prices = items.filter((item) => item.current_price !== null && item.current_price !== undefined).length;
-  preview.innerHTML = `<strong>${lastCapture.items.length} lidos · ${screened.candidates.length} candidatos · ${screened.review.length} para revisar · ${screened.rejected.length} fora do filtro</strong>${images} com imagem • ${prices} com preço • ${escapeHtml(lastCapture.platform)} · ${items.length} selecionados para enviar`;
-  send.disabled = !items.length;
-  send.textContent = `Enviar ${items.length} para o Radar`;
+  const previewKnown=lastImportPreview;
+  let detail=`${images} com imagem • ${prices} com preço • ${escapeHtml(lastCapture.platform)} · ${items.length} selecionados para enviar`;
+  if (previewKnown?.counts) {
+    const c=previewKnown.counts;
+    detail += `<div class="import-preview-count"><strong>${c.new||0} novos · ${c.existing||0} já cadastrados · ${c.price_drops||0} queda(s) de preço</strong>`;
+    detail += `${(c.invalid||0)+(c.duplicate_batch||0)} link(s) inválido(s) ou repetido(s) no lote</div>`;
+    send.textContent = c.new ? `Enviar ${c.new} novo(s) · atualizar ${c.existing||0}` :
+      c.existing ? `Atualizar ${c.existing} conhecido(s)` : "Nenhum anúncio novo";
+    send.disabled = !c.new && !c.existing;
+  } else {
+    send.textContent = `Enviar ${items.length} para o Radar`;
+    send.disabled = !items.length;
+    detail += '<div class="import-preview-count">Conferindo duplicatas no Radar...</div>';
+  }
+  preview.innerHTML = `<strong>${lastCapture.items.length} lidos · ${screened.candidates.length} candidatos · ${screened.review.length} para revisar · ${screened.rejected.length} fora do filtro</strong>`+detail;
+}
+
+// Read-only request: duplicate check uses the exact IDs recognized by the importer.
+async function refreshImportPreview() {
+  const id=++previewRequestId;
+  lastImportPreview=null;
+  if (!lastCapture?.items?.length) return;
+  const selected=ListingPreflight.inspectBatch(lastCapture.items,{
+    source_url:lastCapture.source_url,
+    radar_category:$('#radarSelect').selectedOptions[0]?.dataset.category || '',
+  });
+  const items=$('#includeRejected').checked ? lastCapture.items : selected.accepted;
+  if (!items.length) {renderPreview();return;}
+  $('#sendItems').disabled=true;
+  try {
+    const result=await radarApi('/api/import/preview',{
+      method:'POST',
+      body:JSON.stringify({items,radar_id:$('#radarSelect').value||null,
+        source_url:lastCapture.source_url,include_rejected:$('#includeRejected').checked}),
+    });
+    if(id!==previewRequestId)return;
+    lastImportPreview=result;
+    renderPreview();
+  } catch(error) {
+    if(id!==previewRequestId)return;
+    renderPreview();
+    $('#preview').insertAdjacentHTML('beforeend',
+      `<small>Prévia de repetidos indisponível: ${escapeHtml(error.message)}. O envio ainda verifica duplicatas.</small>`);
+    $('#sendItems').disabled=false;
+  }
 }
 
 async function sendItems() {
@@ -559,5 +605,5 @@ activeTab().then((tab) => {
 
 loadRadarStatus();
 
-$('#includeRejected')?.addEventListener('change',renderPreview);
-$('#radarSelect')?.addEventListener('change',()=>{if(lastCapture)renderPreview();});
+$('#includeRejected')?.addEventListener('change',()=>refreshImportPreview().catch(()=>{}));
+$('#radarSelect')?.addEventListener('change',()=>{if(lastCapture)refreshImportPreview().catch(()=>{});});

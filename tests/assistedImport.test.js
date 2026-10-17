@@ -603,3 +603,53 @@ test("Conferência de duplicatas pode ocultar alerta, nunca excluir anúncios",a
  assert.equal((await listings(target.id)).length,2);
  await api("/api/catalog/review/dismiss","POST",{listing_id:999999,code:"duplicate_title"},404);
 });
+
+test("Prévia identifica repetidos por ID OLX, novos e preço menor sem gravar nada",async()=>{
+  const target=await radar({category:"roupas",query:"JNCO"});
+  const saved=await importItems(target.id,[
+    item("jnco-existing",{platform:"OLX",title:"JNCO Big Crown vintage",
+      url:"https://pr.olx.com.br/roupas/jnco-big-crown-1543363631",
+      current_price:195}),
+    item("jnco-existing-b",{platform:"OLX",title:"JNCO baggy red embroidery",
+      url:"https://sp.olx.com.br/roupas/jnco-1536813022",current_price:125}),
+  ],{source_url:"https://www.olx.com.br/brasil?q=JNCO"});
+  assert.equal(saved.imported,2);
+  const preview=await api("/api/import/preview","POST",{
+    radar_id:target.id,source_url:"https://www.olx.com.br/brasil?q=JNCO",
+    items:[
+      item("same-item-different-slug",{platform:"OLX",title:"JNCO Big Crown vintage",
+        url:"https://pr.olx.com.br/roupas/outro-slug-1543363631",current_price:170}),
+      item("same-item-b",{platform:"OLX",title:"JNCO baggy red embroidery",
+        url:"https://sp.olx.com.br/roupas/other-1536813022",current_price:125}),
+      item("new-item",{platform:"OLX",title:"JNCO dragon baggy jeans",
+        url:"https://sp.olx.com.br/roupas/jnco-dragon-1599999199",current_price:125}),
+      item("car-junk",{platform:"OLX",title:"Rodas JNC aro 15",
+        url:"https://pr.olx.com.br/autos-e-pecas/rodas-jnc-1599999190"}),
+    ],
+  });
+  assert.equal(preview.counts.existing,2);
+  assert.equal(preview.counts.new,1);
+  assert.equal(preview.counts.filtered,1);
+  assert.equal(preview.counts.price_drops,1);
+  assert.equal((await listings(target.id)).length,2);
+  assert.equal((await listings(target.id)).find(x=>x.id===saved.listings[0].id).current_price,195);
+  const repeat=await api("/api/import/preview","POST",{
+    radar_id:target.id,source_url:"https://www.olx.com.br/brasil?q=JNCO",
+    items:[
+      item("same-id",{platform:"OLX",title:"JNCO Big Crown",
+        url:"https://pr.olx.com.br/roupas/jnco-1543363631"}),
+      item("same-id2",{platform:"OLX",title:"JNCO Big Crown",
+        url:"https://pr.olx.com.br/roupas/old-title-1543363631"}),
+    ],
+  });
+  assert.equal(repeat.counts.duplicate_batch,1);
+});
+test("Estatísticas de fontes nacionais refletem anúncios locais sem navegação externa",async()=>{
+  const stats=await api("/api/sources/brazil-summary");
+  assert.equal(stats.window_days,7);
+  for(const site of ["olx","enjoei","mercadolivre","facebook"]){
+    assert.ok(stats.sources[site]);
+    assert.ok(Number.isFinite(stats.sources[site].total));
+  }
+  assert.ok(stats.sources.olx.total>=2);
+});

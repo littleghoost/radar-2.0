@@ -2825,6 +2825,7 @@ document.querySelectorAll(".nav-button").forEach((button) => {
     if (page === "connections") {
       loadConnections();
       loadMobileSyncStatus().catch(()=>{});
+      loadBrazilSourceMetrics().catch(()=>{});
     }
 
     if (page === "activity") {
@@ -4028,6 +4029,7 @@ function renderTrainer() {
         <strong>${money(item.current_price,item.currency)}</strong>
         <p>Você considera essa peça diferenciada e interessante para o seu radar? Não use só a marca como critério; observe modelagem, gráficos e detalhes.</p>
         ${item.review_reason ? `<p class="training-reason"><strong>Por que esta peça?</strong> ${escapeHtml(item.review_reason)}</p>` : ""}
+        ${item.taste_explanation ? `<p class="training-reason"><strong>Seu histórico:</strong> ${escapeHtml(item.taste_explanation)}</p>` : ""}
         ${item.visual_learning_ready
           ? '<p>Avaliação visual disponível: sua resposta contribui para o reconhecimento por similaridade.</p>'
           : '<p>Esta imagem ainda não tem embedding visual. Sua decisão ensina os sinais do título agora; a aprendizagem visual exige processar as fotos.</p>'}
@@ -4188,3 +4190,20 @@ $("#syncMobileNow")?.addEventListener("click",async()=>{
   }catch(error){target.textContent="Falha na sincronização: "+error.message;notify(error.message,"error");}
   finally {button.disabled=false;}
 });
+
+
+// Histórico de resultados nacionais: métricas do catálogo, não links de busca.
+async function loadBrazilSourceMetrics() {
+  const target=$("#nationalSourceMetrics");
+  if(!target)return;
+  try {
+    const d=await api("/api/sources/brazil-summary");
+    const names={olx:"OLX",enjoei:"Enjoei",mercadolivre:"Mercado Livre",facebook:"Facebook"};
+    target.textContent="Últimos 7 dias — "+Object.entries(names).map(([id,name])=>{
+      const stats=d.sources?.[id]||{};
+      return name+": "+(stats.new_7d||0)+" novos de "+(stats.total||0)+" no catálogo";
+    }).join(" · ")+".";
+  }catch(error){
+    target.textContent="Estatísticas de fontes indisponíveis: "+error.message;
+  }
+}

@@ -25,12 +25,26 @@ function reviewReason(row) {
     return "Imagem já analisada: confirme se a semelhança visual faz sentido.";
   return "Sem análise visual: sua avaliação ajuda a calibrar o filtro.";
 }
+function learnedTasteExplanation(row,profile={}) {
+  const words=normalizedTokens(row.title);
+  const favorable=words.map(word=>({word,count:(profile.positive_terms?.[word]||0)-(profile.negative_terms?.[word]||0)}))
+    .filter(x=>x.count>0).sort((a,b)=>b.count-a.count).slice(0,2).map(x=>x.word);
+  const unfavorable=words.map(word=>({word,count:(profile.negative_terms?.[word]||0)-(profile.positive_terms?.[word]||0)}))
+    .filter(x=>x.count>0).sort((a,b)=>b.count-a.count).slice(0,2).map(x=>x.word);
+  const texts=[];
+  if (favorable.length)texts.push("Você costuma aprovar títulos com: "+favorable.join(", ")+".");
+  if (unfavorable.length)texts.push("Você já rejeitou características com: "+unfavorable.join(", ")+".");
+  if (row.image_embedding_json) texts.push("Comparação visual CLIP disponível.");
+  else texts.push("Ainda não há comparação visual CLIP desta foto.");
+  return texts.join(" ");
+}
 function rankTrainingCandidates(rows=[],profile={},limit=5) {
   const sorted=rows.map(row=>({...row,
     review_priority:candidateReviewPriority(row,{
       rare:profile.labeled_positive||0,common:profile.labeled_negative||0,
     }),
     review_reason:reviewReason(row),
+    taste_explanation:learnedTasteExplanation(row,profile),
   })).sort((a,b)=>b.review_priority-a.review_priority ||
     Number(b.id||0)-Number(a.id||0));
   const result=[],remaining=[...sorted],seenTokens=[];
@@ -49,4 +63,4 @@ function rankTrainingCandidates(rows=[],profile={},limit=5) {
   }
   return result;
 }
-module.exports={rankTrainingCandidates,candidateReviewPriority,reviewReason};
+module.exports={rankTrainingCandidates,candidateReviewPriority,reviewReason,learnedTasteExplanation};
