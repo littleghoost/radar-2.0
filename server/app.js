@@ -44,6 +44,9 @@ const {
 const {
   resolveStoredFilePath,
 } = require("./services/storedFilePath");
+const { createSessionStore } = require("./services/sessionStore");
+const { createMemoryRateLimiter, clientIp } = require("./services/rateLimit");
+const { createWriteQueue } = require("./services/writeQueue");
 
 const app = express();
 const {boundedNumber} = require("./services/numericSettings");
@@ -79,6 +82,23 @@ const VISUAL_REFERENCE_DIR =
 fs.mkdirSync(IMAGE_DIR, { recursive: true });
 fs.mkdirSync(VISUAL_REFERENCE_DIR, { recursive: true });
 
+const AUTH_CONFIGURED = authEnabled();
+
+if (!AUTH_CONFIGURED && !DESKTOP_MODE) {
+  const warning =
+    "Radar: RADAR_PASSWORD e/ou SESSION_SECRET não configurados. A autenticação está DESATIVADA e qualquer pessoa com a URL do Radar terá acesso total.";
+
+  if (process.env.NODE_ENV === "production") {
+    console.error(warning);
+    console.error(
+      "Radar: abortando a inicialização. Defina RADAR_PASSWORD e SESSION_SECRET.",
+    );
+    process.exit(1);
+  }
+
+  console.warn(warning);
+}
+
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: false }));
 
@@ -106,32 +126,59 @@ function safeEqualText(a, b) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
-function createSessionToken() {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET não configurado.");
-  return crypto.createHmac("sha256", secret).update("radar-auth-v1").digest("hex");
-}
-
 function authEnabled() {
   return Boolean(process.env.RADAR_PASSWORD && process.env.SESSION_SECRET);
 }
 
-function isAuthenticated(req) {
+const sessions = createSessionStore({
+  get,
+  run,
+  secret: process.env.SESSION_SECRET || "",
+});
+
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 8;
+const loginLimiter = createMemoryRateLimiter({
+  windowMs: LOGIN_WINDOW_MS,
+  limit: LOGIN_MAX_ATTEMPTS,
+});
+
+function sessionCookie(req, value, maxAge) {
+  const parts = [
+    `radar_session=${encodeURIComponent(value)}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    "Path=/",
+    `Max-Age=${maxAge}`,
+  ];
+
+  // "Secure" só em HTTPS: em http://IP-da-rede:3000 o navegador descarta o
+  // cookie e o login entra em loop.
+  const isHttps =
+    req.secure || req.headers["x-forwarded-proto"] === "https";
+
+  if (isHttps) parts.push("Secure");
+
+  return parts.join("; ");
+}
+
+async function isAuthenticated(req) {
   try {
     const token = parseCookies(req).radar_session;
-    return Boolean(token && safeEqualText(token, createSessionToken()));
+    if (!token) return false;
+    return await sessions.isValidSession(token);
   } catch {
     return false;
   }
 }
 
-app.get("/login", (req, res) => {
+app.get("/login", async (req, res) => {
   if (!authEnabled()) return res.redirect("/");
-  if (isAuthenticated(req)) return res.redirect("/");
+  if (await isAuthenticated(req)) return res.redirect("/");
   res.sendFile(path.join(__dirname, "..", "public", "login.html"));
 });
 
-app.post("/login", (req, res) => {
+app.post("/login", loginLimiter, async (req, res) => {
   const expected = process.env.RADAR_PASSWORD;
   const supplied = req.body.password || "";
 
@@ -139,23 +186,39 @@ app.post("/login", (req, res) => {
     return res.redirect("/login?error=1");
   }
 
-  const token = createSessionToken();
-  res.setHeader(
-    "Set-Cookie",
-    `radar_session=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000`,
-  );
-  res.redirect("/");
+  try {
+    const token = await sessions.createSession({
+      ip: clientIp(req),
+      userAgent: req.headers["user-agent"],
+    });
+
+    // Login bem-sucedido zera a cota: o limite deve punir tentativa errada,
+    // não o uso normal do Radar.
+    loginLimiter.reset();
+
+    res.setHeader("Set-Cookie", sessionCookie(req, token, 2592000));
+    return res.redirect("/");
+  } catch (error) {
+    console.error("Radar: falha ao criar sessão:", error.message);
+    return res
+      .status(503)
+      .send("Não foi possível iniciar a sessão. Tente novamente.");
+  }
 });
 
-app.post("/logout", (_req, res) => {
-  res.setHeader(
-    "Set-Cookie",
-    "radar_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
-  );
+app.post("/logout", async (req, res) => {
+  try {
+    const token = parseCookies(req).radar_session;
+    if (token) await sessions.revokeSession(token);
+  } catch (error) {
+    console.error("Radar: falha ao revogar sessão:", error.message);
+  }
+
+  res.setHeader("Set-Cookie", sessionCookie(req, "", 0));
   res.redirect("/login");
 });
 
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   if (!authEnabled()) return next();
   if (req.path === "/api/health") return next();
   // Android verifies the app's signing certificate without login or cookies.
@@ -164,7 +227,7 @@ app.use((req, res, next) => {
   if (req.path === "/webhooks/ebay/marketplace-account-deletion") return next();
   if (req.path.startsWith("/bridge/")) return next();
   if (req.path === "/mobile" || req.path.startsWith("/mobile/")) return next();
-  if (isAuthenticated(req)) return next();
+  if (await isAuthenticated(req)) return next();
 
   if (req.path.startsWith("/api/")) {
     return res.status(401).json({ error: "Faça login para acessar o Radar." });
@@ -283,6 +346,12 @@ app.get("/api/image-proxy", async (req, res) => {
 
     clearTimeout(timeout);
 
+    // fetch segue redirect por padrão: sem bloquear, um 302 servido pelo host
+    // permitido poderia levar o proxy a buscar um endereço interno (SSRF).
+    if (response.status >= 300 && response.status < 400) {
+      return res.status(502).end();
+    }
+
     if (!response.ok) {
       return res.status(response.status).end();
     }
@@ -371,24 +440,14 @@ function get(sql, params = []) {
   });
 }
 
-function run(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(
-      sql,
-      params,
+const writeQueue = createWriteQueue({ db });
 
-      function (err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({
-            id: this.lastID,
-            changes: this.changes,
-          });
-        }
-      },
-    );
-  });
+function run(sql, params = []) {
+  return writeQueue.run(sql, params);
+}
+
+function tx(work) {
+  return writeQueue.tx(work, { all, get });
 }
 
 
@@ -1820,6 +1879,7 @@ app.get("/api/health", async (_req, res) => {
       ok: true,
       service: "radar-2.0",
       database: "ok",
+      auth: AUTH_CONFIGURED ? "enabled" : "disabled",
       semantic: semanticStatus(),
       uptime_seconds: Math.round(process.uptime()),
     });
@@ -4409,19 +4469,26 @@ app.post("/api/listings/bulk", async (req, res) => {
     }
 
     if (action === "delete") {
-      await run(
-        `DELETE FROM listing_training_feedback WHERE listing_id IN (${placeholders})`,
-        ids,
-      );
-      await run(`DELETE FROM listing_review_dismissals WHERE listing_id IN (${placeholders})`,ids);
-      await run(
-        `DELETE FROM price_history WHERE listing_id IN (${placeholders})`,
-        ids,
-      );
-      await run(
-        `DELETE FROM listings WHERE id IN (${placeholders})`,
-        ids,
-      );
+      // Tudo ou nada: sem transação, uma falha no meio deixava feedback e
+      // histórico apagados com o anúncio ainda no banco.
+      await tx(async ({ run: txRun }) => {
+        await txRun(
+          `DELETE FROM listing_training_feedback WHERE listing_id IN (${placeholders})`,
+          ids,
+        );
+        await txRun(
+          `DELETE FROM listing_review_dismissals WHERE listing_id IN (${placeholders})`,
+          ids,
+        );
+        await txRun(
+          `DELETE FROM price_history WHERE listing_id IN (${placeholders})`,
+          ids,
+        );
+        await txRun(
+          `DELETE FROM listings WHERE id IN (${placeholders})`,
+          ids,
+        );
+      });
 
       return res.json({ ok: true, action, affected: listings.length });
     }
@@ -6625,6 +6692,10 @@ app.listen(
   () => {
     console.log(`Radar 2.0 rodando em http://localhost:${PORT}`);
     mobileDesktopSync.start();
+    sessions.purgeExpired().catch(() => {});
+    setInterval(() => {
+      sessions.purgeExpired().catch(() => {});
+    }, 6 * 60 * 60 * 1000).unref?.();
     if (DESKTOP_MODE) {
       const backupService = createDesktopBackupService({db,dataDir:DATA_ROOT});
       const checkBackups = () => backupService.run().catch(error =>

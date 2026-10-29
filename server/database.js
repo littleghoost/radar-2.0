@@ -695,6 +695,27 @@ db.serialize(() => {
       }
     },
   );
+
+  /* =========================
+     SESSÕES DE LOGIN
+  ========================= */
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at DATETIME,
+      expires_at DATETIME NOT NULL,
+      revoked_at DATETIME,
+      ip TEXT,
+      user_agent TEXT
+    )
+  `);
+
+  db.run(
+    "CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)",
+  );
 });
 
 module.exports = db;
