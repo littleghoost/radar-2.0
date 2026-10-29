@@ -32,6 +32,22 @@ Abra `http://localhost:3000`.
 
 Veja `.env.example`. Credenciais reais nunca devem ser commitadas.
 
+### Login
+
+Fora do modo desktop o Radar exige senha única:
+
+- `RADAR_PASSWORD` — a senha de acesso;
+- `SESSION_SECRET` — chave usada para derivar o hash das sessões.
+
+Sem as duas a autenticação fica desativada e a API inteira fica pública. Com
+`NODE_ENV=production` o servidor se recusa a iniciar nessa condição.
+
+Cada login cria um token aleatório guardado apenas como hash na tabela `sessions`
+(validade de 30 dias). O logout revoga o token no servidor, e o `/login` tem
+limite de tentativas por IP.
+
+O `/api/health` informa `auth: "enabled"` ou `"disabled"`.
+
 ## Produção
 
 O deploy usa:
